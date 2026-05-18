@@ -156,6 +156,23 @@ public final class Models {
             @JsonProperty("elapsed_ms") int elapsedMs) {
     }
 
+    /**
+     * One Server-Sent Events frame, as emitted by the streaming
+     * endpoints ({@code /api/v1/jobs/{id}/stream},
+     * {@code /api/v1/query/stream}).
+     *
+     * <p>The reactive client materialises each SSE frame as one of
+     * these records. {@code event} carries the SSE event type
+     * ({@code stage} / {@code token} / {@code completed} / ...),
+     * {@code data} carries the parsed JSON payload, and
+     * {@code cursor} mirrors the {@code data.cursor} field when
+     * present (job streams) or a monotonic counter otherwise
+     * (query streams).
+     */
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public record StreamFrame(long cursor, String event, Map<String, Object> data) {
+    }
+
     @JsonIgnoreProperties(ignoreUnknown = true)
     public record AnswerRequest(
             String question,
