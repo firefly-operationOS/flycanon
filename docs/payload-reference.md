@@ -435,6 +435,152 @@ Query: `group_by` (csv), `actor`, `since`, `until`.
 }
 ```
 
+### `GET /api/v1/billing/events` -- `CostEventsPage`
+
+```json
+{
+  "rows": [
+    {
+      "id": 1234,
+      "agent_name": "flycanon-answerer",
+      "model": "anthropic:claude-sonnet-4-6",
+      "input_tokens": 1024,
+      "output_tokens": 256,
+      "total_tokens": 1280,
+      "cost_usd": "0.00420",
+      "latency_ms": 842,
+      "actor": "u-1",
+      "correlation_id": "01HV...",
+      "subject_kind": "knowledge_item",
+      "subject_id": "ki-1",
+      "occurred_at": "2026-05-18T17:00:00Z"
+    }
+  ],
+  "limit": 50,
+  "offset": 0
+}
+```
+
+### `GET /api/v1/billing/summary` -- `BillingSummary`
+
+```json
+{
+  "generated_at": "2026-05-18T17:00:00Z",
+  "last_24h": {
+    "since": "2026-05-17T17:00:00Z",
+    "calls": 142,
+    "input_tokens": 312000,
+    "output_tokens": 78000,
+    "total_tokens": 390000,
+    "cost_usd": "4.21",
+    "top_model": "anthropic:claude-sonnet-4-6",
+    "top_model_cost_usd": "3.82",
+    "top_actor": "u-1",
+    "top_actor_cost_usd": "1.95"
+  },
+  "last_7d":  { /* same shape as last_24h */ },
+  "last_30d": { /* same shape as last_24h */ }
+}
+```
+
+### `GET /api/v1/billing/top` -- `TopConsumersReport`
+
+```json
+{
+  "dimension": "model",
+  "rows": [
+    {
+      "dimension": "model",
+      "value": "anthropic:claude-sonnet-4-6",
+      "input_tokens": 312000,
+      "output_tokens": 78000,
+      "total_tokens": 390000,
+      "cost_usd": "3.82",
+      "calls": 120
+    }
+  ]
+}
+```
+
+Invalid `dimension` -> RFC 7807 `bad_request_exception`.
+
+### `GET /api/v1/billing/by-subject` -- `SubjectCostReport`
+
+```json
+{
+  "rows": [
+    {
+      "subject_kind": "source",
+      "subject_id": "src-...",
+      "input_tokens": 24000,
+      "output_tokens": 6000,
+      "total_tokens": 30000,
+      "cost_usd": "0.21",
+      "calls": 8
+    }
+  ]
+}
+```
+
+### `GET /api/v1/billing/latency` -- `LatencyReport`
+
+```json
+{
+  "rows": [
+    {
+      "group": { "model": "anthropic:claude-sonnet-4-6" },
+      "count": 120,
+      "avg_ms": 842,
+      "p50_ms": 720,
+      "p95_ms": 1840,
+      "p99_ms": 2900,
+      "max_ms": 4210
+    }
+  ]
+}
+```
+
+## Corpus inventory
+
+### `GET /api/v1/stats` -- `CorpusStats`
+
+```json
+{
+  "generated_at": "2026-05-18T17:00:00Z",
+  "sources": {
+    "total": 142,
+    "by_kind":   { "pdf": 87, "docx": 36, "html": 12 },
+    "by_status": { "ingested": 140, "failed": 2 },
+    "total_bytes": 187200000
+  },
+  "knowledge_items": {
+    "total": 64,
+    "by_status": { "published": 52, "draft": 8, "superseded": 3, "retired": 1 },
+    "by_domain": { "compliance": 18, "process": 24, "finance": 14, "security": 8 }
+  },
+  "knowledge_versions": 89,
+  "candidates": {
+    "total": 21,
+    "by_status": { "proposed": 7, "accepted": 12, "rejected": 2 }
+  },
+  "chunks": {
+    "total": 9842,
+    "embedded": 9840,
+    "embedded_pct": 99.98
+  },
+  "ingest_jobs": {
+    "total": 38,
+    "by_status": { "completed": 36, "failed": 1, "running": 1 },
+    "avg_attempts": 1.05
+  },
+  "cost": {
+    "total_events": 942,
+    "cost_usd_24h": "4.21",
+    "cost_usd_30d": "87.43"
+  }
+}
+```
+
 ## PII
 
 When `FLYCANON_PII_POLICY=reject`, the intake controller returns:

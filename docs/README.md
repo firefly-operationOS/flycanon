@@ -80,6 +80,8 @@ Pick the entry point that matches what you're trying to do:
 | [async-ingest.md](async-ingest.md)                | You're enqueuing large / bulk ingests and streaming progress via SSE.                                                          |
 | [quality.md](quality.md)                          | You're running staleness scans or conflict detection on the canon.                                                             |
 | [pii.md](pii.md)                                  | You need to understand the PII guardrail (scanner, policy, redaction, findings, RFC 7807 violation shape).                     |
+| [billing.md](billing.md)                          | You're tracking LLM cost / latency -- the six `/api/v1/billing/*` endpoints, the recorded fields, when to use each.            |
+| [stats.md](stats.md)                              | You're rendering a corpus dashboard -- the one-shot `/api/v1/stats` snapshot.                                                  |
 | [deployment.md](deployment.md)                    | You're running this in production -- env vars, topologies, OCR engines, embedding providers, auth, observability, sizing.       |
 | [cicd.md](cicd.md)                                | You're cutting a release or wiring CI/CD -- PR gate, Docker publish, SDK publish, secrets.                                      |
 | [troubleshooting.md](troubleshooting.md)          | The service / ingest / search / answer surface is misbehaving -- symptom → root cause → fix.                                    |
