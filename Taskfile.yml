@@ -1,0 +1,188 @@
+# Copyright 2026 Firefly Software Solutions Inc
+#
+# Developer workflows for flycanon. Run ``task`` with no arguments to
+# list every target. Each task is meant to be the shortest path to a
+# working environment.
+
+version: "3"
+
+vars:
+  PORT: '{{.PORT | default "8500"}}'
+  COMPOSE: docker compose
+  COMPOSE_TEST: docker compose -f docker-compose.yml -f docker-compose.test.yml
+
+env:
+  PYTHONPATH: src
+
+tasks:
+  default:
+    cmds: [task --list]
+    silent: true
+
+  # ===================================================================
+  # Setup
+  # ===================================================================
+  deps:install:
+    desc: Create the venv and install runtime + dev dependencies.
+    cmds:
+      - uv sync --extra dev
+
+  env:init:
+    desc: Copy env_template to .env if .env is missing.
+    # Used as a precondition by every docker:* task so the stack boots
+    # even on a brand-new checkout. Idempotent -- skips silently when
+    # .env exists.
+    status:
+      - test -f .env
+    cmds:
+      - cp env_template .env
+      - 'echo "[env:init] bootstrapped .env from env_template -- edit credentials before production."'
+
+  # ===================================================================
+  # Code quality
+  # ===================================================================
+  lint:check:
+    desc: Ruff lint + format check.
+    cmds:
+      - uv run ruff check .
+      - uv run ruff format --check .
+
+  lint:format:
+    desc: Auto-format with ruff.
+    cmds:
+      - uv run ruff format .
+      - uv run ruff check --fix .
+
+  # ===================================================================
+  # Tests
+  # ===================================================================
+  test:
+    desc: Run unit tests (skips real-LLM tests).
+    cmds:
+      - uv run pytest
+
+  test:unit:
+    desc: Unit tests only.
+    cmds:
+      - uv run pytest tests/unit
+
+  test:integration:
+    desc: Integration tests against the docker compose stack.
+    env:
+      FLYCANON_RUN_INTEGRATION: "1"
+    cmds:
+      - uv run pytest tests/integration -m integration
+
+  # ===================================================================
+  # Local dev -- one terminal each, no Docker for the API
+  # ===================================================================
+  dev:db:
+    desc: |
+      Bring up Postgres + Redis in docker (leaves the API + worker on the host).
+      Use this when you want to iterate on Python code with a stable database.
+    deps: [env:init]
+    cmds:
+      - '{{.COMPOSE}} up -d postgres redis'
+      - 'echo "Postgres on :5535  Redis on :6395  (override with PG_PORT/REDIS_PORT)"'
+
+  dev:db:down:
+    desc: Stop the dev Postgres + Redis containers.
+    cmds:
+      - '{{.COMPOSE}} stop postgres redis'
+
+  dev:migrate:
+    desc: alembic upgrade head against the configured DATABASE_URL.
+    cmds:
+      - uv run flycanon migrate
+
+  dev:serve:
+    desc: Run the API with hot-reload on :{{.PORT}}.
+    cmds:
+      - uv run uvicorn flycanon.main:app --reload --host 0.0.0.0 --port {{.PORT}}
+
+  dev:worker:
+    desc: Run the EDA worker that consumes the ingestion queue.
+    cmds:
+      - uv run flycanon worker
+
+  dev:up:
+    desc: |
+      Local-first dev: start Postgres + Redis in docker, run migrations,
+      then start the API in hot-reload mode. The worker is NOT started --
+      run ``task dev:worker`` in another terminal.
+    cmds:
+      - task: dev:db
+      - task: dev:migrate
+      - task: dev:serve
+
+  # ===================================================================
+  # Docker -- everything inside containers
+  # ===================================================================
+  docker:build:
+    desc: Build the flycanon image with sibling-path BuildKit contexts.
+    deps: [env:init]
+    cmds:
+      - '{{.COMPOSE}} build'
+
+  docker:up:
+    desc: Boot the full stack (api + worker + postgres + redis) in the background.
+    deps: [env:init]
+    cmds:
+      - '{{.COMPOSE}} up -d --build'
+      - 'echo "API   -> http://localhost:{{.PORT}}"'
+      - 'echo "docs  -> http://localhost:{{.PORT}}/docs"'
+      - 'echo "health-> http://localhost:{{.PORT}}/actuator/health"'
+
+  docker:logs:
+    desc: Tail logs from every container.
+    cmds:
+      - '{{.COMPOSE}} logs -f --tail=200'
+
+  docker:down:
+    desc: Tear down the stack (keeps the postgres volume).
+    cmds:
+      - '{{.COMPOSE}} down'
+
+  docker:nuke:
+    desc: Tear down the stack and delete the postgres volume.
+    cmds:
+      - '{{.COMPOSE}} down -v'
+
+  docker:up:test:
+    desc: Boot the integration-test stack.
+    deps: [env:init]
+    cmds:
+      - '{{.COMPOSE_TEST}} up -d --build'
+
+  docker:down:test:
+    desc: Tear down the integration-test stack (deletes the volumes).
+    cmds:
+      - '{{.COMPOSE_TEST}} down -v'
+
+  # ===================================================================
+  # Diagnostic shortcuts
+  # ===================================================================
+  health:
+    desc: Curl the /actuator/health endpoint of the running API.
+    cmds:
+      - 'curl -fsS http://localhost:{{.PORT}}/actuator/health | jq .'
+
+  health:readiness:
+    desc: Curl /actuator/health/readiness -- shows the database + EDA components.
+    cmds:
+      - 'curl -fsS http://localhost:{{.PORT}}/actuator/health/readiness | jq .'
+
+  health:liveness:
+    desc: Curl /actuator/health/liveness -- cheap, no broker pings.
+    cmds:
+      - 'curl -fsS http://localhost:{{.PORT}}/actuator/health/liveness | jq .'
+
+  version:
+    desc: Curl the /api/v1/version endpoint of the running API.
+    cmds:
+      - 'curl -fsS http://localhost:{{.PORT}}/api/v1/version | jq .'
+
+  openapi:
+    desc: Dump the OpenAPI document.
+    cmds:
+      - 'curl -fsS http://localhost:{{.PORT}}/openapi.json | jq .'

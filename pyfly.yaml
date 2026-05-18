@@ -1,0 +1,87 @@
+# Copyright 2026 Firefly Software Solutions Inc
+#
+# PyFly application configuration. Values override the property-driven
+# defaults activated by ``enable_core_stack``. Anything in the
+# environment (FLYCANON_*) wins over this file because pydantic-settings
+# is loaded after pyfly merges its config sources.
+
+pyfly:
+  # Web tier -- FastAPI adapter, default ASGI server, /api as base.
+  web:
+    enabled: true
+    base-path: /api
+  server:
+    enabled: true
+    host: 0.0.0.0
+    port: 8500
+
+  # Observability -- Prometheus metrics + OpenTelemetry tracing.
+  observability:
+    enabled: true
+  metrics:
+    enabled: true
+  tracing:
+    enabled: true
+    service-name: flycanon
+
+  # Actuator -- /actuator/health, /actuator/info, /actuator/metrics
+  actuator:
+    enabled: true
+    metrics:
+      enabled: true
+
+  # Admin dashboard -- embedded management UI at /admin/. Read-only by
+  # default; toggle ``require-auth: true`` before exposing it to the
+  # public internet.
+  admin:
+    enabled: true
+    path: /admin
+    title: "flycanon -- PyFly Admin"
+    theme: auto
+    require-auth: false
+    refresh-interval: 5000
+
+  # AOP -- required for @authorize / @cacheable / @retry decorators.
+  aop:
+    enabled: true
+
+  # Resilience -- circuit breaker + retry for outbound LLM and webhook
+  # calls.
+  resilience:
+    enabled: true
+
+  # CQRS -- CommandBus + QueryBus + handler scan.
+  cqrs:
+    enabled: true
+
+  # Cache -- Redis-backed (falls back to in-memory if Redis URL is unset).
+  cache:
+    enabled: true
+
+  # EDA -- knowledge-lifecycle event bus, wired by pyfly's
+  # EdaAutoConfiguration. Default provider is ``postgres`` which uses
+  # LISTEN/NOTIFY + the durable ``pyfly_eda_outbox`` table; flycanon
+  # already runs Postgres so no extra broker is required. Override
+  # with ``FLYCANON_EDA_ADAPTER`` (memory | postgres | redis | kafka).
+  eda:
+    enabled: true
+    provider: ${FLYCANON_EDA_ADAPTER:postgres}
+    # Comma-separated destinations the in-process subscriber listens
+    # to. The worker container overrides this to ``flycanon.ingest``
+    # alone so the offset advances independently.
+    destinations: ${FLYCANON_EDA_DESTINATIONS:flycanon.ingest,flycanon.knowledge,flycanon.audit}
+    group: ${FLYCANON_EDA_GROUP:flycanon-workers}
+    postgres:
+      dsn: ${FLYCANON_DATABASE_URL:postgresql+asyncpg://canon:canon@localhost:5432/flycanon}
+      channel: flycanon_eda
+    redis:
+      url: ${FLYCANON_REDIS_URL:redis://localhost:6379/0}
+    kafka:
+      bootstrap-servers: ${FLYCANON_KAFKA_BOOTSTRAP:localhost:9092}
+
+  # Persistence -- async SQLAlchemy with Alembic migrations on startup
+  # if ``RUN_MIGRATIONS=true``.
+  data:
+    relational:
+      enabled: true
+      url: ${FLYCANON_DATABASE_URL:postgresql+asyncpg://canon:canon@localhost:5432/flycanon}

@@ -1,0 +1,41 @@
+# pre-commit hooks for flycanon.
+#
+# Install once:
+#     uv run pre-commit install --hook-type pre-commit
+#
+# Run on demand against the staged set:
+#     uv run pre-commit run
+#
+# The hooks here are intentionally light. The full lint + test gate
+# runs in GitHub Actions (.github/workflows/pr-gate.yaml).
+
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: check-merge-conflict
+      - id: detect-private-key
+      - id: end-of-file-fixer
+      - id: trailing-whitespace
+      - id: check-yaml
+      - id: check-toml
+      - id: check-added-large-files
+        args: ["--maxkb=1024"]
+
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.15.12
+    hooks:
+      - id: ruff-check
+        args: ["--fix"]
+      - id: ruff-format
+
+  - repo: local
+    hooks:
+      - id: no-anthropic-keys
+        name: Reject committed Anthropic API keys
+        # Matches the live-key prefix Anthropic uses on every API key.
+        # Run against staged files only so the hook is fast and false-
+        # positive-free against unrelated history.
+        entry: scripts/precommit_no_anthropic_keys.sh
+        language: script
+        types: [text]

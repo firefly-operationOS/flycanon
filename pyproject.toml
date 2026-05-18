@@ -1,0 +1,150 @@
+[project]
+name = "flycanon"
+# CalVer YY.MM.PP -- bumped per release. Note that PEP 440 normalises
+# ``26.05.01`` -> ``26.5.1`` in the built wheel filename.
+version = "26.5.1"
+description = "Operational Knowledge Repository -- versioned, provenance-tracked canonical knowledge with hybrid retrieval and RAG, exposed as a standalone HTTP microservice over fireflyframework-pyfly and -agentic. Part of Firefly OperationOS, platform-agnostic by design."
+readme = "README.md"
+requires-python = ">=3.13"
+# flycanon (the service) is proprietary -- no public license is granted.
+# Only the SDKs under ``sdks/python`` and ``sdks/java`` are released
+# under Apache-2.0; each carries its own LICENSE file.
+authors = [
+    { name = "Firefly Software Solutions Inc" },
+]
+
+dependencies = [
+    # Firefly Framework runtime (DI, CQRS, EDA, web, observability, resilience,
+    # actuator, data-relational, security). Pulled in with the extras we use
+    # so a fresh ``uv sync`` is enough to boot the full stack.
+    "pyfly[fastapi,observability,security,data-relational,postgresql,eda,redis,client,scheduling,cli]>=26.5.4",
+
+    # GenAI metaframework -- FireflyAgent over pydantic-ai, plus the
+    # corpus / hybrid-retrieval primitives the query stage uses
+    # (SqliteCorpus + HybridRetriever live under
+    # ``fireflyframework_agentic.rag``). The ``corpus-search`` extra
+    # bundles MarkItDown (multi-format intake), the SQLite-vec vector
+    # store backend, openai-embeddings, and sqlglot.
+    "fireflyframework-agentic[rest,security,redis,corpus-search]>=26.5.11",
+
+    # Source intake -- ``python-docx`` for direct DOCX parsing in the
+    # docx loader, ``pypdf`` for PDF text extraction, ``beautifulsoup4``
+    # for HTML normalisation. MarkItDown (bundled via the corpus-search
+    # extra above) is the canonical loader for everything else.
+    "python-docx>=1.1",
+    "pypdf>=4.3.0",
+    "beautifulsoup4>=4.12",
+    "lxml>=5.0",
+
+    # HTTP client for outbound calls (webhooks, future SOTA monitors).
+    "httpx>=0.28.0",
+    "tenacity>=9.0.0",
+
+    # Configuration.
+    "pydantic>=2.10.0",
+    "pydantic-settings>=2.7.0",
+
+    # Persistence stack. asyncpg drives the runtime (async engine); psycopg
+    # is the sync sibling used by Alembic for migrations (env.py rewrites
+    # ``+asyncpg`` -> ``+psycopg`` so a single DATABASE_URL covers both).
+    "sqlalchemy[asyncio]>=2.0",
+    "asyncpg>=0.30",
+    "psycopg[binary]>=3.2",
+    "aiosqlite>=0.22",
+    "alembic>=1.14",
+    "redis>=5.2",
+
+    # Structured logging + tracing.
+    "structlog>=25.5.0",
+]
+
+[project.scripts]
+flycanon = "flycanon.cli:main"
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.24",
+    "pytest-cov>=5.0",
+    "pytest-timeout>=2.3",
+    "ruff>=0.8",
+    "pyright>=1.1",
+    "testcontainers[postgres,redis]>=4.0",
+    "respx>=0.21",
+    "httpx>=0.28",
+    "reportlab>=4.2",
+    "python-docx>=1.1",
+]
+
+# Optional ``pgvector`` adapter for the retrieval store. The default
+# vector backend is the in-tree ``SqliteCorpus`` from the agentic
+# framework, which is enough for single-node deployments. Pull this
+# extra when you want to point flycanon at a Postgres + pgvector
+# cluster instead.
+pgvector = [
+    "pgvector>=0.3.6",
+]
+
+[build-system]
+requires = ["hatchling>=1.18"]
+build-backend = "hatchling.build"
+
+[tool.uv.sources]
+# Sibling-repo path sources -- mirror what the rest of operationOS does
+# so both services boot from a fresh local checkout without needing the
+# registry.
+pyfly = { path = "../../fireflyframework/fireflyframework-pyfly", editable = true }
+fireflyframework-agentic = { path = "../../fireflyframework/fireflyframework-agentic", editable = true }
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/flycanon"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+pythonpath = ["src"]
+markers = [
+    "integration: requires docker compose stack (real Postgres / Redis)",
+    "llm: requires a real LLM provider (OPENAI_API_KEY/ANTHROPIC_API_KEY/...). Skipped by default.",
+]
+addopts = "-v --tb=short -m 'not llm'"
+
+[tool.ruff]
+target-version = "py313"
+line-length = 110
+# CI clones the sibling firefly framework repos into ``./vendor/`` so
+# the Dockerfile's BuildKit contexts resolve identically in local
+# checkouts and in GitHub Actions. We don't lint third-party code on
+# its way through our pipeline -- they have their own ruff config.
+extend-exclude = ["vendor"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "UP", "B", "SIM"]
+
+[tool.ruff.lint.per-file-ignores]
+# Public DTOs / interface enums map directly onto the JSON wire
+# contract we ship to callers. The mixedCase fields and Exception-
+# suffix-less identifiers are intentional -- renaming them would break
+# the API.
+"src/flycanon/interfaces/**" = ["N801", "N811", "N815", "N818"]
+# Domain exceptions on the CQRS handlers follow the framework's
+# exception-naming convention (no ``Error`` suffix); renaming them
+# would ripple through every controller advice mapping.
+"src/flycanon/core/services/**" = ["N818"]
+# Tests routinely build long inline DTOs; the line-length cap is a
+# code-smell signal we don't enforce on test fixtures.
+"tests/**" = ["E501"]
+
+[tool.pyright]
+pythonVersion = "3.13"
+typeCheckingMode = "basic"
+include = ["src/flycanon"]
+exclude = ["tests/**", "**/__pycache__/**", "vendor/**"]
+
+# Execution-environment overrides silence false positives that come
+# from framework-level metaprogramming pyright can't follow. pyfly's
+# ``Body[T]`` / ``Valid[T]`` / ``PathVar[T]`` are runtime
+# ``Generic[T]`` classes the framework strips at injection time.
+[[tool.pyright.executionEnvironments]]
+root = "src/flycanon/web/controllers"
+reportArgumentType = "none"

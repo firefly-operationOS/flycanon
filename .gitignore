@@ -1,0 +1,108 @@
+# =============================================================================
+# flycanon -- .gitignore
+#
+# Tracked: source, tests, docs, build manifests, Dockerfile, docker-compose
+# files, prompt YAMLs, Alembic migrations, env_template, and the Taskfile.
+#
+# Everything below is local-only state, secrets, or generated artefacts.
+# =============================================================================
+
+# --- Python virtual envs + bytecode ------------------------------------------
+.venv/
+venv/
+env/
+.python-version
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# --- Build outputs / packaging -----------------------------------------------
+build/
+dist/
+*.egg
+*.egg-info/
+.eggs/
+pip-wheel-metadata/
+wheels/
+*.whl
+
+# --- uv + pip cache ----------------------------------------------------------
+.uv/
+.pip/
+
+# --- Test, lint, type-check caches -------------------------------------------
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.pyright_cache/
+.pyright/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+.tox/
+.nox/
+
+# --- Local environment overrides + secrets -----------------------------------
+# env_template is the canonical, tracked example -- .env is per-developer.
+.env
+.env.*
+!env_template
+*.pem
+*.key
+*.crt
+secrets/
+.secrets/
+
+# --- Local databases / state -------------------------------------------------
+*.db
+*.db-journal
+*.sqlite
+*.sqlite3
+*.sqlite3-journal
+flycanon_dev.db
+local_data/
+
+# --- Logs --------------------------------------------------------------------
+*.log
+logs/
+
+# --- IDE / editor noise ------------------------------------------------------
+.idea/
+.vscode/
+*.swp
+*.swo
+*.sublime-*
+.fleet/
+.project
+.classpath
+.settings/
+
+# --- OS noise ----------------------------------------------------------------
+.DS_Store
+Thumbs.db
+desktop.ini
+.AppleDouble
+.LSOverride
+
+# --- Claude Code + AI assistants ---------------------------------------------
+# Per-project memory and local agent state should never land in the repo.
+.claude/
+.claude*
+CLAUDE.md
+claude-*.md
+.cursor/
+.aider*
+
+# --- Docker / compose runtime data -------------------------------------------
+.docker/
+docker-data/
+postgres_data/
+
+# --- Misc generated artefacts ------------------------------------------------
+*.tmp
+*.bak
+*.orig
+site/

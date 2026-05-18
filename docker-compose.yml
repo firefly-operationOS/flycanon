@@ -1,0 +1,98 @@
+# Copyright 2026 Firefly Software Solutions Inc
+#
+# Default compose stack:  api + worker + postgres + redis
+#
+# Usage:
+#   cp env_template .env
+#   docker compose up --build
+
+x-build: &service-build
+  context: .
+  dockerfile: Dockerfile
+  additional_contexts:
+    pyfly: ../../fireflyframework/fireflyframework-pyfly
+    fireflyframework-agentic: ../../fireflyframework/fireflyframework-agentic
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: canon
+      POSTGRES_PASSWORD: canon
+      POSTGRES_DB: flycanon
+    ports:
+      - "${PG_PORT:-5535}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U canon -d flycanon"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "${REDIS_PORT:-6395}:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+
+  api:
+    build: *service-build
+    image: flycanon:latest
+    container_name: flycanon-api
+    command: ["serve"]
+    ports:
+      - "${CANON_PORT:-8500}:8500"
+    # Optional .env -- compose v2 honours ``required: false`` so the stack
+    # boots even without a local .env (provider keys fall back to the host
+    # shell env). ``task docker:up`` also auto-creates .env from env_template.
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      FLYCANON_DATABASE_URL: postgresql+asyncpg://canon:canon@postgres:5432/flycanon
+      FLYCANON_REDIS_URL: redis://redis:6379/0
+      FLYCANON_EDA_ADAPTER: postgres
+      FLYCANON_EMBEDDING_MODEL: ${FLYCANON_EMBEDDING_MODEL:-openai:text-embedding-3-small}
+      FLYCANON_ANSWER_MODEL: ${FLYCANON_ANSWER_MODEL:-anthropic:claude-sonnet-4-6}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      RUN_MIGRATIONS: "true"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost:8500/actuator/health/readiness"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+
+  worker:
+    build: *service-build
+    image: flycanon:latest
+    container_name: flycanon-worker
+    command: ["worker"]
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      FLYCANON_DATABASE_URL: postgresql+asyncpg://canon:canon@postgres:5432/flycanon
+      FLYCANON_REDIS_URL: redis://redis:6379/0
+      FLYCANON_EDA_ADAPTER: postgres
+      FLYCANON_EMBEDDING_MODEL: ${FLYCANON_EMBEDDING_MODEL:-openai:text-embedding-3-small}
+      FLYCANON_ANSWER_MODEL: ${FLYCANON_ANSWER_MODEL:-anthropic:claude-sonnet-4-6}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      RUN_MIGRATIONS: "false"
+    depends_on:
+      api:
+        condition: service_healthy
+
+volumes:
+  postgres_data:

@@ -1,0 +1,38 @@
+# Copyright 2026 Firefly Software Solutions Inc
+#
+# Integration-test overlay. Adds an OpenAI-compatible mock LLM server so
+# integration tests run against a deterministic backend without burning
+# real provider quota.
+#
+# Usage:
+#   docker compose -f docker-compose.yml -f docker-compose.test.yml up --build
+
+services:
+  mock-llm:
+    image: stoplight/prism:5
+    container_name: flycanon-mock-llm
+    command: ["mock", "-h", "0.0.0.0", "-p", "8500", "/mock/openai.yaml"]
+    volumes:
+      - ./tests/fixtures/mock-llm:/mock:ro
+    ports:
+      - "${MOCK_LLM_PORT:-8505}:8500"
+
+  api:
+    environment:
+      OPENAI_BASE_URL: http://mock-llm:8500/v1
+      OPENAI_API_KEY: mock-key
+      FLYCANON_EMBEDDING_MODEL: openai:text-embedding-3-small
+      FLYCANON_ANSWER_MODEL: openai:gpt-4o
+    depends_on:
+      mock-llm:
+        condition: service_started
+
+  worker:
+    environment:
+      OPENAI_BASE_URL: http://mock-llm:8500/v1
+      OPENAI_API_KEY: mock-key
+      FLYCANON_EMBEDDING_MODEL: openai:text-embedding-3-small
+      FLYCANON_ANSWER_MODEL: openai:gpt-4o
+    depends_on:
+      mock-llm:
+        condition: service_started

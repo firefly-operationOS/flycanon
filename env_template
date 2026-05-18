@@ -1,0 +1,89 @@
+# Copyright 2026 Firefly Software Solutions Inc
+#
+# Copy to .env (this file is the canonical reference; .env is gitignored).
+# All keys are prefixed with FLYCANON_ so they are easy to grep for and
+# easy to scope per service.
+
+# ----------------------------------------------------------------------------
+# Service
+# ----------------------------------------------------------------------------
+FLYCANON_LOG_LEVEL=INFO
+FLYCANON_PORT=8500
+
+# ----------------------------------------------------------------------------
+# Persistence
+# ----------------------------------------------------------------------------
+# Async-SQLAlchemy URL. asyncpg for Postgres, aiosqlite for SQLite (tests).
+FLYCANON_DATABASE_URL=postgresql+asyncpg://canon:canon@localhost:5432/flycanon
+
+# Run alembic upgrade head on startup (set to "false" in production deploys
+# that prefer migrating as a separate step).
+RUN_MIGRATIONS=true
+
+# ----------------------------------------------------------------------------
+# Queue / EDA
+# ----------------------------------------------------------------------------
+# Choose ``memory`` (single-process dev), ``postgres`` (default -- durable
+# outbox + LISTEN/NOTIFY, no extra broker needed since the service already
+# runs Postgres), ``redis`` (Redis Streams), or ``kafka`` (production
+# fan-out). All adapters live in ``pyfly.eda.adapters``.
+FLYCANON_EDA_ADAPTER=postgres
+FLYCANON_REDIS_URL=redis://localhost:6379/0
+
+# Topics for the lifecycle events flycanon publishes. Downstream services
+# subscribe to these to keep their projections in sync.
+FLYCANON_INGEST_TOPIC=flycanon.ingest
+FLYCANON_KNOWLEDGE_TOPIC=flycanon.knowledge
+FLYCANON_AUDIT_TOPIC=flycanon.audit
+
+# ----------------------------------------------------------------------------
+# Embeddings + RAG
+# ----------------------------------------------------------------------------
+# Embedding provider, used by the chunk indexer and the query stage.
+# Supports any pydantic-ai / fireflyframework-agentic embedder identifier
+# (``openai:text-embedding-3-small``, ``cohere:embed-english-v3.0``, ...).
+FLYCANON_EMBEDDING_MODEL=openai:text-embedding-3-small
+FLYCANON_EMBEDDING_DIMENSIONS=1536
+
+# Answer model for the RAG query endpoint. Any pydantic-ai provider id.
+FLYCANON_ANSWER_MODEL=anthropic:claude-sonnet-4-6
+FLYCANON_ANSWER_FALLBACK_MODEL=openai:gpt-4o
+
+# Hybrid retrieval knobs.
+FLYCANON_RETRIEVAL_TOP_K=10
+FLYCANON_RETRIEVAL_PER_QUERY_K=30
+FLYCANON_RETRIEVAL_RRF_K=60
+
+# ----------------------------------------------------------------------------
+# Vector store
+# ----------------------------------------------------------------------------
+# ``sqlite-vec`` is the default. Set to ``pgvector`` and install the
+# ``pgvector`` extra to use the operational Postgres instead.
+FLYCANON_VECTOR_STORE=sqlite-vec
+# SQLite path the default corpus uses. The directory is created on
+# startup if it does not exist.
+FLYCANON_CORPUS_PATH=./local_data/corpus.db
+
+# ----------------------------------------------------------------------------
+# Ingestion
+# ----------------------------------------------------------------------------
+# Chunker knobs.
+FLYCANON_CHUNK_SIZE_TOKENS=1200
+FLYCANON_CHUNK_OVERLAP_TOKENS=150
+FLYCANON_CHUNK_STRATEGY=paragraph
+
+# Max bytes accepted in a single source submission (after upload).
+FLYCANON_MAX_BYTES=33554432
+
+# ----------------------------------------------------------------------------
+# Provider credentials -- pulled from the standard env vars. Set only
+# the ones you need.
+# ----------------------------------------------------------------------------
+# OPENAI_API_KEY=
+# ANTHROPIC_API_KEY=
+
+# ----------------------------------------------------------------------------
+# Security (optional)
+# ----------------------------------------------------------------------------
+# Static API keys that grant access. Comma-separated.
+FLYCANON_API_KEYS=
