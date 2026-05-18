@@ -109,3 +109,26 @@ class TestHitDtoMapper:
         assert h.source_kind is None
         assert h.source_uri is None
         assert h.section_path is None
+
+    def test_underscore_prefixed_filter_metadata_is_stripped(self):
+        # The retrieval hydration step seeds ``_knowledge_*`` keys on
+        # the metadata bag so ``_apply_filters`` can match against
+        # them without a second repo round-trip. They MUST NOT leak
+        # into the public Hit.metadata field that SDK consumers see.
+        h = _hit_dto(
+            _make_stub(
+                {
+                    "source_kind": "pdf",
+                    "_knowledge_status": "published",
+                    "_knowledge_domain": "process",
+                    "_knowledge_jurisdiction": "GLOBAL",
+                    "_knowledge_tags": "mvp,workshop",
+                    "custom_facet": "experimental",
+                }
+            )
+        )
+        # Source kind still flows up; the internal keys are gone.
+        assert h.source_kind == "pdf"
+        assert h.metadata == {"custom_facet": "experimental"}
+        assert "_knowledge_status" not in h.metadata
+        assert "_knowledge_domain" not in h.metadata

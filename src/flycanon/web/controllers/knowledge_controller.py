@@ -6,6 +6,7 @@ from __future__ import annotations
 from pyfly.container import rest_controller
 from pyfly.cqrs import DefaultCommandBus, DefaultQueryBus
 from pyfly.kernel import ResourceNotFoundException
+from pyfly.observability.correlation import get_correlation_id
 from pyfly.web import (
     Body,
     PathVar,
@@ -109,7 +110,9 @@ class KnowledgeController:
         request: Valid[Body[CreateKnowledgeRequest]],
     ) -> KnowledgeVersion:
         """Create a fresh knowledge item + version=1."""
-        return await self._commands.send(CreateKnowledgeCommand(request=request))
+        return await self._commands.send(
+            CreateKnowledgeCommand(request=request, correlation_id=get_correlation_id())
+        )
 
     @put_mapping("/{item_id}")
     async def update_knowledge(
@@ -120,7 +123,11 @@ class KnowledgeController:
         """Append a new version to the item (the previous version
         transitions to ``superseded``)."""
         return await self._commands.send(
-            UpdateKnowledgeCommand(item_id=item_id, request=request)
+            UpdateKnowledgeCommand(
+                item_id=item_id,
+                request=request,
+                correlation_id=get_correlation_id(),
+            )
         )
 
     @post_mapping("/{item_id}:supersede")
@@ -131,7 +138,11 @@ class KnowledgeController:
     ) -> KnowledgeItem:
         """Point the whole item at another canonical item."""
         return await self._commands.send(
-            SupersedeKnowledgeCommand(item_id=item_id, request=request)
+            SupersedeKnowledgeCommand(
+                item_id=item_id,
+                request=request,
+                correlation_id=get_correlation_id(),
+            )
         )
 
     @post_mapping("/{item_id}:retire")
@@ -142,7 +153,11 @@ class KnowledgeController:
     ) -> KnowledgeItem:
         """Withdraw the item permanently."""
         return await self._commands.send(
-            RetireKnowledgeCommand(item_id=item_id, request=request)
+            RetireKnowledgeCommand(
+                item_id=item_id,
+                request=request,
+                correlation_id=get_correlation_id(),
+            )
         )
 
 

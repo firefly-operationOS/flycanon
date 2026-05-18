@@ -5,6 +5,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Sequence
 from contextlib import asynccontextmanager
+from dataclasses import dataclass, field
 from typing import Any
 
 from sqlalchemy import func, select
@@ -14,6 +15,25 @@ from flycanon.models.entities.citation import CitationRow
 from flycanon.models.entities.knowledge_item import KnowledgeItemRow
 from flycanon.models.entities.knowledge_version import KnowledgeVersionRow
 from flycanon.models.repositories._engine import build_session_factory
+
+
+@dataclass(frozen=True, slots=True)
+class KnowledgeLink:
+    """Snapshot of a knowledge_version's hit-time dimensions.
+
+    Returned by :meth:`KnowledgeRepository.lookup_published_citations_for_chunks`
+    so retrieval hit hydration can populate ``Hit.knowledge_item_id`` /
+    ``Hit.knowledge_version`` and the retrieval post-filter can match
+    against status / domain / jurisdiction / tags without a second
+    repo round-trip per hit.
+    """
+
+    item_id: str
+    version: int
+    status: str
+    domain: str
+    jurisdiction: str
+    tags: tuple[str, ...] = field(default_factory=tuple)
 
 
 class KnowledgeRepository:
@@ -162,3 +182,71 @@ class KnowledgeRepository:
             session.add_all(prepared)
             await session.flush()
             return len(prepared)
+
+    async def lookup_published_citations_for_chunks(
+        self,
+        chunk_ids: Sequence[str],
+    ) -> dict[str, "KnowledgeLink"]:
+        """Resolve the chunk -> knowledge linkage for the retrieval hit hydration.
+
+        Returns a mapping ``chunk_id -> KnowledgeLink`` for chunks
+        that are cited by **the current version** of any knowledge
+        item. Older / superseded versions are ignored so the Hit DTO
+        points at the live canonical row, not a historical one.
+
+        The lookup is one round-trip regardless of the number of
+        chunks -- a single SELECT joining ``canon_citations`` against
+        ``canon_knowledge_versions`` + ``canon_knowledge_items`` and
+        filtering by ``version == item.current_version``. When a chunk
+        is cited by multiple knowledge items (rare but legal), the
+        most recently updated item wins.
+
+        The link carries the full knowledge-version dimensions
+        (status, domain, jurisdiction, tags) so the retrieval
+        post-filter can match on them without a second repo
+        round-trip per hit.
+        """
+        ids = list(chunk_ids)
+        if not ids:
+            return {}
+        async with self._session_factory() as session:
+            stmt = (
+                select(
+                    CitationRow.chunk_id,
+                    KnowledgeVersionRow.knowledge_item_id,
+                    KnowledgeVersionRow.version,
+                    KnowledgeVersionRow.status,
+                    KnowledgeVersionRow.domain,
+                    KnowledgeVersionRow.jurisdiction,
+                    KnowledgeVersionRow.tags_json,
+                    KnowledgeItemRow.updated_at,
+                )
+                .join(
+                    KnowledgeVersionRow,
+                    KnowledgeVersionRow.id == CitationRow.knowledge_version_id,
+                )
+                .join(
+                    KnowledgeItemRow,
+                    KnowledgeItemRow.id == KnowledgeVersionRow.knowledge_item_id,
+                )
+                .where(
+                    CitationRow.chunk_id.in_(ids),
+                    KnowledgeVersionRow.version == KnowledgeItemRow.current_version,
+                )
+                .order_by(KnowledgeItemRow.updated_at.desc())
+            )
+            rows = (await session.execute(stmt)).all()
+
+        resolved: dict[str, KnowledgeLink] = {}
+        for chunk_id, item_id, version, status, domain, jurisdiction, tags_json, _updated_at in rows:
+            if chunk_id is None or chunk_id in resolved:
+                continue
+            resolved[chunk_id] = KnowledgeLink(
+                item_id=item_id,
+                version=int(version),
+                status=str(status),
+                domain=str(domain),
+                jurisdiction=str(jurisdiction),
+                tags=tuple(tags_json or ()),
+            )
+        return resolved

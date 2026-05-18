@@ -6,6 +6,7 @@ from __future__ import annotations
 from pyfly.container import rest_controller
 from pyfly.cqrs import DefaultCommandBus, DefaultQueryBus
 from pyfly.kernel import ResourceNotFoundException
+from pyfly.observability.correlation import get_correlation_id
 from pyfly.web import (
     Body,
     PathVar,
@@ -49,7 +50,9 @@ class CandidatesController:
     ) -> list[CandidateRecord]:
         """Run the consolidation stage against a source and persist
         every resulting candidate in ``proposed`` status."""
-        return await self._commands.send(ProposeCandidatesCommand(request=request))
+        return await self._commands.send(
+            ProposeCandidatesCommand(request=request, correlation_id=get_correlation_id())
+        )
 
     @get_mapping("")
     async def list_candidates(
@@ -88,7 +91,11 @@ class CandidatesController:
     ) -> CandidateRecord:
         """Materialise the candidate as a knowledge version."""
         return await self._commands.send(
-            AcceptCandidateCommand(candidate_id=candidate_id, request=request)
+            AcceptCandidateCommand(
+                candidate_id=candidate_id,
+                request=request,
+                correlation_id=get_correlation_id(),
+            )
         )
 
     @post_mapping("/{candidate_id}:reject")
@@ -98,7 +105,11 @@ class CandidatesController:
         request: Valid[Body[RejectCandidateRequest]],
     ) -> CandidateRecord:
         return await self._commands.send(
-            RejectCandidateCommand(candidate_id=candidate_id, request=request)
+            RejectCandidateCommand(
+                candidate_id=candidate_id,
+                request=request,
+                correlation_id=get_correlation_id(),
+            )
         )
 
 

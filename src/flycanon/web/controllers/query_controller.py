@@ -42,8 +42,10 @@ class QueryController:
     async def search(self, request: Valid[Body[SearchRequest]]) -> SearchResponse:
         """Hybrid retrieval over the canon corpus.
 
-        BM25 (SQLite FTS5) is fused with dense-vector search via
-        Reciprocal Rank Fusion::
+        BM25 (Postgres ``tsvector`` + GIN on ``canon_chunks`` for the
+        default ``pgvector`` backend; SQLite FTS5 only for the
+        file-backed ``sqlite-vec`` backend) is fused with dense-vector
+        search via Reciprocal Rank Fusion::
 
             score(chunk) = sum_over_modalities( 1 / (k + rank) )
 

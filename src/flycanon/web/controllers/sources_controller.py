@@ -24,6 +24,7 @@ import logging
 from pyfly.container import rest_controller
 from pyfly.cqrs import DefaultCommandBus, DefaultQueryBus
 from pyfly.kernel import ResourceNotFoundException
+from pyfly.observability.correlation import get_correlation_id
 from pyfly.web import (
     Body,
     PathVar,
@@ -156,6 +157,7 @@ class SourcesController:
                 content_type=payload.content_type,
                 kind=payload.kind,
                 uri=payload.uri,
+                correlation_id=get_correlation_id(),
             )
         )
 
