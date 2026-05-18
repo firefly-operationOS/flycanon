@@ -82,6 +82,19 @@ FLYCANON_RETRIEVAL_TOP_K=10
 FLYCANON_RETRIEVAL_PER_QUERY_K=30
 FLYCANON_RETRIEVAL_RRF_K=60
 
+# Optional cross-encoder reranker. Empty = disabled (the default).
+# Set to ``cohere:rerank-multilingual-v3.0`` (needs COHERE_API_KEY)
+# or ``voyageai:rerank-2`` (needs VOYAGEAI_API_KEY) to enable.
+FLYCANON_RERANKER_MODEL=
+FLYCANON_RERANKER_TOP_N=20
+
+# Optional multi-query expansion -- the answer model rewrites the
+# query into N paraphrases, each runs through the retriever, and
+# the result lists are RRF-fused for higher recall. Costs +1 LLM
+# call per /search and /query.
+FLYCANON_QUERY_EXPANSION_ENABLED=false
+FLYCANON_QUERY_EXPANSION_N=3
+
 # ----------------------------------------------------------------------------
 # Vector store
 # ----------------------------------------------------------------------------

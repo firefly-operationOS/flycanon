@@ -19,12 +19,17 @@ import logging
 import time
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 from flycanon.core.services.embeddings import EmbeddingService
 from flycanon.core.services.retrieval.corpus_factory import CorpusContext
 from flycanon.models.repositories.chunk_repository import ChunkRepository
 from flycanon.models.repositories.knowledge_repository import KnowledgeRepository
 from flycanon.models.repositories.source_repository import SourceRepository
+
+if TYPE_CHECKING:
+    from flycanon.core.services.retrieval.query_expander import QueryExpander
+    from flycanon.core.services.retrieval.reranker import Reranker
 
 logger = logging.getLogger(__name__)
 
@@ -74,6 +79,10 @@ class RetrievalService:
         default_top_k: int,
         default_per_query_k: int,
         rrf_k: int,
+        reranker: "Reranker | None" = None,
+        reranker_top_n: int = 20,
+        query_expander: "QueryExpander | None" = None,
+        query_expansion_n: int = 1,
     ) -> None:
         self._context = context
         self._embeddings = embeddings
@@ -83,6 +92,10 @@ class RetrievalService:
         self._default_top_k = default_top_k
         self._default_per_query_k = default_per_query_k
         self._rrf_k = rrf_k
+        self._reranker = reranker
+        self._reranker_top_n = reranker_top_n
+        self._query_expander = query_expander
+        self._query_expansion_n = query_expansion_n
 
     async def search(
         self,
@@ -106,8 +119,25 @@ class RetrievalService:
         effective_per_query_k = per_query_k or self._default_per_query_k
 
         start = time.perf_counter()
+
+        # Optional multi-query expansion. When enabled, the retriever
+        # walks every paraphrase in one call -- the agentic
+        # HybridRetriever already RRFs over the multi-query result
+        # lists internally.
+        queries = [query]
+        if self._query_expander is not None and self._query_expansion_n > 1:
+            queries = await self._query_expander.expand(
+                query, n=self._query_expansion_n
+            )
+            if len(queries) > 1:
+                logger.info(
+                    "query expansion query=%s variants=%d",
+                    query[:60],
+                    len(queries),
+                )
+
         chunk_hits = await retriever.retrieve(
-            [query],
+            queries,
             top_k_per_query=effective_per_query_k,
             top_k_final=effective_top_k * 3,  # widen for post-filter
         )
@@ -115,6 +145,20 @@ class RetrievalService:
         hydrated = await self._hydrate(chunk_hits)
         if filters is not None:
             hydrated = list(self._apply_filters(hydrated, filters))
+
+        # Optional cross-encoder rerank. The reranker reads
+        # ``(query, chunk_content)`` pairs and re-orders the
+        # candidate list. We feed it the top ``reranker_top_n``
+        # post-filter candidates and let it score; then trim to
+        # ``effective_top_k``.
+        if self._reranker is not None and hydrated:
+            ranked = await self._reranker.rerank(
+                query=query,
+                hits=hydrated[: self._reranker_top_n],
+                top_n=effective_top_k,
+            )
+            hydrated = ranked + hydrated[len(ranked) :]
+
         hydrated = hydrated[:effective_top_k]
         elapsed_ms = int((time.perf_counter() - start) * 1000)
         logger.info(
