@@ -1,4 +1,12 @@
-# Glossary
+<div align="center">
+
+<img src="assets/logo.png" alt="flycanon" width="380" />
+
+### **Glossary**
+
+</div>
+
+---
 
 | Term | Definition |
 |------|------------|

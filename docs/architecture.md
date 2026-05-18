@@ -1,4 +1,12 @@
-# Architecture
+<div align="center">
+
+<img src="assets/logo.png" alt="flycanon" width="380" />
+
+### **Architecture**
+
+</div>
+
+---
 
 flycanon is a single-process Python service composed of four layers,
 each implemented as a flat package under `src/flycanon`:

@@ -1,138 +1,222 @@
-<p align="center">
-  <img src="docs/assets/logo.png" alt="flycanon" width="520" />
-</p>
+<div align="center">
 
-<p align="center">
-  <em>Operational Knowledge Repository &mdash; the living source of truth for canonical operational knowledge.</em>
-</p>
+<img src="docs/assets/logo.png" alt="flycanon — operational knowledge repository" width="520" />
 
-<p align="center">
-  <a href="LICENSE"><img alt="License" src="https://img.shields.io/badge/license-Proprietary-lightgrey.svg"></a>
-  <a href="#"><img alt="Python" src="https://img.shields.io/badge/python-3.13-blue.svg"></a>
-  <a href="#"><img alt="Java SDK" src="https://img.shields.io/badge/sdk--java-25%20%2B%20Spring%20Boot%203.5.9-orange.svg"></a>
-  <a href="#"><img alt="Version" src="https://img.shields.io/badge/version-26.5.1-green.svg"></a>
-  <a href="docs/architecture.md"><img alt="Docs" src="https://img.shields.io/badge/docs-architecture-blueviolet.svg"></a>
-</p>
+### **Operational Knowledge Repository**
+
+The living source of truth for canonical operational knowledge.
+Universal ingestion, hybrid retrieval, retrieval-augmented answering
+with citations — all behind a single HTTP service.
+
+[![Python 3.13](https://img.shields.io/badge/python-3.13-blue.svg)](https://www.python.org)
+[![Java 25](https://img.shields.io/badge/java%20sdk-25%20%2B%20Spring%20Boot%203.5.9-orange)](sdks/java/README.md)
+[![pyfly](https://img.shields.io/badge/runtime-fireflyframework--pyfly-orange)](https://github.com/fireflyframework/fireflyframework-pyfly)
+[![agentic](https://img.shields.io/badge/genai-fireflyframework--agentic-purple)](https://github.com/fireflyframework/fireflyframework-agentic)
+[![OpenAPI](https://img.shields.io/badge/api-openapi%203.1-green)](docs/api-reference.md)
+[![pgvector](https://img.shields.io/badge/default--vector--store-pgvector-336791)](docs/architecture.md#pluggable-retrieval-backends)
+[![Version](https://img.shields.io/badge/version-26.5.1-green.svg)](#)
+[![License](https://img.shields.io/badge/license-Proprietary-lightgrey.svg)](LICENSE)
+
+</div>
 
 ---
 
-**flycanon** is a standalone HTTP microservice that owns the data plane
-for an organisation's canonical knowledge: ingestion, versioning,
-provenance, hybrid retrieval, and retrieval-augmented answering. Other
-services in Firefly OperationOS talk to it over REST or subscribe to
-its EDA topics; flycanon ships none of the workflow UI, none of the
-back-office screens, and none of the active-monitoring surfaces &mdash;
-only the rich, agentic intelligence layer.
+> **In a hurry?** &nbsp;Jump to the [**10-minute Quickstart →**](QUICKSTART.md) &nbsp;·&nbsp; SDK paths: [Python](sdks/python/QUICKSTART.md) · [Java / Spring Boot](sdks/java/QUICKSTART.md) &nbsp;·&nbsp; Wire payloads: [**Payload reference →**](docs/payload-reference.md)
 
-## Highlights
+---
 
-- **Universal ingestion.** Submit any file format -- DOCX, XLSX, PPTX,
-  PDF, RTF, ODF, HTML, Markdown, plain text, CSV, JSON, XML, EPUB,
-  emails (`.eml` / `.msg`), images (PNG / JPG / HEIC / AVIF / TIFF /
-  SVG), archives (`.zip` / `.7z` / `.tar.gz`), transcripts
-  (`.vtt` / `.srt`), or just a URL. flycanon detects the media type
-  from the magic bytes, normalises through a routing matrix
-  (Office &rarr; Markdown, archives expanded recursively, images
-  OCR'd, emails decomposed into body + attachments, &hellip;) and feeds
-  the result into the canonical pipeline.
+## Why this service exists
 
-- **Backend-agnostic retrieval.** Pluggable vector store: PostgreSQL
-  &#43; **pgvector** (default), Chroma, Qdrant, Pinecone, sqlite-vec
-  for laptops, or an in-memory store for tests. BM25 stays on a
-  file-backed SQLite FTS5 index for portability. Fusion via
-  Reciprocal Rank Fusion (RRF).
+Every operations team builds the same workflow underneath process
+docs, compliance runbooks, vendor agreements, internal policies, and
+post-incident retrospectives:
 
-- **Retrieval-augmented answers, fully cited.** Every answer carries
-  citations to the underlying chunks. No-answer pathways are explicit
-  (`answer == ""` with an empty citation list) -- never hallucinated.
+> _"Take this document, file it under the right thing, keep the
+> version chain honest, and let me ask it questions later — with
+> citations I can audit."_
 
-- **Event-driven by default.** Three durable topics published via the
-  Postgres outbox: `flycanon.ingest` (intake lifecycle),
-  `flycanon.knowledge` (lifecycle of canonical items),
-  `flycanon.audit` (mirror of every audited mutation).
+Doing that with a wiki is a losing game: layouts change, formats
+mutate (DOCX, PDF, scanned PDF, HEIC, ZIP bundles, `.eml`
+threads…), and the team ends up hand-copying snippets into another
+tool every time a single thing moves.
 
-- **Production-grade DX.** Spring-Boot-style autoconfig for the Java
-  SDK, async-first Python SDK, rich OpenAPI (multi-paragraph DTO
-  descriptions, mixed business + technical context), RFC 7807
-  ProblemDetails with stable `code` field, append-only audit log,
-  CalVer versioning (`26.5.1`).
+**flycanon** collapses the whole workflow into a single HTTP
+service. You ship any file format, declare the metadata you care
+about, and the service hands back a structured `SourceRecord` whose
+content is parsed, normalised, chunked, embedded, and indexed —
+ready for hybrid retrieval and grounded RAG answers. Knowledge is
+never edited in place: every revision appends a new version row, the
+previous one transitions to `superseded`, and the provenance graph
+travels with it.
 
-## Stack
+It is built to drop into a production back-office stack: idempotent
+APIs, event-driven downstream notifications via a durable Postgres
+outbox, observability out of the box, and clean failure isolation
+per pipeline stage.
 
-flycanon is built on the Firefly Framework:
+---
 
-- [`fireflyframework-pyfly`](https://github.com/fireflyframework/fireflyframework-pyfly)
-  -- DI (`@service` / `@bean` / `@configuration`), CQRS
-  (`@command_handler` / `@query_handler`), EDA, web (Starlette /
-  FastAPI), observability, resilience, actuator.
-- [`fireflyframework-agentic`](https://github.com/fireflyframework/fireflyframework-agentic)
-  -- FireflyAgent over pydantic-ai, MarkItDown intake, hybrid
-  retrieval (BM25 + vector + RRF fusion), embedding-provider
-  abstraction.
+## What you get back
+
+You give the service one HTTP request. The response is a single JSON
+object that carries, for every interaction:
+
+| Layer                       | What it tells you                                                                                                                              |
+| --------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Sources**                 | `SourceRecord` per ingested artefact (id, kind, status, content sha256, chunk count, ancestry chain when the artefact came out of a bundle).   |
+| **Knowledge items**         | Canonical pointer (status, current version, domain, jurisdiction). Updates append a new version; the previous one flips to `superseded`.       |
+| **Knowledge versions**      | Append-only revisions of a knowledge item. Citations to source chunks travel with the edge.                                                    |
+| **Candidates**              | Pre-canonical LLM proposals tied to a source. Accept / reject lifecycle materialises them into the knowledge chain.                            |
+| **Hybrid retrieval**        | `SearchResponse` with BM25 (SQLite FTS5) + dense vectors fused via Reciprocal Rank Fusion (RRF). Each hit carries `chunk_id`, `source_id`, the matching `content`, and the fused `score`. |
+| **Grounded RAG answers**    | `AnswerResponse` with the answer, citation list, `model`, `elapsed_ms`. A grounded "I don't know" is `answer == ""` with empty citations — flycanon never hallucinates. |
+| **Provenance**              | Resolved citation graph for one knowledge version plus the source summaries it touches plus the version chain of its item.                     |
+| **Append-only audit log**   | Every mutation (`/api/v1/audit`) with correlation id, actor, payload, and W3C trace context.                                                   |
+| **EDA topics**              | Three durable topics published via the Postgres outbox: `flycanon.ingest`, `flycanon.knowledge`, `flycanon.audit`.                              |
+| **RFC 7807 error envelope** | Every non-2xx response is a ProblemDetails payload with a stable `code` field for branching.                                                   |
+| **OpenAPI 3.1**             | Multi-paragraph DTO descriptions mixing business and technical context, served live at `/openapi.json` (Swagger UI at `/docs`, ReDoc at `/redoc`). |
+
+---
+
+## Universal ingestion
+
+Submit any file format. flycanon detects the media type from the
+magic bytes (stdlib `mimetypes` + a curated header table + ZIP
+central-directory inspection to disambiguate Office formats from
+generic archives) and routes the payload through a fixed routing
+matrix before the parse / chunk / embed / index pipeline runs:
+
+| Class            | Examples                                          | Strategy                                                                                                                                                          |
+| ---------------- | ------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Plain text       | `text/plain`, `text/markdown`, `text/csv`, JSON, XML | Pass-through.                                                                                                                                                     |
+| PDF              | `application/pdf`                                 | Encrypted / corrupt PDFs rejected with `unsupported_binary`; otherwise straight to MarkItDown.                                                                    |
+| Office           | DOCX / XLSX / PPTX / ODT / ODS / ODP / RTF        | `office_converter=none` (default) feeds MarkItDown directly; `gotenberg` (HTTP sidecar) or `libreoffice` (in-container `soffice`) render to PDF first.            |
+| Raster images    | PNG / JPG / WEBP                                  | Pass-through to OCR (Tesseract, multi-language).                                                                                                                  |
+| Converted images | HEIC / AVIF / TIFF / SVG / BMP                    | Pillow + pillow-heif + cairosvg → PNG, then OCR.                                                                                                                  |
+| Archives         | ZIP / 7Z / TAR / TAR.GZ / TAR.BZ2 / EPUB          | Expanded recursively (capped at `binary_max_recursion_depth` and `binary_max_expanded_files`). Each child re-enters the normaliser.                               |
+| Emails           | EML / MSG                                         | Body + each attachment exposed as a separate artefact carrying `parent_artifact` ancestry.                                                                        |
+| Web              | HTML / XHTML                                      | MarkItDown.                                                                                                                                                       |
+| Transcripts      | WebVTT / SRT                                      | Cue-aware loader.                                                                                                                                                 |
+| Unknown          | _everything else_                                 | `UnsupportedBinaryError` → `IngestionFailed` event with stable `code`.                                                                                            |
+
+Multi-artefact intakes (archives, multi-attachment emails) are merged
+into a single Markdown document with `## Artifact: <filename>`
+section markers, so chunks remain attributable via
+`metadata.parent_artifact`.
+
+---
+
+## Backend-agnostic retrieval
+
+BM25 stays on a file-backed SQLite FTS5 index (portable, no extra
+service, sufficient for the BM25 channel). The dense projection is
+chosen at boot via `FLYCANON_VECTOR_STORE`:
+
+| Backend      | Use case                                                                                                                                |
+| ------------ | --------------------------------------------------------------------------------------------------------------------------------------- |
+| **`pgvector`**   | **Default.** PostgreSQL + pgvector extension. HNSW index on `vector_cosine_ops`, tuneable `m` / `ef_construction`. Same operational Postgres as the canonical store. |
+| `chroma`     | Self-hosted Chroma server. Namespaced by `FLYCANON_CHROMA_COLLECTION`.                                                                  |
+| `qdrant`     | Self-hosted or Qdrant Cloud. `FLYCANON_QDRANT_URL` + optional API key.                                                                  |
+| `pinecone`   | Pinecone Serverless. `FLYCANON_PINECONE_INDEX` + `FLYCANON_PINECONE_API_KEY`.                                                            |
+| `sqlite-vec` | Laptop / single-process deployments. Same SQLite file as the FTS5 index.                                                                |
+| `memory`     | Tests only — evicted on process exit.                                                                                                   |
+
+Switching backends is a config change — the application code only
+sees `VectorStoreProtocol`. Fusion always happens via Reciprocal
+Rank Fusion over the two channels.
+
+---
 
 ## Public surface
 
-| Concern                                                          | Endpoint(s)                          |
-|------------------------------------------------------------------|--------------------------------------|
-| Source intake (any format, see _Universal ingestion_ above)      | `POST /api/v1/sources`               |
-| Source lookup / pagination                                       | `GET /api/v1/sources[/{id}]`         |
-| Knowledge-item lifecycle (draft / published / superseded / retired) | `/api/v1/knowledge/...`           |
-| Hybrid retrieval (BM25 + vectors, RRF fusion)                    | `POST /api/v1/search`                |
-| RAG answer with citations                                        | `POST /api/v1/query`                 |
-| Candidate proposals (pre-canonical)                              | `/api/v1/candidates/...`             |
-| Provenance graph                                                 | `GET /api/v1/knowledge/{id}/provenance` |
-| Append-only audit log                                            | `GET /api/v1/audit`                  |
-| Taxonomy (domain + jurisdiction)                                 | `/api/v1/taxonomy/...`               |
-| Identity / model info                                            | `GET /api/v1/version`                |
-| Health / readiness / liveness                                    | `/actuator/health/...`               |
-| OpenAPI                                                          | `/openapi.json`, `/docs`, `/redoc`   |
+| Concern                                                          | Endpoint(s)                                |
+| ---------------------------------------------------------------- | ------------------------------------------ |
+| Source intake (any format)                                       | `POST /api/v1/sources`                     |
+| Source lookup / pagination                                       | `GET /api/v1/sources[/{id}]`               |
+| Knowledge-item lifecycle (draft / published / superseded / retired) | `/api/v1/knowledge/...`                 |
+| Hybrid retrieval                                                 | `POST /api/v1/search`                      |
+| RAG answer with citations                                        | `POST /api/v1/query`                       |
+| Candidate proposals (pre-canonical)                              | `/api/v1/candidates/...`                   |
+| Provenance graph                                                 | `GET /api/v1/knowledge/{id}/provenance`    |
+| Append-only audit log                                            | `GET /api/v1/audit`                        |
+| Taxonomy (domain + jurisdiction)                                 | `/api/v1/taxonomy/...`                     |
+| Identity / model info                                            | `GET /api/v1/version`                      |
+| Health / readiness / liveness                                    | `/actuator/health/...`                     |
+| OpenAPI 3.1                                                      | `/openapi.json`, `/docs`, `/redoc`         |
 
-## EDA topics published
-
-| Topic                  | Events                                                                 |
-|------------------------|------------------------------------------------------------------------|
-| `flycanon.ingest`      | `SourceIngested`, `IngestionFailed`                                    |
-| `flycanon.knowledge`   | `KnowledgeItemPublished`, `KnowledgeItemSuperseded`, `KnowledgeItemRetired` |
-| `flycanon.audit`       | Mirror of every audited mutation (sized for compliance projections)    |
+---
 
 ## Quickstart
 
+> **Want the 10-minute curl tour instead?** &nbsp;See [`QUICKSTART.md`](QUICKSTART.md)
+> — `task docker:up:test` + one curl call against a mock LLM, no API keys.
+
 ```bash
-task deps:install       # uv sync --extra dev
-task docker:up          # full stack: api + worker + postgres (pgvector) + redis
+git clone https://github.com/firefly-operationOS/flycanon.git
+cd flycanon
+task deps:install          # uv sync --extra dev (pins .venv)
+task docker:up             # api + worker + postgres(pgvector) + redis
 curl -fsS http://localhost:8500/actuator/health | jq .
 ```
 
-The full five-minute tour is in [`QUICKSTART.md`](QUICKSTART.md);
-architecture, payload reference, and the API catalogue live under
-[`docs/`](docs/).
+Ingest a sample DOCX (the binary normaliser handles every format —
+this is just the simplest curl):
+
+```bash
+curl -fsS -X POST http://localhost:8500/api/v1/sources \
+  -F "file=@./tests/fixtures/sample.docx" \
+  -F 'metadata={"title":"Sample","domain":"process_owner"};type=application/json' \
+  | jq .
+```
+
+Search the corpus:
+
+```bash
+curl -fsS -X POST http://localhost:8500/api/v1/search \
+  -H 'Content-Type: application/json' \
+  -d '{"query":"what does the document say about scope","top_k":5}' | jq .
+```
+
+Ask a grounded question:
+
+```bash
+curl -fsS -X POST http://localhost:8500/api/v1/query \
+  -H 'Content-Type: application/json' \
+  -d '{"question":"Summarise the scope section in three sentences."}' | jq .
+```
+
+A grounded "I don't know" looks like `{"answer":"","citations":[]}`
+— flycanon never hallucinates.
+
+---
 
 ## Local development
 
 ```bash
-task dev:db             # Postgres (pgvector/pg16) + Redis only
-task dev:migrate        # alembic upgrade head
-task dev:serve          # FastAPI hot-reload on :8500
-task dev:worker         # EDA worker in a separate terminal
+task dev:db              # Postgres (pgvector/pg16) + Redis only
+task dev:migrate         # alembic upgrade head
+task dev:serve           # FastAPI hot-reload on :8500
+task dev:worker          # EDA worker in a separate terminal
 ```
 
 Smoke the running service:
 
 ```bash
-task health             # /actuator/health
-task version            # /api/v1/version
-task openapi            # /openapi.json
+task health              # /actuator/health
+task version             # /api/v1/version
+task openapi             # /openapi.json
 ```
+
+---
 
 ## SDKs
 
-Both SDKs pin their version to the service's CalVer (`26.5.1`), so the
-client and server upgrade in lockstep.
+Both SDKs pin their version to the service's CalVer (`26.5.1`), so
+the client and server upgrade in lockstep.
 
 | SDK | Highlights |
 |-----|------------|
-| [Python](sdks/python/README.md) | Async-first, `httpx` + Pydantic. Python &ge; 3.11. |
-| [Java](sdks/java/README.md)     | **Spring Boot 3.5.9 + Spring `RestClient` + Jackson. Java 25 (LTS). `groupId = com.firefly`.** Ships an `@AutoConfiguration` so a `CanonClient` bean is wired straight from `flycanon.*` properties. |
+| [**Python**](sdks/python/README.md) | Async-first, `httpx` + Pydantic. Python ≥ 3.11. |
+| [**Java**](sdks/java/README.md)     | **Spring Boot 3.5.9 + Spring `RestClient` + Jackson. Java 25 (LTS). `groupId = com.firefly`.** Ships an `@AutoConfiguration` so a `CanonClient` bean is wired straight from `flycanon.*` properties. |
 
 Java consumers just declare the dependency and inject the bean:
 
@@ -141,44 +225,67 @@ Java consumers just declare the dependency and inject the bean:
 public class CopilotService {
     private final CanonClient canon;
     public CopilotService(CanonClient canon) { this.canon = canon; }
-    // ... use canon.submitSource(...), canon.search(...), canon.answer(...)
+    // canon.submitSource(...), canon.search(...), canon.answer(...)
 }
 ```
+
+---
+
+## Documentation
+
+| Document | Read it when… |
+|----------|---------------|
+| [QUICKSTART.md](QUICKSTART.md) | You want your first ingest + search + answer in ten minutes (HTTP / curl). |
+| [docs/architecture.md](docs/architecture.md) | You need the data model, the binary-normaliser routing matrix, the pluggable retrieval backend matrix, the dependency arrows. |
+| [docs/pipeline.md](docs/pipeline.md) | You're touching the orchestrator, adding a new stage, or chasing a slow ingest. |
+| [docs/api-reference.md](docs/api-reference.md) | You're integrating with the HTTP API and need every endpoint, shape, and status code. |
+| [docs/payload-reference.md](docs/payload-reference.md) | You're composing the request payload — every field, option, and example. |
+| [docs/eda-events.md](docs/eda-events.md) | You're subscribing to the `flycanon.ingest` / `flycanon.knowledge` / `flycanon.audit` topics. |
+| [docs/glossary.md](docs/glossary.md) | You need a precise definition for a term the API or docs use. |
+| [sdks/python/README.md](sdks/python/README.md) | You're integrating from Python — async-first SDK with Pydantic typing. |
+| [sdks/java/README.md](sdks/java/README.md) | You're integrating from Java / Spring Boot — Spring Boot 3.5.9, `com.firefly` groupId, `@AutoConfiguration`. |
+
+The OpenAPI 3.1 document is served live by the running service at
+`/openapi.json`, with Swagger UI at `/docs` and Redoc at `/redoc`.
+
+---
 
 ## Repository layout
 
 ```
 flycanon/
-+- Dockerfile                # Multi-stage build with the binary-normaliser system deps
-+- Taskfile.yml              # Canonical dev-loop interface
-+- docker-compose.yml        # api + worker + postgres (pgvector) + redis
-+- docker-compose.test.yml   # Adds the mock LLM for integration tests
-+- pyfly.yaml                # pyfly application configuration
-+- alembic.ini               # Migration runner config
-+- env_template              # Reference environment file (.env is gitignored)
-+- migrations/               # Alembic versions
-+- src/flycanon/
-|  +- app.py                 # @pyfly_application + scan_packages
-|  +- main.py                # ASGI entry consumed by uvicorn
-|  +- cli.py                 # `flycanon {serve,worker,migrate}`
-|  +- config.py              # CanonSettings (FLYCANON_* env)
-|  +- core/                  # @configuration + services + binary normaliser + mappers
-|  +- interfaces/            # Public DTOs + enums
-|  +- models/                # SQLAlchemy entities + repositories
-|  +- resources/prompts/     # YAML prompt templates
-|  +- web/                   # @rest_controller + @controller_advice
-+- sdks/
-|  +- python/                # Async-first Python SDK (Apache-2.0)
-|  +- java/                  # Spring Boot Java SDK (Apache-2.0, com.firefly)
-+- docs/                     # Architecture, payload reference, API reference, EDA events, glossary
-+- tests/
-   +- unit/
-   +- integration/
+├─ Dockerfile                # Multi-stage build with the binary-normaliser system deps
+├─ Taskfile.yml              # Canonical dev-loop interface
+├─ docker-compose.yml        # api + worker + postgres (pgvector) + redis (optional gotenberg)
+├─ docker-compose.test.yml   # Adds the mock LLM for integration tests
+├─ pyfly.yaml                # pyfly application configuration
+├─ alembic.ini               # Migration runner config
+├─ env_template              # Reference environment file (.env is gitignored)
+├─ migrations/               # Alembic versions
+├─ src/flycanon/
+│  ├─ app.py                 # @pyfly_application + scan_packages
+│  ├─ main.py                # ASGI entry consumed by uvicorn
+│  ├─ cli.py                 # `flycanon {serve,worker,migrate}`
+│  ├─ config.py              # CanonSettings (FLYCANON_* env)
+│  ├─ core/                  # @configuration + services + binary normaliser + mappers
+│  ├─ interfaces/            # Public DTOs + enums
+│  ├─ models/                # SQLAlchemy entities + repositories
+│  ├─ resources/prompts/     # YAML prompt templates
+│  └─ web/                   # @rest_controller + @controller_advice
+├─ sdks/
+│  ├─ python/                # Async-first Python SDK (Apache-2.0)
+│  └─ java/                  # Spring Boot Java SDK (Apache-2.0, com.firefly)
+├─ docs/                     # Architecture, payload reference, API reference, EDA events, glossary
+└─ tests/
+   ├─ unit/
+   └─ integration/
 ```
+
+---
 
 ## License
 
-The service is proprietary -- see [`LICENSE`](LICENSE).
+The service is proprietary — see [`LICENSE`](LICENSE).
 
 The SDKs under [`sdks/python`](sdks/python) and [`sdks/java`](sdks/java)
 are released under the Apache License 2.0; each ships its own LICENSE
@@ -186,6 +293,8 @@ file.
 
 ---
 
-<p align="center">
-  Part of <a href="https://github.com/firefly-operationOS"><strong>Firefly OperationOS</strong></a>. Platform-agnostic by design.
-</p>
+<div align="center">
+
+Part of **[Firefly OperationOS](https://github.com/firefly-operationOS)**. &nbsp;Platform-agnostic by design.
+
+</div>

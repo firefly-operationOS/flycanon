@@ -1,4 +1,12 @@
-# Payload reference
+<div align="center">
+
+<img src="assets/logo.png" alt="flycanon" width="380" />
+
+### **Payload reference**
+
+</div>
+
+---
 
 All requests and responses are JSON. The wire shape is the source of
 truth -- the OpenAPI doc at `/openapi.json` is generated from the

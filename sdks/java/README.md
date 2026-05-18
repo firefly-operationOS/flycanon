@@ -1,4 +1,12 @@
-# flycanon-sdk (Java, Spring Boot)
+<div align="center">
+
+<img src="../../docs/assets/logo.png" alt="flycanon" width="380" />
+
+### **Java SDK** &nbsp;·&nbsp; Spring Boot 3.5.9 &nbsp;·&nbsp; Java 25
+
+</div>
+
+---
 
 Spring-Boot-native Java client for the
 [flycanon](https://github.com/firefly-operationOS/flycanon) Operational

@@ -1,4 +1,12 @@
-# flycanon-sdk (Python)
+<div align="center">
+
+<img src="../../docs/assets/logo.png" alt="flycanon" width="380" />
+
+### **Python SDK**
+
+</div>
+
+---
 
 Async-first Python client for the
 [flycanon](https://github.com/firefly-operationOS/flycanon) Operational

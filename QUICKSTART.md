@@ -1,11 +1,17 @@
-<p align="center">
-  <img src="docs/assets/logo.png" alt="flycanon" width="380" />
-</p>
+<div align="center">
 
-# flycanon quickstart
+<img src="docs/assets/logo.png" alt="flycanon" width="380" />
 
-Ten-minute tour. Boots the full stack, ingests a sample source, and
-answers a question over it -- all against the mock LLM so no provider
+### **Quickstart**
+
+Ten minutes from `git clone` to your first ingest + grounded answer.
+
+</div>
+
+---
+
+Boots the full stack, ingests a sample source, and answers a
+question over it — all against the mock LLM so no provider
 credentials are required.
 
 ## 0. Prerequisites
