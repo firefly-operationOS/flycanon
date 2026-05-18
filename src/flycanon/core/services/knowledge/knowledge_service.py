@@ -197,7 +197,7 @@ class KnowledgeService:
         await self._repository.upsert_version_status(current)
 
         await self._audit.record(
-            event_type=f"knowledge.updated",
+            event_type="knowledge.updated",
             subject_kind="knowledge_item",
             subject_id=item_id,
             actor=request.actor,

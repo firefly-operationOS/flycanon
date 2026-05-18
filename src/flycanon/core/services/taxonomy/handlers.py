@@ -53,6 +53,12 @@ class GetTaxonomyHandler(QueryHandler[GetTaxonomyQuery, TaxonomyTree]):
         self._taxonomy = taxonomy
 
     async def do_handle(self, query: GetTaxonomyQuery) -> TaxonomyTree:
+        # Idempotent lazy seed -- guarantees the documented
+        # "ships a default taxonomy seeded from the workshop personas"
+        # contract holds on a fresh deploy. ``ensure_default_seed`` is a
+        # no-op when the root nodes already exist, so the cost on the
+        # hot path is one indexed SELECT.
+        await self._taxonomy.ensure_default_seed()
         rows = await self._taxonomy.list_all()
         return TaxonomyTree(nodes=[to_taxonomy_node(r) for r in rows])
 
