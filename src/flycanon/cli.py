@@ -64,6 +64,9 @@ def cmd_worker(_: argparse.Namespace) -> int:
         worker_mod = importlib.import_module("flycanon.core.services.workers.ingest_worker")
         ingestion_mod = importlib.import_module("flycanon.core.services.ingestion")
         repo_mod = importlib.import_module("flycanon.models.repositories")
+        async_ingest_mod = importlib.import_module(
+            "flycanon.core.services.sources.async_ingest_service"
+        )
 
         from flycanon.app import CanonApplication
         from flycanon.config import CanonSettings
@@ -72,11 +75,16 @@ def cmd_worker(_: argparse.Namespace) -> int:
         await pyfly_app.startup()
         try:
             container = pyfly_app.context.container
+            try:
+                async_ingest = container.resolve(async_ingest_mod.AsyncIngestService)
+            except Exception:
+                async_ingest = None
             worker = worker_mod.IngestWorker(
                 ingestion=container.resolve(ingestion_mod.IngestionService),
                 repository=container.resolve(repo_mod.SourceRepository),
                 event_publisher=container.resolve(EventPublisher),
                 settings=container.resolve(CanonSettings),
+                async_ingest=async_ingest,
             )
             await worker.run_forever()
         finally:

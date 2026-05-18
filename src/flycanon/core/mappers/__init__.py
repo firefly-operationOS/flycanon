@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from flycanon.core.mappers.audit_mapper import to_audit_event
 from flycanon.core.mappers.candidate_mapper import to_candidate_record
+from flycanon.core.mappers.job_mapper import to_ingest_job
 from flycanon.core.mappers.knowledge_mapper import (
     to_citation,
     to_knowledge_item,
@@ -24,6 +25,7 @@ __all__ = [
     "to_audit_event",
     "to_candidate_record",
     "to_citation",
+    "to_ingest_job",
     "to_knowledge_item",
     "to_knowledge_relation",
     "to_knowledge_version",

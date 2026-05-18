@@ -12,6 +12,7 @@ from __future__ import annotations
 from flycanon.models.repositories.audit_repository import AuditRepository
 from flycanon.models.repositories.candidate_repository import CandidateRepository
 from flycanon.models.repositories.chunk_repository import ChunkRepository
+from flycanon.models.repositories.ingest_job_repository import IngestJobRepository
 from flycanon.models.repositories.knowledge_repository import KnowledgeRepository
 from flycanon.models.repositories.relation_repository import RelationRepository
 from flycanon.models.repositories.source_repository import SourceRepository
@@ -21,6 +22,7 @@ __all__ = [
     "AuditRepository",
     "CandidateRepository",
     "ChunkRepository",
+    "IngestJobRepository",
     "KnowledgeRepository",
     "RelationRepository",
     "SourceRepository",

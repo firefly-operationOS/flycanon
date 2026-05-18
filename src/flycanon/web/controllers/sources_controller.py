@@ -43,7 +43,9 @@ from flycanon.core.services.sources import (
     ReplaceSourceCommand,
     SubmitSourceCommand,
 )
+from flycanon.core.services.sources.async_ingest_service import AsyncIngestService
 from flycanon.core.services.sources.url_fetcher import UrlFetcher
+from flycanon.interfaces.dtos.job import IngestJob
 from flycanon.interfaces.dtos.source import (
     BulkSourceResult,
     BulkSourcesResponse,
@@ -109,16 +111,20 @@ class SourcesController:
         commands: DefaultCommandBus,
         queries: DefaultQueryBus,
         url_fetcher: UrlFetcher,
+        async_ingest: AsyncIngestService,
     ) -> None:
         self._commands = commands
         self._queries = queries
         self._url_fetcher = url_fetcher
+        self._async_ingest = async_ingest
 
     @post_mapping("", status_code=201)
     async def submit_json(
         self,
         payload: Valid[Body[SubmitSourceJsonPayload]],
-    ) -> SourceRecord:
+        mode: QueryParam[str] = "sync",
+        callback_url: QueryParam[str] = "",
+    ) -> SourceRecord | IngestJob:
         """Submit a source for intake.
 
         The request body carries the canonical bytes encoded as
@@ -173,6 +179,20 @@ class SourcesController:
         ``error_message`` so callers can inspect and re-submit.
         """
         content, content_type, filename = await self._resolve_payload_content(payload)
+        correlation_id = get_correlation_id()
+        if mode.lower() == "async":
+            from flycanon.core.mappers.job_mapper import to_ingest_job
+
+            row = await self._async_ingest.submit_async(
+                request=payload,
+                content=content,
+                filename=filename,
+                content_type=content_type,
+                actor=None,
+                correlation_id=correlation_id,
+                callback_url=callback_url or None,
+            )
+            return to_ingest_job(row)
         return await self._commands.send(
             SubmitSourceCommand(
                 content=content,
@@ -181,7 +201,7 @@ class SourcesController:
                 content_type=content_type,
                 kind=payload.kind,
                 uri=payload.uri,
-                correlation_id=get_correlation_id(),
+                correlation_id=correlation_id,
             )
         )
 

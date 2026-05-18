@@ -13,6 +13,7 @@ from flycanon.models.entities.audit_event import AuditEventRow
 from flycanon.models.entities.base import Base
 from flycanon.models.entities.candidate import CandidateRow
 from flycanon.models.entities.citation import CitationRow
+from flycanon.models.entities.ingest_job import IngestJobEventRow, IngestJobRow
 from flycanon.models.entities.knowledge_chunk import KnowledgeChunkRow
 from flycanon.models.entities.knowledge_item import KnowledgeItemRow
 from flycanon.models.entities.knowledge_relation import KnowledgeRelationRow
@@ -25,6 +26,8 @@ __all__ = [
     "Base",
     "CandidateRow",
     "CitationRow",
+    "IngestJobEventRow",
+    "IngestJobRow",
     "KnowledgeChunkRow",
     "KnowledgeItemRow",
     "KnowledgeRelationRow",
