@@ -158,7 +158,13 @@ Rank Fusion over the two channels.
 | Candidate proposals (pre-canonical)                              | `/api/v1/candidates/...`                   |
 | Provenance graph                                                 | `GET /api/v1/knowledge/{id}/provenance`    |
 | Quality scans (staleness + conflict detection)                   | `GET /api/v1/knowledge:stale`, `POST /api/v1/knowledge:detect-conflicts` |
-| Cost / billing rollups                                           | `GET /api/v1/billing`                      |
+| Cost / billing rollups                                           | `GET /api/v1/billing` (aggregate)          |
+| Cost drill-down -- per-call events                               | `GET /api/v1/billing/events`               |
+| Cost drill-down -- 24h / 7d / 30d snapshot                       | `GET /api/v1/billing/summary`              |
+| Cost drill-down -- top-N consumers                               | `GET /api/v1/billing/top`                  |
+| Cost drill-down -- per-subject attribution                       | `GET /api/v1/billing/by-subject`           |
+| Cost drill-down -- latency percentiles (p50/p95/p99)             | `GET /api/v1/billing/latency`              |
+| Corpus + queue + cost inventory snapshot                         | `GET /api/v1/stats`                        |
 | Append-only audit log                                            | `GET /api/v1/audit`                        |
 | Taxonomy (domain + jurisdiction)                                 | `/api/v1/taxonomy/...`                     |
 | Identity / model info                                            | `GET /api/v1/version`                      |

@@ -71,6 +71,100 @@ class CostRepository:
             result = await session.execute(stmt)
             return list(result.scalars().all())
 
+    async def list_subject_costs(
+        self,
+        *,
+        subject_kind: str | None = None,
+        since: datetime | None = None,
+        until: datetime | None = None,
+        limit: int = 100,
+    ) -> list[dict]:
+        """Sum tokens + cost grouped by ``(subject_kind, subject_id)``.
+
+        Answers the operationally common question "how much did
+        indexing source X cost?" -- the per-call rows store the
+        subject the LLM call was running against, so this is just a
+        SUM GROUP BY. Rows with NULL subject are skipped (they were
+        not tied to a domain entity).
+        """
+        async with self._session_factory() as session:
+            stmt = (
+                select(
+                    CostEventRow.subject_kind,
+                    CostEventRow.subject_id,
+                    func.coalesce(func.sum(CostEventRow.input_tokens), 0),
+                    func.coalesce(func.sum(CostEventRow.output_tokens), 0),
+                    func.coalesce(func.sum(CostEventRow.total_tokens), 0),
+                    func.coalesce(func.sum(CostEventRow.cost_usd), 0),
+                    func.count(CostEventRow.id),
+                )
+                .where(CostEventRow.subject_id.isnot(None))
+                .group_by(CostEventRow.subject_kind, CostEventRow.subject_id)
+            )
+            if subject_kind:
+                stmt = stmt.where(CostEventRow.subject_kind == subject_kind)
+            if since is not None:
+                stmt = stmt.where(CostEventRow.occurred_at >= since)
+            if until is not None:
+                stmt = stmt.where(CostEventRow.occurred_at <= until)
+            stmt = stmt.order_by(func.sum(CostEventRow.cost_usd).desc()).limit(limit)
+            rows = (await session.execute(stmt)).all()
+
+        out: list[dict] = []
+        for r in rows:
+            out.append(
+                {
+                    "subject_kind": r[0],
+                    "subject_id": r[1],
+                    "input_tokens": int(r[2] or 0),
+                    "output_tokens": int(r[3] or 0),
+                    "total_tokens": int(r[4] or 0),
+                    "cost_usd": str(Decimal(r[5] or 0)),
+                    "calls": int(r[6] or 0),
+                }
+            )
+        return out
+
+    async def latency_samples(
+        self,
+        *,
+        group_by: Sequence[str],
+        since: datetime | None = None,
+        until: datetime | None = None,
+    ) -> dict[tuple[str, ...], list[int]]:
+        """Raw ``latency_ms`` samples grouped by the named columns.
+
+        Returned as a dict keyed by the group tuple so callers can
+        compute percentiles in Python. Postgres has ``percentile_cont``
+        but SQLite (tests) doesn't; doing the math in Python keeps the
+        repo dialect-agnostic and the cardinality stays bounded by
+        ``canon_cost_events`` size, which is tiny relative to the
+        domain corpus.
+        """
+        column_map = {
+            "model": CostEventRow.model,
+            "agent_name": CostEventRow.agent_name,
+            "actor": CostEventRow.actor,
+        }
+        cols = [column_map[g] for g in group_by if g in column_map]
+        if not cols:
+            cols = [CostEventRow.model]
+        async with self._session_factory() as session:
+            stmt = select(*cols, CostEventRow.latency_ms).where(
+                CostEventRow.latency_ms.isnot(None)
+            )
+            if since is not None:
+                stmt = stmt.where(CostEventRow.occurred_at >= since)
+            if until is not None:
+                stmt = stmt.where(CostEventRow.occurred_at <= until)
+            rows = (await session.execute(stmt)).all()
+
+        buckets: dict[tuple[str, ...], list[int]] = {}
+        for r in rows:
+            head = tuple(str(v) if v is not None else "" for v in r[:-1])
+            buckets.setdefault(head, []).append(int(r[-1]))
+        return buckets
+
     async def aggregate(
         self,
         *,
@@ -123,7 +217,7 @@ class CostRepository:
             head = list(row[: len(group_names)])
             tail = list(row[len(group_names) :])
             record: dict = {}
-            for name, value in zip(group_names, head):
+            for name, value in zip(group_names, head, strict=False):
                 record[name] = str(value) if value is not None else None
             record["input_tokens"] = int(tail[0] or 0)
             record["output_tokens"] = int(tail[1] or 0)
