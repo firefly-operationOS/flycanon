@@ -142,9 +142,9 @@ class PdfLoader:
 
     Image-only PDFs produce empty text per page; the ingestion
     pipeline raises :class:`EmptySource` upstream when no chunk has
-    extractable text. Layout-aware OCR / bbox refinement lives in
-    flydocs, not here; flycanon's intake assumes the source is
-    semantically text-bearing.
+    extractable text. flycanon's intake path assumes the source is
+    semantically text-bearing -- layout-aware OCR / bbox refinement
+    is a sibling-service concern and is not run here.
     """
 
     kind = SourceKind.pdf
