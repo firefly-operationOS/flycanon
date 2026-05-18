@@ -10,9 +10,12 @@ import respx
 from flycanon_sdk import (
     AnswerResponse,
     BillingReport,
+    BillingSummary,
     CanonAPIError,
     CanonClient,
     ConflictScanResponse,
+    CorpusStats,
+    CostEventsPage,
     CreateConversationTurnRequest,
     CreateRelationRequest,
     Hit,
@@ -20,12 +23,15 @@ from flycanon_sdk import (
     KnowledgeDiff,
     KnowledgeGraph,
     KnowledgeItem,
+    LatencyReport,
     ProposeCandidateRequest,
     RelationsList,
     SourceMetadata,
     StaleReport,
+    SubjectCostReport,
     SubmitSourceJsonPayload,
     SuggestionsResponse,
+    TopConsumersReport,
     VersionInfo,
 )
 
@@ -322,6 +328,176 @@ async def test_billing_report_returns_rows() -> None:
         report = await client.billing_report(group_by=["date", "model"])
         assert isinstance(report, BillingReport)
         assert report.total_calls == 1
+
+
+@pytest.mark.asyncio
+async def test_list_cost_events_returns_page() -> None:
+    async with respx.mock(base_url="http://canon") as mock, CanonClient(
+        base_url="http://canon"
+    ) as client:
+        mock.get("/api/v1/billing/events").respond(
+            json={
+                "rows": [
+                    {
+                        "id": 1,
+                        "agent_name": "flycanon-answerer",
+                        "model": "anthropic:claude-sonnet-4-6",
+                        "input_tokens": 100,
+                        "output_tokens": 50,
+                        "total_tokens": 150,
+                        "cost_usd": "0.01",
+                        "latency_ms": 420,
+                        "occurred_at": "2026-05-18T17:00:00Z",
+                    }
+                ],
+                "limit": 50,
+                "offset": 0,
+            }
+        )
+        page = await client.list_cost_events()
+        assert isinstance(page, CostEventsPage)
+        assert page.rows[0].latency_ms == 420
+
+
+@pytest.mark.asyncio
+async def test_billing_summary_returns_three_windows() -> None:
+    async with respx.mock(base_url="http://canon") as mock, CanonClient(
+        base_url="http://canon"
+    ) as client:
+        window = {
+            "since": "2026-05-17T17:00:00Z",
+            "calls": 1,
+            "input_tokens": 100,
+            "output_tokens": 50,
+            "total_tokens": 150,
+            "cost_usd": "0.01",
+            "top_model": "x",
+            "top_model_cost_usd": "0.01",
+            "top_actor": None,
+            "top_actor_cost_usd": "0",
+        }
+        mock.get("/api/v1/billing/summary").respond(
+            json={
+                "generated_at": "2026-05-18T17:00:00Z",
+                "last_24h": window,
+                "last_7d": window,
+                "last_30d": window,
+            }
+        )
+        summary = await client.billing_summary()
+        assert isinstance(summary, BillingSummary)
+        assert summary.last_24h.calls == 1
+
+
+@pytest.mark.asyncio
+async def test_billing_top_validates_dimension() -> None:
+    async with respx.mock(base_url="http://canon") as mock, CanonClient(
+        base_url="http://canon"
+    ) as client:
+        mock.get("/api/v1/billing/top").respond(
+            json={
+                "dimension": "actor",
+                "rows": [
+                    {
+                        "dimension": "actor",
+                        "value": "alice",
+                        "input_tokens": 100,
+                        "output_tokens": 50,
+                        "total_tokens": 150,
+                        "cost_usd": "0.05",
+                        "calls": 3,
+                    }
+                ],
+            }
+        )
+        top = await client.billing_top(dimension="actor")
+        assert isinstance(top, TopConsumersReport)
+        assert top.rows[0].value == "alice"
+
+
+@pytest.mark.asyncio
+async def test_billing_by_subject_returns_rows() -> None:
+    async with respx.mock(base_url="http://canon") as mock, CanonClient(
+        base_url="http://canon"
+    ) as client:
+        mock.get("/api/v1/billing/by-subject").respond(
+            json={
+                "rows": [
+                    {
+                        "subject_kind": "source",
+                        "subject_id": "src-1",
+                        "input_tokens": 100,
+                        "output_tokens": 50,
+                        "total_tokens": 150,
+                        "cost_usd": "0.05",
+                        "calls": 3,
+                    }
+                ]
+            }
+        )
+        report = await client.billing_by_subject()
+        assert isinstance(report, SubjectCostReport)
+        assert report.rows[0].subject_id == "src-1"
+
+
+@pytest.mark.asyncio
+async def test_billing_latency_returns_percentiles() -> None:
+    async with respx.mock(base_url="http://canon") as mock, CanonClient(
+        base_url="http://canon"
+    ) as client:
+        mock.get("/api/v1/billing/latency").respond(
+            json={
+                "rows": [
+                    {
+                        "group": {"model": "x"},
+                        "count": 10,
+                        "avg_ms": 500,
+                        "p50_ms": 480,
+                        "p95_ms": 920,
+                        "p99_ms": 1240,
+                        "max_ms": 1500,
+                    }
+                ]
+            }
+        )
+        report = await client.billing_latency(group_by=["model"])
+        assert isinstance(report, LatencyReport)
+        assert report.rows[0].p95_ms == 920
+
+
+@pytest.mark.asyncio
+async def test_stats_returns_full_snapshot() -> None:
+    async with respx.mock(base_url="http://canon") as mock, CanonClient(
+        base_url="http://canon"
+    ) as client:
+        mock.get("/api/v1/stats").respond(
+            json={
+                "generated_at": "2026-05-18T17:00:00Z",
+                "sources": {
+                    "total": 1,
+                    "by_kind": {"pdf": 1},
+                    "by_status": {"ingested": 1},
+                    "total_bytes": 1024,
+                },
+                "knowledge_items": {
+                    "total": 0,
+                    "by_status": {},
+                    "by_domain": {},
+                },
+                "knowledge_versions": 0,
+                "candidates": {"total": 0, "by_status": {}},
+                "chunks": {"total": 0, "embedded": 0, "embedded_pct": 0.0},
+                "ingest_jobs": {"total": 0, "by_status": {}, "avg_attempts": 0.0},
+                "cost": {
+                    "total_events": 0,
+                    "cost_usd_24h": "0",
+                    "cost_usd_30d": "0",
+                },
+            }
+        )
+        snap = await client.stats()
+        assert isinstance(snap, CorpusStats)
+        assert snap.sources.total == 1
 
 
 @pytest.mark.asyncio

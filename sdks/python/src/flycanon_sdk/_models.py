@@ -519,3 +519,137 @@ class BillingReport(BaseModel):
     rows: list[BillingRow] = Field(default_factory=list)
     total_cost_usd: str = "0"
     total_calls: int = 0
+
+
+class CostEvent(BaseModel):
+    """Single ``canon_cost_events`` row, surfaced as a DTO."""
+
+    id: int
+    agent_name: str
+    model: str
+    input_tokens: int = 0
+    output_tokens: int = 0
+    total_tokens: int = 0
+    cost_usd: str
+    latency_ms: int | None = None
+    actor: str | None = None
+    correlation_id: str | None = None
+    subject_kind: str | None = None
+    subject_id: str | None = None
+    occurred_at: datetime
+
+
+class CostEventsPage(BaseModel):
+    rows: list[CostEvent] = Field(default_factory=list)
+    limit: int
+    offset: int
+
+
+class BillingWindow(BaseModel):
+    since: datetime
+    calls: int = 0
+    input_tokens: int = 0
+    output_tokens: int = 0
+    total_tokens: int = 0
+    cost_usd: str = "0"
+    top_model: str | None = None
+    top_model_cost_usd: str = "0"
+    top_actor: str | None = None
+    top_actor_cost_usd: str = "0"
+
+
+class BillingSummary(BaseModel):
+    generated_at: datetime
+    last_24h: BillingWindow
+    last_7d: BillingWindow
+    last_30d: BillingWindow
+
+
+class TopConsumerRow(BaseModel):
+    dimension: str
+    value: str | None = None
+    input_tokens: int = 0
+    output_tokens: int = 0
+    total_tokens: int = 0
+    cost_usd: str = "0"
+    calls: int = 0
+
+
+class TopConsumersReport(BaseModel):
+    dimension: str
+    rows: list[TopConsumerRow] = Field(default_factory=list)
+
+
+class SubjectCostRow(BaseModel):
+    subject_kind: str | None = None
+    subject_id: str | None = None
+    input_tokens: int = 0
+    output_tokens: int = 0
+    total_tokens: int = 0
+    cost_usd: str = "0"
+    calls: int = 0
+
+
+class SubjectCostReport(BaseModel):
+    rows: list[SubjectCostRow] = Field(default_factory=list)
+
+
+class LatencyRow(BaseModel):
+    group: dict[str, str] = Field(default_factory=dict)
+    count: int = 0
+    avg_ms: int = 0
+    p50_ms: int = 0
+    p95_ms: int = 0
+    p99_ms: int = 0
+    max_ms: int = 0
+
+
+class LatencyReport(BaseModel):
+    rows: list[LatencyRow] = Field(default_factory=list)
+
+
+class SourceStats(BaseModel):
+    total: int = 0
+    by_kind: dict[str, int] = Field(default_factory=dict)
+    by_status: dict[str, int] = Field(default_factory=dict)
+    total_bytes: int = 0
+
+
+class KnowledgeItemStats(BaseModel):
+    total: int = 0
+    by_status: dict[str, int] = Field(default_factory=dict)
+    by_domain: dict[str, int] = Field(default_factory=dict)
+
+
+class CandidateStats(BaseModel):
+    total: int = 0
+    by_status: dict[str, int] = Field(default_factory=dict)
+
+
+class ChunkStats(BaseModel):
+    total: int = 0
+    embedded: int = 0
+    embedded_pct: float = 0.0
+
+
+class JobStats(BaseModel):
+    total: int = 0
+    by_status: dict[str, int] = Field(default_factory=dict)
+    avg_attempts: float = 0.0
+
+
+class CostStreamStats(BaseModel):
+    total_events: int = 0
+    cost_usd_24h: str = "0"
+    cost_usd_30d: str = "0"
+
+
+class CorpusStats(BaseModel):
+    generated_at: datetime
+    sources: SourceStats
+    knowledge_items: KnowledgeItemStats
+    knowledge_versions: int = 0
+    candidates: CandidateStats
+    chunks: ChunkStats
+    ingest_jobs: JobStats
+    cost: CostStreamStats

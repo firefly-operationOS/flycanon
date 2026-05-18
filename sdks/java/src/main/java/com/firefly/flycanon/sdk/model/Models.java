@@ -370,4 +370,146 @@ public final class Models {
             @JsonProperty("total_cost_usd") String totalCostUsd,
             @JsonProperty("total_calls") int totalCalls) {
     }
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public record CostEvent(
+            long id,
+            @JsonProperty("agent_name") String agentName,
+            String model,
+            @JsonProperty("input_tokens") long inputTokens,
+            @JsonProperty("output_tokens") long outputTokens,
+            @JsonProperty("total_tokens") long totalTokens,
+            @JsonProperty("cost_usd") String costUsd,
+            @JsonProperty("latency_ms") Integer latencyMs,
+            String actor,
+            @JsonProperty("correlation_id") String correlationId,
+            @JsonProperty("subject_kind") String subjectKind,
+            @JsonProperty("subject_id") String subjectId,
+            @JsonProperty("occurred_at") OffsetDateTime occurredAt) {
+    }
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public record CostEventsPage(List<CostEvent> rows, int limit, int offset) {
+    }
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public record BillingWindow(
+            @JsonProperty("since") OffsetDateTime since,
+            int calls,
+            @JsonProperty("input_tokens") long inputTokens,
+            @JsonProperty("output_tokens") long outputTokens,
+            @JsonProperty("total_tokens") long totalTokens,
+            @JsonProperty("cost_usd") String costUsd,
+            @JsonProperty("top_model") String topModel,
+            @JsonProperty("top_model_cost_usd") String topModelCostUsd,
+            @JsonProperty("top_actor") String topActor,
+            @JsonProperty("top_actor_cost_usd") String topActorCostUsd) {
+    }
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public record BillingSummary(
+            @JsonProperty("generated_at") OffsetDateTime generatedAt,
+            @JsonProperty("last_24h") BillingWindow last24h,
+            @JsonProperty("last_7d") BillingWindow last7d,
+            @JsonProperty("last_30d") BillingWindow last30d) {
+    }
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public record TopConsumerRow(
+            String dimension,
+            String value,
+            @JsonProperty("input_tokens") long inputTokens,
+            @JsonProperty("output_tokens") long outputTokens,
+            @JsonProperty("total_tokens") long totalTokens,
+            @JsonProperty("cost_usd") String costUsd,
+            int calls) {
+    }
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public record TopConsumersReport(String dimension, List<TopConsumerRow> rows) {
+    }
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public record SubjectCostRow(
+            @JsonProperty("subject_kind") String subjectKind,
+            @JsonProperty("subject_id") String subjectId,
+            @JsonProperty("input_tokens") long inputTokens,
+            @JsonProperty("output_tokens") long outputTokens,
+            @JsonProperty("total_tokens") long totalTokens,
+            @JsonProperty("cost_usd") String costUsd,
+            int calls) {
+    }
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public record SubjectCostReport(List<SubjectCostRow> rows) {
+    }
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public record LatencyRow(
+            Map<String, String> group,
+            int count,
+            @JsonProperty("avg_ms") int avgMs,
+            @JsonProperty("p50_ms") int p50Ms,
+            @JsonProperty("p95_ms") int p95Ms,
+            @JsonProperty("p99_ms") int p99Ms,
+            @JsonProperty("max_ms") int maxMs) {
+    }
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public record LatencyReport(List<LatencyRow> rows) {
+    }
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public record SourceStats(
+            int total,
+            @JsonProperty("by_kind") Map<String, Integer> byKind,
+            @JsonProperty("by_status") Map<String, Integer> byStatus,
+            @JsonProperty("total_bytes") long totalBytes) {
+    }
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public record KnowledgeItemStats(
+            int total,
+            @JsonProperty("by_status") Map<String, Integer> byStatus,
+            @JsonProperty("by_domain") Map<String, Integer> byDomain) {
+    }
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public record CandidateStats(
+            int total,
+            @JsonProperty("by_status") Map<String, Integer> byStatus) {
+    }
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public record ChunkStats(
+            int total,
+            int embedded,
+            @JsonProperty("embedded_pct") double embeddedPct) {
+    }
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public record JobStats(
+            int total,
+            @JsonProperty("by_status") Map<String, Integer> byStatus,
+            @JsonProperty("avg_attempts") double avgAttempts) {
+    }
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public record CostStreamStats(
+            @JsonProperty("total_events") long totalEvents,
+            @JsonProperty("cost_usd_24h") String costUsd24h,
+            @JsonProperty("cost_usd_30d") String costUsd30d) {
+    }
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public record CorpusStats(
+            @JsonProperty("generated_at") OffsetDateTime generatedAt,
+            SourceStats sources,
+            @JsonProperty("knowledge_items") KnowledgeItemStats knowledgeItems,
+            @JsonProperty("knowledge_versions") int knowledgeVersions,
+            CandidateStats candidates,
+            ChunkStats chunks,
+            @JsonProperty("ingest_jobs") JobStats ingestJobs,
+            CostStreamStats cost) {
+    }
 }

@@ -25,7 +25,10 @@ from flycanon_sdk._models import (
     AnswerResponse,
     AuditPage,
     BillingReport,
+    BillingSummary,
     BulkSourcesResponse,
+    CorpusStats,
+    CostEventsPage,
     CandidateRecord,
     CandidatesPage,
     ConflictScanRequest,
@@ -46,6 +49,7 @@ from flycanon_sdk._models import (
     KnowledgeItemsPage,
     KnowledgeRelation,
     KnowledgeVersion,
+    LatencyReport,
     ProposeCandidateRequest,
     Provenance,
     RejectCandidateRequest,
@@ -56,8 +60,10 @@ from flycanon_sdk._models import (
     SourceRecord,
     SourcesPage,
     StaleReport,
+    SubjectCostReport,
     SubmitSourceJsonPayload,
     SuggestionsResponse,
+    TopConsumersReport,
     SupersedeKnowledgeRequest,
     TaxonomyNode,
     TaxonomyTree,
@@ -80,7 +86,7 @@ class CanonClient:
     ) -> None:
         merged_headers: dict[str, str] = {
             "Accept": "application/json",
-            "User-Agent": "flycanon-sdk-python/26.5.2",
+            "User-Agent": "flycanon-sdk-python/26.5.3",
         }
         if api_key:
             merged_headers["Authorization"] = f"Bearer {api_key}"
@@ -620,6 +626,114 @@ class CanonClient:
             },
         )
         return BillingReport.model_validate(body)
+
+    async def list_cost_events(
+        self,
+        *,
+        actor: str | None = None,
+        agent_name: str | None = None,
+        since: datetime | str | None = None,
+        until: datetime | str | None = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> CostEventsPage:
+        """Per-call drill-down of the cost stream."""
+        body = await self._request(
+            "GET",
+            "/api/v1/billing/events",
+            params={
+                "actor": actor,
+                "agent_name": agent_name,
+                "since": _iso(since),
+                "until": _iso(until),
+                "limit": str(limit),
+                "offset": str(offset),
+            },
+        )
+        return CostEventsPage.model_validate(body)
+
+    async def billing_summary(
+        self,
+        *,
+        actor: str | None = None,
+    ) -> BillingSummary:
+        """Rolling-window cost snapshot (24h / 7d / 30d)."""
+        body = await self._request(
+            "GET",
+            "/api/v1/billing/summary",
+            params={"actor": actor},
+        )
+        return BillingSummary.model_validate(body)
+
+    async def billing_top(
+        self,
+        *,
+        dimension: str = "model",
+        since: datetime | str | None = None,
+        until: datetime | str | None = None,
+        limit: int = 10,
+    ) -> TopConsumersReport:
+        """Top-N consumers on a single dimension."""
+        body = await self._request(
+            "GET",
+            "/api/v1/billing/top",
+            params={
+                "dimension": dimension,
+                "since": _iso(since),
+                "until": _iso(until),
+                "limit": str(limit),
+            },
+        )
+        return TopConsumersReport.model_validate(body)
+
+    async def billing_by_subject(
+        self,
+        *,
+        subject_kind: str | None = None,
+        since: datetime | str | None = None,
+        until: datetime | str | None = None,
+        limit: int = 20,
+    ) -> SubjectCostReport:
+        """Cost attribution per ``(subject_kind, subject_id)``."""
+        body = await self._request(
+            "GET",
+            "/api/v1/billing/by-subject",
+            params={
+                "subject_kind": subject_kind,
+                "since": _iso(since),
+                "until": _iso(until),
+                "limit": str(limit),
+            },
+        )
+        return SubjectCostReport.model_validate(body)
+
+    async def billing_latency(
+        self,
+        *,
+        group_by: Iterable[str] | None = None,
+        since: datetime | str | None = None,
+        until: datetime | str | None = None,
+    ) -> LatencyReport:
+        """p50 / p95 / p99 latency per group bucket."""
+        body = await self._request(
+            "GET",
+            "/api/v1/billing/latency",
+            params={
+                "group_by": _csv(group_by) if group_by else None,
+                "since": _iso(since),
+                "until": _iso(until),
+            },
+        )
+        return LatencyReport.model_validate(body)
+
+    # ------------------------------------------------------------------
+    # Corpus inventory
+    # ------------------------------------------------------------------
+
+    async def stats(self) -> CorpusStats:
+        """One-shot corpus + queue + cost-stream snapshot."""
+        body = await self._request("GET", "/api/v1/stats")
+        return CorpusStats.model_validate(body)
 
     # ------------------------------------------------------------------
     # Taxonomy
