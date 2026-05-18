@@ -16,6 +16,7 @@ from flycanon.core.mappers.knowledge_mapper import (
     to_knowledge_item,
     to_knowledge_version,
 )
+from flycanon.core.mappers.relation_mapper import to_knowledge_relation
 from flycanon.core.mappers.source_mapper import to_source_record
 from flycanon.core.mappers.taxonomy_mapper import to_taxonomy_node
 
@@ -24,6 +25,7 @@ __all__ = [
     "to_candidate_record",
     "to_citation",
     "to_knowledge_item",
+    "to_knowledge_relation",
     "to_knowledge_version",
     "to_source_record",
     "to_taxonomy_node",

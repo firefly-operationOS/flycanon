@@ -18,11 +18,15 @@ from flycanon.core.mappers import (
     to_knowledge_item,
     to_knowledge_version,
 )
+from flycanon.core.mappers import to_knowledge_relation
 from flycanon.core.services.knowledge import (
     KnowledgeDiffService,
+    KnowledgeGraphService,
+    KnowledgeRelationService,
     KnowledgeService,
     ProvenanceService,
 )
+from flycanon.interfaces.dtos.graph import KnowledgeGraph, MermaidGraph
 from flycanon.interfaces.dtos.knowledge import (
     CreateKnowledgeRequest,
     KnowledgeItem,
@@ -33,6 +37,11 @@ from flycanon.interfaces.dtos.knowledge import (
     RetireKnowledgeRequest,
     SupersedeKnowledgeRequest,
     UpdateKnowledgeRequest,
+)
+from flycanon.interfaces.dtos.relation import (
+    CreateRelationRequest,
+    KnowledgeRelation,
+    KnowledgeRelations,
 )
 from flycanon.interfaces.enums import Domain, Jurisdiction, KnowledgeStatus
 from flycanon.models.repositories import KnowledgeRepository
@@ -264,11 +273,157 @@ class GetKnowledgeDiffHandler(QueryHandler[GetKnowledgeDiffQuery, KnowledgeVersi
         )
 
 
+# ---------------------------------------------------------------------------
+# Relations
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class AddKnowledgeRelationCommand(Command[KnowledgeRelation]):
+    from_item_id: str
+    request: CreateRelationRequest
+    correlation_id: str | None = None
+
+
+@command_handler
+@service
+class AddKnowledgeRelationHandler(
+    CommandHandler[AddKnowledgeRelationCommand, KnowledgeRelation]
+):
+    def __init__(self, relations: KnowledgeRelationService) -> None:
+        super().__init__()
+        self._relations = relations
+
+    async def do_handle(self, command: AddKnowledgeRelationCommand) -> KnowledgeRelation:
+        row = await self._relations.add(
+            command.from_item_id,
+            command.request,
+            correlation_id=command.correlation_id,
+        )
+        return to_knowledge_relation(row)
+
+
+@dataclass(frozen=True)
+class RemoveKnowledgeRelationCommand(Command[None]):
+    relation_id: str
+    actor: str | None = None
+    correlation_id: str | None = None
+
+
+@command_handler
+@service
+class RemoveKnowledgeRelationHandler(
+    CommandHandler[RemoveKnowledgeRelationCommand, None]
+):
+    def __init__(self, relations: KnowledgeRelationService) -> None:
+        super().__init__()
+        self._relations = relations
+
+    async def do_handle(self, command: RemoveKnowledgeRelationCommand) -> None:
+        await self._relations.remove(
+            command.relation_id,
+            actor=command.actor,
+            correlation_id=command.correlation_id,
+        )
+
+
+@dataclass(frozen=True)
+class ListKnowledgeRelationsQuery(Query[KnowledgeRelations]):
+    item_id: str
+
+
+@query_handler
+@service
+class ListKnowledgeRelationsHandler(
+    QueryHandler[ListKnowledgeRelationsQuery, KnowledgeRelations]
+):
+    def __init__(self, relations: KnowledgeRelationService) -> None:
+        super().__init__()
+        self._relations = relations
+
+    async def do_handle(self, query: ListKnowledgeRelationsQuery) -> KnowledgeRelations:
+        out_rows, in_rows = await self._relations.list_for_item(query.item_id)
+        return KnowledgeRelations(
+            item_id=query.item_id,
+            outgoing=[to_knowledge_relation(r) for r in out_rows],
+            incoming=[to_knowledge_relation(r) for r in in_rows],
+        )
+
+
+# ---------------------------------------------------------------------------
+# Graph
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class GetKnowledgeGraphQuery(Query[KnowledgeGraph]):
+    domains: list[Domain] = field(default_factory=list)
+    jurisdictions: list[Jurisdiction] = field(default_factory=list)
+    statuses: list[KnowledgeStatus] = field(default_factory=list)
+    include_sources: bool = True
+    limit: int = 500
+
+
+@query_handler
+@service
+class GetKnowledgeGraphHandler(
+    QueryHandler[GetKnowledgeGraphQuery, KnowledgeGraph]
+):
+    def __init__(self, graph_service: KnowledgeGraphService) -> None:
+        super().__init__()
+        self._graph = graph_service
+
+    async def do_handle(self, query: GetKnowledgeGraphQuery) -> KnowledgeGraph:
+        return await self._graph.build(
+            domains=query.domains or None,
+            jurisdictions=query.jurisdictions or None,
+            statuses=query.statuses or None,
+            include_sources=query.include_sources,
+            limit=query.limit,
+        )
+
+
+@dataclass(frozen=True)
+class GetKnowledgeGraphMermaidQuery(Query[MermaidGraph]):
+    domains: list[Domain] = field(default_factory=list)
+    jurisdictions: list[Jurisdiction] = field(default_factory=list)
+    statuses: list[KnowledgeStatus] = field(default_factory=list)
+    include_sources: bool = True
+    limit: int = 200
+
+
+@query_handler
+@service
+class GetKnowledgeGraphMermaidHandler(
+    QueryHandler[GetKnowledgeGraphMermaidQuery, MermaidGraph]
+):
+    def __init__(self, graph_service: KnowledgeGraphService) -> None:
+        super().__init__()
+        self._graph = graph_service
+
+    async def do_handle(
+        self, query: GetKnowledgeGraphMermaidQuery
+    ) -> MermaidGraph:
+        return await self._graph.build_mermaid(
+            domains=query.domains or None,
+            jurisdictions=query.jurisdictions or None,
+            statuses=query.statuses or None,
+            include_sources=query.include_sources,
+            limit=query.limit,
+        )
+
+
 __all__ = [
+    "AddKnowledgeRelationCommand",
+    "AddKnowledgeRelationHandler",
     "CreateKnowledgeCommand",
     "CreateKnowledgeHandler",
     "GetKnowledgeDiffHandler",
     "GetKnowledgeDiffQuery",
+    "GetKnowledgeGraphHandler",
+    "GetKnowledgeGraphMermaidHandler",
+    "GetKnowledgeGraphMermaidQuery",
+    "GetKnowledgeGraphQuery",
     "GetKnowledgeHandler",
     "GetKnowledgeHistoryHandler",
     "GetKnowledgeHistoryQuery",
@@ -277,6 +432,10 @@ __all__ = [
     "GetProvenanceQuery",
     "ListKnowledgeHandler",
     "ListKnowledgeQuery",
+    "ListKnowledgeRelationsHandler",
+    "ListKnowledgeRelationsQuery",
+    "RemoveKnowledgeRelationCommand",
+    "RemoveKnowledgeRelationHandler",
     "RetireKnowledgeCommand",
     "RetireKnowledgeHandler",
     "SupersedeKnowledgeCommand",

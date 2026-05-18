@@ -11,6 +11,7 @@ from flycanon.interfaces.enums.candidate_status import CandidateStatus
 from flycanon.interfaces.enums.domain import Domain
 from flycanon.interfaces.enums.jurisdiction import Jurisdiction
 from flycanon.interfaces.enums.knowledge_status import KnowledgeStatus
+from flycanon.interfaces.enums.relation_kind import RelationKind
 from flycanon.interfaces.enums.source_kind import SourceKind
 from flycanon.interfaces.enums.source_status import SourceStatus
 
@@ -19,6 +20,7 @@ __all__ = [
     "Domain",
     "Jurisdiction",
     "KnowledgeStatus",
+    "RelationKind",
     "SourceKind",
     "SourceStatus",
 ]
