@@ -23,6 +23,13 @@ from pyfly.data.relational.health import SqlAlchemyHealthIndicator
 
 from flycanon.config import CanonSettings, get_settings
 from flycanon.core.services.audit import AuditService
+from flycanon.core.services.binary import (
+    BinaryNormalizer,
+    GotenbergConverter,
+    LibreOfficeConverter,
+    OfficeConverter,
+)
+from flycanon.core.services.binary.office_converter import NoOpOfficeConverter
 from flycanon.core.services.consolidation import (
     CandidateService,
     Consolidator,
@@ -300,10 +307,40 @@ class CanonCoreConfiguration:
             fallback_model=settings.answer_fallback_model,
         )
 
+    # ------------------------------------------------------------------
+    # Binary normalisation
+    #
+    # PdfGuard, ImageNormalizer, ArchiveUnpacker, EmailUnpacker, and
+    # BinaryNormalizer itself carry ``@service`` decorators and are
+    # autoscanned via the ``flycanon.core.services`` scan path -- they
+    # don't need explicit @bean factories.
+    #
+    # The OfficeConverter selection is settings-driven so we keep the
+    # bean factory; the BinaryNormalizer takes it as a constructor
+    # arg through pyfly's auto-resolution against the
+    # :class:`OfficeConverter` protocol.
+    # ------------------------------------------------------------------
+
+    @bean
+    def office_converter(self, settings: CanonSettings) -> OfficeConverter:
+        kind = (settings.office_converter or "none").lower()
+        if kind in {"none", "", "disabled"}:
+            return NoOpOfficeConverter()
+        if kind == "gotenberg":
+            return GotenbergConverter(settings=settings)
+        if kind == "libreoffice":
+            return LibreOfficeConverter(settings=settings)
+        raise ValueError(
+            f"unknown FLYCANON_OFFICE_CONVERTER={settings.office_converter!r}; "
+            "expected 'none', 'gotenberg', or 'libreoffice'"
+        )
+
     @bean
     def intake_service(
         self,
+        binary_normalizer: BinaryNormalizer,
         ingestion_service: IngestionService,
+        loader_registry: LoaderRegistry,
         embedding_service: EmbeddingService,
         index_service: IndexService,
         source_repository: SourceRepository,
@@ -312,7 +349,9 @@ class CanonCoreConfiguration:
         settings: CanonSettings,
     ) -> IntakeService:
         return IntakeService(
+            binary_normalizer=binary_normalizer,
             ingestion=ingestion_service,
+            loaders=loader_registry,
             embeddings=embedding_service,
             indexer=index_service,
             source_repository=source_repository,
