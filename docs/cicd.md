@@ -68,7 +68,7 @@ required by GHCR) doesn't bite.
 | Trigger | Resulting tags |
 |---------|----------------|
 | `push` to `main` | `main`, `sha-<short>`, `latest` |
-| `push` of `v26.5.1` | `26.5.1`, `26.5`, `26`, `v26.5.1`, `latest` |
+| `push` of `v26.5.4` | `26.5.4`, `26.5`, `26`, `v26.5.4`, `latest` |
 | `workflow_dispatch` | `manual-<run-id>` |
 
 Tag computation is delegated to
@@ -119,7 +119,7 @@ because the PyTorch + HuggingFace wheels add ~2.5 GB per architecture
 
 | Tag | Arch | Notes |
 |-----|------|-------|
-| `:latest`, `:26.5.1`, `:main` | `linux/amd64` + `linux/arm64` | Default pull on either arch picks the right manifest transparently. |
+| `:latest`, `:26.5.4`, `:main` | `linux/amd64` + `linux/arm64` | Default pull on either arch picks the right manifest transparently. |
 
 Pull explicitly with `--platform`:
 
@@ -160,7 +160,7 @@ Consumer setup (in any project depending on flycanon-sdk):
 <dependency>
   <groupId>com.firefly</groupId>
   <artifactId>flycanon-sdk</artifactId>
-  <version>26.5.1</version>
+  <version>26.5.4</version>
 </dependency>
 
 <repositories>
@@ -196,7 +196,7 @@ The workflow:
 Consumer setup:
 
 ```bash
-uv add https://github.com/firefly-operationOS/flycanon/releases/download/v26.5.1/flycanon_sdk-26.5.1-py3-none-any.whl
+uv add https://github.com/firefly-operationOS/flycanon/releases/download/v26.5.4/flycanon_sdk-26.5.4-py3-none-any.whl
 ```
 
 Or pin in `pyproject.toml`:
@@ -206,11 +206,11 @@ Or pin in `pyproject.toml`:
 dependencies = ["flycanon-sdk"]
 
 [tool.uv.sources]
-flycanon-sdk = { url = "https://github.com/firefly-operationOS/flycanon/releases/download/v26.5.1/flycanon_sdk-26.5.1-py3-none-any.whl" }
+flycanon-sdk = { url = "https://github.com/firefly-operationOS/flycanon/releases/download/v26.5.4/flycanon_sdk-26.5.4-py3-none-any.whl" }
 ```
 
-**PEP 440 normalisation.** Tag `v26.05.01` produces the wheel name
-`flycanon_sdk-26.5.1-py3-none-any.whl` (leading zeros stripped).
+**PEP 440 normalisation.** Tag `v26.05.04` produces the wheel name
+`flycanon_sdk-26.5.4-py3-none-any.whl` (leading zeros stripped).
 The workflow computes both `TAG_VERSION` (matches the git tag) and
 `WHEEL_VERSION` (the PEP 440 form) so the release-notes install
 snippet points at the right asset URL.
@@ -266,10 +266,10 @@ keys, Anthropic API key, ...) is **not** baked into any CI workflow
 | Symptom | Likely cause | Fix |
 |---------|--------------|-----|
 | `docker-build` job fails on `COPY --from=pyfly`/`agentic` | Sibling clone step skipped or branch ref drifted | Re-trigger; check `PYFLY_REF` / `AGENTIC_REF` env vars match the published sibling branch. |
-| `sdk-java` fails with "Failed to deploy artifacts: ... 422 Unprocessable Entity" | Version already published to GitHub Packages -- you can't re-deploy the same coordinates. | Bump the patch version (`v26.5.2 -> v26.5.3`) and retag. |
+| `sdk-java` fails with "Failed to deploy artifacts: ... 422 Unprocessable Entity" | Version already published to GitHub Packages -- you can't re-deploy the same coordinates. | Bump the patch version (`v26.5.2 -> v26.5.4`) and retag. |
 | `actions/attest-build-provenance` step shows red but the image still landed | Org doesn't have Attestations enabled. The step is advisory (`continue-on-error: true`), the image is valid. | Optional: enable Attestations on the org. |
 | `unit` job hits `ModuleNotFoundError: pyfly` / `fireflyframework_agentic` | The sibling-repo clone step failed silently. | Inspect the `Clone sibling firefly framework repos` step's log; verify the public clone URL + branch. |
-| Python SDK wheel filename does not match the tag (`v26.05.01` vs `26.5.1`) | PEP 440 normalisation -- expected behaviour. | The release-notes step computes `WHEEL_VERSION` separately; the install URL in the release body is correct. |
+| Python SDK wheel filename does not match the tag (`v26.05.04` vs `26.5.4`) | PEP 440 normalisation -- expected behaviour. | The release-notes step computes `WHEEL_VERSION` separately; the install URL in the release body is correct. |
 
 For runtime / deployment failures (image runs but service crashes,
 embeddings unavailable, ...), see

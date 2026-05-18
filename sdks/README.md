@@ -18,8 +18,8 @@ see the top-level [LICENSE](../LICENSE)).
 | [**Java**](java/README.md)     | **Spring Boot 3.5.9 + Spring `RestClient` + Jackson. Java 25 (LTS). `groupId = com.firefly`.** Ships an `@AutoConfiguration`. | You're integrating from a Spring Boot 3.5.x application — declare the dependency and inject the `CanonClient` bean. |
 
 Each SDK pins its version to the service's CalVer (`YY.MM.PP`), so
-`flycanon-sdk@26.5.1` is the matching client for service version
-`26.5.1`.
+`flycanon-sdk@26.5.4` is the matching client for service version
+`26.5.4`.
 
 Quickstarts:
 

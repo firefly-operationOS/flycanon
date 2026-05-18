@@ -27,15 +27,14 @@ from flycanon_sdk._models import (
     BillingReport,
     BillingSummary,
     BulkSourcesResponse,
-    CorpusStats,
-    CostEventsPage,
     CandidateRecord,
     CandidatesPage,
     ConflictScanRequest,
     ConflictScanResponse,
     Conversation,
-    ConversationHeader,
     ConversationTurn,
+    CorpusStats,
+    CostEventsPage,
     CreateConversationRequest,
     CreateConversationTurnRequest,
     CreateKnowledgeRequest,
@@ -63,10 +62,10 @@ from flycanon_sdk._models import (
     SubjectCostReport,
     SubmitSourceJsonPayload,
     SuggestionsResponse,
-    TopConsumersReport,
     SupersedeKnowledgeRequest,
     TaxonomyNode,
     TaxonomyTree,
+    TopConsumersReport,
     UpdateKnowledgeRequest,
     VersionInfo,
 )
@@ -86,7 +85,7 @@ class CanonClient:
     ) -> None:
         merged_headers: dict[str, str] = {
             "Accept": "application/json",
-            "User-Agent": "flycanon-sdk-python/26.5.3",
+            "User-Agent": "flycanon-sdk-python/26.5.4",
         }
         if api_key:
             merged_headers["Authorization"] = f"Bearer {api_key}"
@@ -103,7 +102,7 @@ class CanonClient:
     # Async context manager
     # ------------------------------------------------------------------
 
-    async def __aenter__(self) -> "CanonClient":
+    async def __aenter__(self) -> CanonClient:
         return self
 
     async def __aexit__(

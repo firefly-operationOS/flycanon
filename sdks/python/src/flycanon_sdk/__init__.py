@@ -19,8 +19,8 @@ from flycanon_sdk._models import (
     BulkSourceResult,
     BulkSourcesResponse,
     CandidateRecord,
-    CandidateStats,
     CandidatesPage,
+    CandidateStats,
     ChunkStats,
     Citation,
     ConflictScanRequest,
@@ -47,8 +47,8 @@ from flycanon_sdk._models import (
     KnowledgeFieldChange,
     KnowledgeGraph,
     KnowledgeItem,
-    KnowledgeItemStats,
     KnowledgeItemsPage,
+    KnowledgeItemStats,
     KnowledgeRelation,
     KnowledgeVersion,
     LatencyReport,
@@ -63,8 +63,8 @@ from flycanon_sdk._models import (
     SearchResponse,
     SourceMetadata,
     SourceRecord,
-    SourceStats,
     SourcesPage,
+    SourceStats,
     StaleItem,
     StaleReport,
     SubjectCostReport,
@@ -72,15 +72,15 @@ from flycanon_sdk._models import (
     SubmitSourceJsonPayload,
     SuggestionsResponse,
     SupersedeKnowledgeRequest,
-    TopConsumerRow,
-    TopConsumersReport,
     TaxonomyNode,
     TaxonomyTree,
+    TopConsumerRow,
+    TopConsumersReport,
     UpdateKnowledgeRequest,
     VersionInfo,
 )
 
-__version__ = "26.5.3"
+__version__ = "26.5.4"
 
 __all__ = [
     "AcceptCandidateRequest",

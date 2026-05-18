@@ -25,7 +25,7 @@ Knowledge Repository service.
 <dependency>
   <groupId>com.firefly</groupId>
   <artifactId>flycanon-sdk</artifactId>
-  <version>26.5.1</version>
+  <version>26.5.4</version>
 </dependency>
 ```
 
@@ -129,8 +129,8 @@ try {
 ## Versioning
 
 The SDK pins its version to the service's CalVer (`YY.MM.PP`), so
-`flycanon-sdk@26.5.1` is the matching client for service version
-`26.5.1`. Upgrade the SDK in lockstep with the service.
+`flycanon-sdk@26.5.4` is the matching client for service version
+`26.5.4`. Upgrade the SDK in lockstep with the service.
 
 ## License
 

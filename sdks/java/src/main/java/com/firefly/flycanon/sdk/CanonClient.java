@@ -60,7 +60,7 @@ public final class CanonClient {
                 : RestClient.builder())
                 .baseUrl(builder.baseUrl)
                 .defaultHeader(HttpHeaders.ACCEPT, MediaType.APPLICATION_JSON_VALUE)
-                .defaultHeader(HttpHeaders.USER_AGENT, "flycanon-sdk-java/26.5.3");
+                .defaultHeader(HttpHeaders.USER_AGENT, "flycanon-sdk-java/26.5.4");
         Optional.ofNullable(builder.apiKey)
                 .filter(k -> !k.isBlank())
                 .ifPresent(k -> rcb.defaultHeader(HttpHeaders.AUTHORIZATION, "Bearer " + k));

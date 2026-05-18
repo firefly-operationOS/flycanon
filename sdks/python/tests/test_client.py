@@ -3,7 +3,6 @@
 
 from __future__ import annotations
 
-import httpx
 import pytest
 import respx
 
@@ -18,13 +17,10 @@ from flycanon_sdk import (
     CostEventsPage,
     CreateConversationTurnRequest,
     CreateRelationRequest,
-    Hit,
     IngestJob,
     KnowledgeDiff,
     KnowledgeGraph,
-    KnowledgeItem,
     LatencyReport,
-    ProposeCandidateRequest,
     RelationsList,
     SourceMetadata,
     StaleReport,
@@ -44,7 +40,7 @@ async def test_version_returns_version_info() -> None:
         mock.get("/api/v1/version").respond(
             json={
                 "service": "flycanon",
-                "version": "26.5.1",
+                "version": "26.5.4",
                 "embedding_model": "openai:text-embedding-3-small",
                 "answer_model": "anthropic:claude-sonnet-4-6",
                 "answer_fallback_model": "openai:gpt-4o",

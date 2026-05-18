@@ -18,7 +18,7 @@ a Spring Boot 3.5.x application on Java 25.
 <dependency>
   <groupId>com.firefly</groupId>
   <artifactId>flycanon-sdk</artifactId>
-  <version>26.5.1</version>
+  <version>26.5.4</version>
 </dependency>
 ```
 
