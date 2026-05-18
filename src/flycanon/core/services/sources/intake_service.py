@@ -47,6 +47,13 @@ from flycanon.core.services.embeddings import EmbeddingService
 from flycanon.core.services.ingestion import IngestionService, LoadedDocument
 from flycanon.core.services.ingestion.loaders import LoaderRegistry
 from flycanon.core.services.metadata import MetadataExtractor
+from flycanon.core.services.pii import (
+    PiiPolicy,
+    PiiPolicyViolation,
+    PiiScanner,
+    build_pii_scanner,
+)
+from flycanon.core.services.pii.scanner import redact as pii_redact
 from flycanon.core.services.retrieval import IndexService
 from flycanon.interfaces.dtos.source import SourceMetadata, SubmitSourceRequest
 from flycanon.interfaces.enums import SourceKind, SourceStatus
@@ -86,6 +93,19 @@ class IntakeService:
         self._audit = audit
         self._publisher = event_publisher
         self._settings = settings
+        # Resolve the configured PII scanner once at construction.
+        # ``None`` when the scanner is disabled (or the policy is
+        # ``disabled``) -- the submit path short-circuits the check.
+        try:
+            policy = PiiPolicy(settings.pii_policy)
+        except ValueError:
+            policy = PiiPolicy.warn
+        self._pii_policy = policy
+        self._pii_scanner: PiiScanner | None = (
+            build_pii_scanner(settings.pii_scanner)
+            if policy != PiiPolicy.disabled
+            else None
+        )
 
     async def submit(
         self,
@@ -104,6 +124,26 @@ class IntakeService:
             filename=filename,
         )
         merged_kind, merged_content, merged_metadata = self._merge_artifacts(artifacts, filename)
+        # PII guardrail. The scanner operates on the merged text
+        # (decoded UTF-8) so a contaminated child artefact in an
+        # archive triggers the same policy as a top-level hit.
+        pii_findings: list = []
+        if self._pii_scanner is not None and self._pii_policy != PiiPolicy.disabled:
+            text_view = self._decode_for_scan(merged_content)
+            pii_findings = self._pii_scanner.scan(text_view)
+            if pii_findings:
+                if self._pii_policy == PiiPolicy.reject:
+                    raise PiiPolicyViolation(pii_findings)
+                if self._pii_policy == PiiPolicy.redact:
+                    redacted = pii_redact(text_view, pii_findings)
+                    merged_content = redacted.encode("utf-8")
+                merged_metadata.setdefault(
+                    "pii_findings",
+                    [
+                        {"kind": f.kind, "start": f.start, "end": f.end}
+                        for f in pii_findings
+                    ],
+                )
 
         if request.kind != SourceKind.unknown:
             primary_kind = request.kind
@@ -359,6 +399,21 @@ class IntakeService:
             updated_row.n_chunks,
         )
         return updated_row
+
+    @staticmethod
+    def _decode_for_scan(content: bytes) -> str:
+        """Best-effort UTF-8 decode for the PII scanner.
+
+        Binary payloads (PDFs in their canonical form, images,
+        archives that didn't get expanded inline) decode as
+        ``replace`` -- the scanner runs against the parts of the
+        stream that ARE text, and the binary spans become
+        unmatchable byte runs.
+        """
+        try:
+            return content.decode("utf-8")
+        except (UnicodeDecodeError, AttributeError):
+            return content.decode("utf-8", errors="replace") if isinstance(content, bytes) else ""
 
     @staticmethod
     def _first_text(chunks: list[Any]) -> str:

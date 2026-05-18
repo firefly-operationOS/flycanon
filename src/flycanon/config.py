@@ -146,6 +146,17 @@ class CanonSettings(BaseSettings):
     query_expansion_enabled: bool = Field(default=False)
     query_expansion_n: int = Field(default=3, ge=1, le=10)
 
+    # PII detection at ingest.
+    #   scanner: ``regex`` (default, no deps) | ``presidio`` (needs
+    #            the optional presidio-analyzer extra) | ``disabled``.
+    #   policy:  ``warn`` (default -- index as-is, flag the source
+    #            row's metadata for audit review) | ``redact``
+    #            (replace each hit with [REDACTED:<KIND>] before
+    #            chunking) | ``reject`` (fail the intake with
+    #            ``pii_detected``).
+    pii_scanner: str = Field(default="regex")
+    pii_policy: str = Field(default="warn")
+
     # -- Vector store ---------------------------------------------------
     # Backend selector. Every option implements the agentic
     # ``VectorStoreProtocol``; BM25 stays on SQLite regardless of the
