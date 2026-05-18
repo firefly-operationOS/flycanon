@@ -131,6 +131,18 @@ class KnowledgeRepository:
             await session.refresh(row)
             return row
 
+    async def upsert_version_status(self, row: KnowledgeVersionRow) -> KnowledgeVersionRow:
+        """Merge status / supersession pointers on an existing version row.
+
+        Used by ``KnowledgeService.update`` to flip the previous
+        version's status to ``superseded`` without rewriting the
+        version content.
+        """
+        async with self.session() as session:
+            merged = await session.merge(row)
+            await session.flush()
+            return merged
+
     # ------------------------------------------------------------------
     # Citations
     # ------------------------------------------------------------------
