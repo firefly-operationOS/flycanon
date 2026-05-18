@@ -2,7 +2,7 @@
  * Copyright 2026 Firefly Software Solutions Inc.
  * Licensed under the Apache License, Version 2.0.
  */
-package io.firefly.flycanon.sdk;
+package com.firefly.flycanon.sdk;
 
 import org.junit.jupiter.api.Test;
 
@@ -14,7 +14,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class CanonAPIExceptionTest {
 
     @Test
-    void carriesCodeAndStatus() {
+    void carriesCodeStatusAndExtensions() {
         CanonAPIException ex = new CanonAPIException(
                 404,
                 "knowledge_item_not_found",

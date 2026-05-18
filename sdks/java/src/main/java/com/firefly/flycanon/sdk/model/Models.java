@@ -2,7 +2,7 @@
  * Copyright 2026 Firefly Software Solutions Inc.
  * Licensed under the Apache License, Version 2.0.
  */
-package io.firefly.flycanon.sdk.model;
+package com.firefly.flycanon.sdk.model;
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;
@@ -13,11 +13,11 @@ import java.util.Map;
 
 /**
  * Co-located records mirroring the wire shapes flycanon ships. Java
- * records play well with Jackson 2.18 once the parameter-names module
- * is registered (the {@link io.firefly.flycanon.sdk.CanonClient} does
+ * records play well with Jackson once the parameter-names module is
+ * registered (the {@link com.firefly.flycanon.sdk.CanonClient} does
  * that). {@link JsonIgnoreProperties} keeps the client forward-
- * compatible: new fields added by the service on a minor version
- * will not break deserialisation.
+ * compatible: new fields added by the service on a minor version do
+ * not break deserialisation.
  */
 public final class Models {
 
@@ -134,7 +134,9 @@ public final class Models {
     }
 
     @JsonIgnoreProperties(ignoreUnknown = true)
-    public record SearchResponse(List<Hit> hits, @JsonProperty("elapsed_ms") int elapsedMs) {
+    public record SearchResponse(
+            List<Hit> hits,
+            @JsonProperty("elapsed_ms") int elapsedMs) {
     }
 
     @JsonIgnoreProperties(ignoreUnknown = true)

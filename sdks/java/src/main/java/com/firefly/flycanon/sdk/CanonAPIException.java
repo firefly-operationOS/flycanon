@@ -2,14 +2,27 @@
  * Copyright 2026 Firefly Software Solutions Inc.
  * Licensed under the Apache License, Version 2.0.
  */
-package io.firefly.flycanon.sdk;
+package com.firefly.flycanon.sdk;
 
 import java.util.Map;
 
 /**
  * Thrown by {@link CanonClient} on any non-2xx response. Carries the
- * service's stable ``code`` plus the raw ProblemDetails payload so
- * callers can branch without parsing the human-readable detail.
+ * service's stable {@code code} plus the raw ProblemDetails payload
+ * so callers can branch without parsing the human-readable detail.
+ *
+ * <p>Typical usage:
+ * <pre>{@code
+ *   try {
+ *       canonClient.getKnowledge("missing-id");
+ *   } catch (CanonAPIException ex) {
+ *       if ("knowledge_item_not_found".equals(ex.code())) {
+ *           // graceful 404 handling
+ *       } else {
+ *           throw ex;
+ *       }
+ *   }
+ * }</pre>
  */
 public class CanonAPIException extends RuntimeException {
 

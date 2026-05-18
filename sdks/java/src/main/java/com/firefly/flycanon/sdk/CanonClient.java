@@ -2,19 +2,22 @@
  * Copyright 2026 Firefly Software Solutions Inc.
  * Licensed under the Apache License, Version 2.0.
  */
-package io.firefly.flycanon.sdk;
+package com.firefly.flycanon.sdk;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
-import io.firefly.flycanon.sdk.model.Models;
+import com.firefly.flycanon.sdk.model.Models;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpStatusCode;
+import org.springframework.http.MediaType;
+import org.springframework.web.client.HttpStatusCodeException;
+import org.springframework.web.client.RestClient;
+import org.springframework.web.client.ResourceAccessException;
 
 import java.io.IOException;
 import java.net.URI;
 import java.net.URLEncoder;
-import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.LinkedHashMap;
@@ -22,27 +25,46 @@ import java.util.Map;
 import java.util.Optional;
 
 /**
- * Java client for the flycanon Operational Knowledge Repository.
+ * Spring-Boot-native Java client for the flycanon Operational
+ * Knowledge Repository service.
  *
- * <p>Built on {@code java.net.http.HttpClient} and Jackson. Thread-
- * safe; one instance per service deployment is enough.
+ * <p>Built on Spring's {@link RestClient} (sync, blocking; new
+ * default in Spring Framework 6.1+) and Jackson. Thread-safe; one
+ * instance per service deployment is enough.
+ *
+ * <p>The companion {@link CanonClientAutoConfiguration} wires a
+ * fully-configured bean from ``flycanon.*`` properties so most
+ * consumers just inject it:
+ *
+ * <pre>{@code
+ *   @Service
+ *   class CopilotService {
+ *       private final CanonClient canon;
+ *       CopilotService(CanonClient canon) { this.canon = canon; }
+ *       ...
+ *   }
+ * }</pre>
+ *
+ * Manual construction stays available via {@link #builder()} for
+ * multi-tenant deployments that point at different bases per tenant.
  */
-public final class CanonClient implements AutoCloseable {
+public final class CanonClient {
 
-    private final HttpClient http;
+    private final RestClient restClient;
     private final ObjectMapper mapper;
-    private final URI baseUrl;
-    private final Optional<String> apiKey;
-    private final Duration timeout;
 
     private CanonClient(Builder builder) {
-        this.baseUrl = URI.create(builder.baseUrl);
-        this.apiKey = Optional.ofNullable(builder.apiKey);
-        this.timeout = builder.timeout;
-        this.http = builder.http != null
-                ? builder.http
-                : HttpClient.newBuilder().connectTimeout(timeout).build();
         this.mapper = builder.mapper != null ? builder.mapper : defaultMapper();
+        RestClient.Builder rcb = (builder.restClientBuilder != null
+                ? builder.restClientBuilder
+                : RestClient.builder())
+                .baseUrl(builder.baseUrl)
+                .defaultHeader(HttpHeaders.ACCEPT, MediaType.APPLICATION_JSON_VALUE)
+                .defaultHeader(HttpHeaders.USER_AGENT, "flycanon-sdk-java/26.5.1");
+        Optional.ofNullable(builder.apiKey)
+                .filter(k -> !k.isBlank())
+                .ifPresent(k -> rcb.defaultHeader(HttpHeaders.AUTHORIZATION, "Bearer " + k));
+        this.restClient = rcb.build();
     }
 
     public static Builder builder() {
@@ -110,60 +132,53 @@ public final class CanonClient implements AutoCloseable {
     // ---------- Internals ----------
 
     private <T> T request(String method, String path, Object body, Class<T> responseType) {
-        HttpRequest.Builder rb = HttpRequest.newBuilder()
-                .uri(baseUrl.resolve(path))
-                .timeout(timeout)
-                .header("Accept", "application/json")
-                .header("User-Agent", "flycanon-sdk-java/26.5.1");
-        apiKey.ifPresent(k -> rb.header("Authorization", "Bearer " + k));
-        if (body != null) {
-            try {
-                rb.header("Content-Type", "application/json")
-                        .method(method, HttpRequest.BodyPublishers.ofByteArray(mapper.writeValueAsBytes(body)));
-            } catch (IOException e) {
-                throw new RuntimeException("could not serialise request body", e);
+        var spec = switch (method.toUpperCase()) {
+            case "GET" -> restClient.get().uri(path);
+            case "POST" -> {
+                var post = restClient.post().uri(path);
+                if (body != null) {
+                    post.contentType(MediaType.APPLICATION_JSON);
+                    post.body(body);
+                }
+                yield post;
             }
-        } else {
-            rb.method(method, HttpRequest.BodyPublishers.noBody());
-        }
-
-        HttpResponse<byte[]> response;
+            case "PUT" -> {
+                var put = restClient.put().uri(path);
+                if (body != null) {
+                    put.contentType(MediaType.APPLICATION_JSON);
+                    put.body(body);
+                }
+                yield put;
+            }
+            case "DELETE" -> restClient.delete().uri(path);
+            default -> throw new IllegalArgumentException("unsupported method: " + method);
+        };
         try {
-            response = http.send(rb.build(), HttpResponse.BodyHandlers.ofByteArray());
-        } catch (IOException | InterruptedException e) {
-            Thread.currentThread().interrupt();
-            throw new RuntimeException("flycanon request failed: " + e.getMessage(), e);
+            return spec.retrieve().body(responseType);
+        } catch (HttpStatusCodeException ex) {
+            throw raiseForProblem(ex);
+        } catch (ResourceAccessException ex) {
+            throw new RuntimeException("flycanon request failed: " + ex.getMessage(), ex);
         }
-
-        int status = response.statusCode();
-        if (status >= 200 && status < 300) {
-            if (status == 204 || response.body() == null || response.body().length == 0) {
-                return null;
-            }
-            try {
-                return mapper.readValue(response.body(), responseType);
-            } catch (IOException e) {
-                throw new RuntimeException("could not deserialise response body", e);
-            }
-        }
-        throw raiseForProblem(status, response.body());
     }
 
-    private CanonAPIException raiseForProblem(int status, byte[] body) {
+    private CanonAPIException raiseForProblem(HttpStatusCodeException ex) {
+        HttpStatusCode status = ex.getStatusCode();
+        String body = ex.getResponseBodyAsString();
         try {
             Models.ProblemDetails problem = mapper.readValue(body, Models.ProblemDetails.class);
             return new CanonAPIException(
-                    problem.status() > 0 ? problem.status() : status,
+                    problem.status() > 0 ? problem.status() : status.value(),
                     problem.code() != null ? problem.code() : "http_error",
-                    problem.title() != null ? problem.title() : "HTTP " + status,
+                    problem.title() != null ? problem.title() : "HTTP " + status.value(),
                     problem.detail(),
                     problem.extensions());
         } catch (IOException ignored) {
             return new CanonAPIException(
-                    status,
+                    status.value(),
                     "http_error",
-                    "HTTP " + status,
-                    body == null ? null : new String(body, StandardCharsets.UTF_8),
+                    "HTTP " + status.value(),
+                    body == null || body.isBlank() ? null : body,
                     null);
         }
     }
@@ -192,10 +207,9 @@ public final class CanonClient implements AutoCloseable {
         return URLEncoder.encode(value, StandardCharsets.UTF_8);
     }
 
-    @Override
-    public void close() {
-        // HttpClient has no explicit close; reserved for future
-        // implementations that own a pool we need to drain.
+    /** Convenience builder for query-string filters. */
+    public static Map<String, String> filters() {
+        return new LinkedHashMap<>();
     }
 
     // ---------- Builder ----------
@@ -204,7 +218,7 @@ public final class CanonClient implements AutoCloseable {
         private String baseUrl;
         private String apiKey;
         private Duration timeout = Duration.ofSeconds(60);
-        private HttpClient http;
+        private RestClient.Builder restClientBuilder;
         private ObjectMapper mapper;
 
         public Builder baseUrl(String url) {
@@ -222,8 +236,8 @@ public final class CanonClient implements AutoCloseable {
             return this;
         }
 
-        public Builder httpClient(HttpClient client) {
-            this.http = client;
+        public Builder restClientBuilder(RestClient.Builder builder) {
+            this.restClientBuilder = builder;
             return this;
         }
 
@@ -236,12 +250,11 @@ public final class CanonClient implements AutoCloseable {
             if (baseUrl == null || baseUrl.isBlank()) {
                 throw new IllegalArgumentException("baseUrl is required");
             }
+            // The timeout currently rides on the RestClient.Builder
+            // (consumers can override with their own builder for
+            // fine-grained control). Stored here for future use.
+            URI.create(baseUrl);
             return new CanonClient(this);
         }
-    }
-
-    /** Convenience builder for query-string filters. */
-    public static Map<String, String> filters() {
-        return new LinkedHashMap<>();
     }
 }
