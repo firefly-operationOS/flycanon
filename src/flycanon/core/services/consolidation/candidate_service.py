@@ -46,7 +46,6 @@ from flycanon.interfaces.dtos.knowledge import (
 )
 from flycanon.interfaces.enums import CandidateStatus, Domain, Jurisdiction
 from flycanon.models.entities.candidate import CandidateRow
-from flycanon.models.entities.knowledge_chunk import KnowledgeChunkRow
 from flycanon.models.entities.source import SourceRow
 from flycanon.models.repositories.candidate_repository import CandidateRepository
 from flycanon.models.repositories.chunk_repository import ChunkRepository
@@ -157,7 +156,7 @@ class CandidateService:
         if candidate.status != CandidateStatus.proposed.value:
             raise CandidateAlreadyDecided(candidate_id, candidate.status)
 
-        citations = _citations_from_candidate(candidate)
+        citations = await self._citations_from_candidate(candidate)
         domain = Domain(candidate.domain)
         jurisdiction = Jurisdiction(candidate.jurisdiction)
 
@@ -285,6 +284,41 @@ class CandidateService:
                 exc,
             )
 
+    async def _citations_from_candidate(
+        self, candidate: CandidateRow
+    ) -> list[Citation]:
+        """Hydrate the candidate's citations into ``Citation`` DTOs.
+
+        The candidate's ``citations_json`` only stores
+        ``chunk_id`` / ``quote`` / ``relevance`` (per the consolidator
+        output shape). We resolve ``page`` here by batching a single
+        lookup against :class:`ChunkRepository` so the materialised
+        ``KnowledgeVersion`` carries the same page-level breadcrumb
+        the retrieval Hit / provenance graph expose. Without this
+        step the citation table's ``page`` column ends up NULL even
+        when the source chunk has a known page.
+        """
+        raw_citations = candidate.citations_json or []
+        chunk_ids = sorted({raw.get("chunk_id") for raw in raw_citations if raw.get("chunk_id")})
+        page_by_chunk: dict[str, int | None] = {}
+        if chunk_ids:
+            chunk_rows = await self._chunks.get_many(chunk_ids)
+            for row in chunk_rows:
+                page_by_chunk[row.id] = row.page
+        citations: list[Citation] = []
+        for raw in raw_citations:
+            chunk_id = raw.get("chunk_id")
+            citations.append(
+                Citation(
+                    source_id=candidate.source_id,
+                    chunk_id=chunk_id,
+                    quote=raw.get("quote"),
+                    relevance=raw.get("relevance"),
+                    page=page_by_chunk.get(chunk_id) if chunk_id else None,
+                )
+            )
+        return citations
+
 
 def _proposal_to_row(
     *,
@@ -316,15 +350,3 @@ def _proposal_to_row(
     )
 
 
-def _citations_from_candidate(candidate: CandidateRow) -> list[Citation]:
-    citations: list[Citation] = []
-    for raw in candidate.citations_json or []:
-        citations.append(
-            Citation(
-                source_id=candidate.source_id,
-                chunk_id=raw.get("chunk_id"),
-                quote=raw.get("quote"),
-                relevance=raw.get("relevance"),
-            )
-        )
-    return citations
