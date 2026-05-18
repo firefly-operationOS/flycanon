@@ -36,20 +36,61 @@ class IngestJob(BaseModel):
             "Resolved source id once intake completes. ``null`` while the job is queued or running."
         ),
     )
-    attempts: int = Field(ge=0)
-    filename: str | None = Field(default=None)
-    content_type: str | None = Field(default=None)
-    uri: str | None = Field(default=None)
-    content_sha256: str | None = Field(default=None)
-    actor: str | None = Field(default=None)
-    correlation_id: str | None = Field(default=None)
-    callback_url: str | None = Field(default=None)
-    error_code: str | None = Field(default=None)
-    error_message: str | None = Field(default=None)
-    created_at: datetime
-    started_at: datetime | None = Field(default=None)
-    finished_at: datetime | None = Field(default=None)
-    updated_at: datetime
+    attempts: int = Field(
+        ge=0,
+        description="How many times the worker has tried this job (bumped on each retry).",
+    )
+    filename: str | None = Field(
+        default=None,
+        description="Original filename declared at submit time, when available.",
+    )
+    content_type: str | None = Field(
+        default=None,
+        description="Declared content type from the submit request (server still re-sniffs the magic bytes).",
+    )
+    uri: str | None = Field(
+        default=None,
+        description="Optional source URI captured at submit (mirrors ``SourceRecord.uri``).",
+    )
+    content_sha256: str | None = Field(
+        default=None,
+        description="SHA-256 of the raw payload; null until the worker has hashed the content.",
+    )
+    actor: str | None = Field(
+        default=None,
+        description="Caller identity captured at submit. Surfaces on the audit + billing trails.",
+    )
+    correlation_id: str | None = Field(
+        default=None,
+        description=(
+            "W3C correlation id from the originating request -- pivot back to the audit log with this."
+        ),
+    )
+    callback_url: str | None = Field(
+        default=None,
+        description=(
+            "Optional webhook URL the worker POSTs to on completion / failure. "
+            "Receives a ``{job_id, status, source_id, error_code, error_message, occurred_at}`` body."
+        ),
+    )
+    error_code: str | None = Field(
+        default=None,
+        description="Stable error code matching the RFC 7807 ``code`` field. Populated on ``failed``.",
+    )
+    error_message: str | None = Field(
+        default=None,
+        description="Human-readable failure detail. Populated on ``failed``.",
+    )
+    created_at: datetime = Field(description="UTC timestamp of submit.")
+    started_at: datetime | None = Field(
+        default=None,
+        description="UTC timestamp when the worker picked the job up (``null`` while still queued).",
+    )
+    finished_at: datetime | None = Field(
+        default=None,
+        description="UTC timestamp of the terminal transition (``succeeded`` or ``failed``).",
+    )
+    updated_at: datetime = Field(description="UTC timestamp of the last row mutation.")
 
 
 class IngestJobEvent(BaseModel):
@@ -69,13 +110,21 @@ class IngestJobEvent(BaseModel):
             "``embedding``, ``indexing``, ``auditing``, ``finished``."
         )
     )
-    message: str | None = Field(default=None)
-    payload: dict[str, Any] = Field(default_factory=dict)
-    occurred_at: datetime
+    message: str | None = Field(
+        default=None,
+        description="Optional human-readable note. Surfaced verbatim in SSE / list views.",
+    )
+    payload: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Stage-specific structured payload (e.g. ``{chunks: 42}`` on chunking).",
+    )
+    occurred_at: datetime = Field(description="UTC timestamp the event was emitted.")
 
 
 class IngestJobsPage(BaseModel):
-    items: list[IngestJob]
-    total: int = Field(ge=0)
-    offset: int = Field(ge=0)
-    limit: int = Field(ge=1, le=500)
+    """Paged view of recent ingest jobs (``GET /api/v1/jobs``)."""
+
+    items: list[IngestJob] = Field(description="One row per job in the requested page.")
+    total: int = Field(ge=0, description="Total jobs matching the filter (before pagination).")
+    offset: int = Field(ge=0, description="0-based offset of the first row in ``items``.")
+    limit: int = Field(ge=1, le=500, description="Page size requested by the caller (1-500).")
