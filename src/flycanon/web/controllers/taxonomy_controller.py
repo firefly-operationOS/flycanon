@@ -5,6 +5,7 @@ from __future__ import annotations
 
 from pyfly.container import rest_controller
 from pyfly.cqrs import DefaultCommandBus, DefaultQueryBus
+from pyfly.observability.correlation import get_correlation_id
 from pyfly.web import Body, Valid, get_mapping, post_mapping, request_mapping
 
 from flycanon.core.services.taxonomy.handlers import (
@@ -36,4 +37,8 @@ class TaxonomyController:
         request: Valid[Body[CreateTaxonomyNodeRequest]],
     ) -> TaxonomyNode:
         """Attach a new node to the tree."""
-        return await self._commands.send(CreateTaxonomyNodeCommand(request=request))
+        return await self._commands.send(
+            CreateTaxonomyNodeCommand(
+                request=request, correlation_id=get_correlation_id()
+            )
+        )
