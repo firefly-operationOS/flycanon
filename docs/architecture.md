@@ -97,9 +97,22 @@ artefact via `metadata.parent_artifact`.
 
 ## Pluggable retrieval backends
 
-BM25 stays on a file-backed SQLite FTS5 index (portable, no extra
-service, sufficient for the BM25 channel). The dense projection is
-chosen at boot via `FLYCANON_VECTOR_STORE`:
+The BM25 corpus is co-located with the dense projection so hybrid
+retrieval is a single-host operation in the default deployment:
+
+* `FLYCANON_VECTOR_STORE=pgvector` (default) -- BM25 rides on a
+  `tsvector` + GIN index on `canon_chunks.tsv` (a Postgres GENERATED
+  column derived from `content`; see migration `0003_bm25_tsv`). No
+  extra service, no SQLite file -- both projections live in the same
+  operational Postgres. The text-search config defaults to `simple`
+  (multilingual, no stemming); flip
+  `FLYCANON_BM25_TEXT_SEARCH_CONFIG` to `english` / `spanish` / &hellip;
+  for language-aware stemming.
+* Anything else (`sqlite-vec`, `chroma`, `qdrant`, `pinecone`,
+  `memory`) -- BM25 falls back to the file-backed SQLite FTS5 corpus
+  shipped by `fireflyframework-agentic`.
+
+The dense projection is chosen at boot via `FLYCANON_VECTOR_STORE`:
 
 | Value         | Use case                                                                 |
 |---------------|--------------------------------------------------------------------------|

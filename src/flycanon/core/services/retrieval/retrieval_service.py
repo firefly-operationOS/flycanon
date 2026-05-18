@@ -131,7 +131,14 @@ class RetrievalService:
 
     async def _hydrate(self, chunk_hits: Sequence[object]) -> list[Hit]:
         chunk_ids = [getattr(h, "chunk_id", "") for h in chunk_hits]
-        rows = {row.id: row for row in await self._chunk_repo.get_many(chunk_ids)}
+        chunk_rows = await self._chunk_repo.get_many(chunk_ids)
+        rows = {row.id: row for row in chunk_rows}
+        # Batch-resolve the source rows that the matched chunks belong
+        # to so every hit can be enriched with filename / title /
+        # source_kind / uri without N+1 lookups.
+        source_ids = {row.source_id for row in chunk_rows}
+        source_rows = await self._source_repo.get_many(list(source_ids)) if source_ids else []
+        sources_by_id = {row.id: row for row in source_rows}
         hits: list[Hit] = []
         for hit in chunk_hits:
             chunk_id = getattr(hit, "chunk_id", "")
@@ -141,6 +148,27 @@ class RetrievalService:
                 # skip rather than surface a half-resolved row.
                 continue
             metadata = dict(getattr(hit, "metadata", {}) or {})
+            source = sources_by_id.get(row.source_id)
+            if source is not None:
+                metadata.setdefault("source_kind", source.kind)
+                if source.filename:
+                    metadata.setdefault("source_filename", source.filename)
+                if source.uri:
+                    metadata.setdefault("source_uri", source.uri)
+                # Title lives on metadata_json -- prefer the caller's
+                # explicit title, otherwise the extractor-derived one.
+                source_meta = source.metadata_json or {}
+                title = (
+                    source_meta.get("title")
+                    or (source_meta.get("extracted") or {}).get("title")
+                )
+                if title:
+                    metadata.setdefault("source_title", title)
+            # Chunk-level breadcrumbs.
+            if row.section_path:
+                metadata.setdefault("section_path", row.section_path)
+            if row.page is not None:
+                metadata.setdefault("page", str(row.page))
             hits.append(
                 Hit(
                     chunk_id=chunk_id,

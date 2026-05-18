@@ -123,6 +123,21 @@ class CanonSettings(BaseSettings):
     pgvector_table: str = "canon_chunk_vectors"
     pgvector_hnsw_m: int = Field(default=16, ge=4, le=64)
     pgvector_hnsw_ef_construction: int = Field(default=64, ge=8, le=1024)
+    # BM25 / Postgres FTS text-search configuration. ``simple`` is
+    # the safest multilingual default (no stemming, no stopwords);
+    # switch to ``english`` / ``spanish`` / etc. when the deployment
+    # is mono-lingual to get language-aware stemming. Only consulted
+    # when ``FLYCANON_VECTOR_STORE=pgvector`` (the default) -- SQLite
+    # corpus deployments ignore this knob.
+    bm25_text_search_config: str = Field(
+        default="simple",
+        description=(
+            "Postgres ``text-search`` configuration used by the BM25 "
+            "projection on ``canon_chunks.tsv``. ``simple`` for "
+            "multilingual corpora; ``english`` / ``spanish`` / etc. "
+            "for language-specific stemming."
+        ),
+    )
 
     # -- Chroma backend ------------------------------------------------
     chroma_collection: str = "flycanon"

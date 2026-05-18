@@ -84,6 +84,9 @@ class AnswerService:
                 {
                     "chunk_id": hit.chunk_id,
                     "source_id": hit.source_id,
+                    "source_filename": hit.metadata.get("source_filename", ""),
+                    "source_title": hit.metadata.get("source_title", ""),
+                    "source_kind": hit.metadata.get("source_kind", ""),
                     "content": hit.content,
                     "section_path": hit.metadata.get("section_path", ""),
                     "page": hit.metadata.get("page", ""),
@@ -104,26 +107,20 @@ class AnswerService:
                 raise
 
         # Hydrate citations with the full Hit rows so the caller does
-        # not have to make a second call.
+        # not have to make a second call. Goes through the same
+        # ``_hit_dto`` mapper as ``/search`` so citations carry the
+        # rich source-side fields (filename, title, kind, page,
+        # section_path) -- no second ``/sources/{id}`` round-trip
+        # needed in the UI.
+        from flycanon.core.services.query.search_service import _hit_dto
+
         hits_by_id = {hit.chunk_id: hit for hit in result.hits}
         citations: list[Hit] = []
         for chunk_id in output.citation_chunk_ids:
             hit = hits_by_id.get(chunk_id)
             if hit is None:
                 continue
-            citations.append(
-                Hit(
-                    chunk_id=hit.chunk_id,
-                    source_id=hit.source_id,
-                    knowledge_item_id=hit.knowledge_item_id,
-                    knowledge_version=hit.knowledge_version,
-                    content=hit.content,
-                    score=hit.score,
-                    bm25_rank=hit.bm25_rank,
-                    vector_rank=hit.vector_rank,
-                    metadata=dict(hit.metadata or {}),
-                )
-            )
+            citations.append(_hit_dto(hit))
 
         elapsed_ms = int((time.perf_counter() - start) * 1000)
         logger.info(

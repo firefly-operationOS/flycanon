@@ -202,18 +202,30 @@ appends a new version (N+1) and flips the previous version to
     {
       "chunk_id": "ch-...",
       "source_id": "src-...",
+      "source_filename": "Cleargate Business Idea.docx",
+      "source_title": "Cleargate Business Idea",
+      "source_kind": "docx",
+      "source_uri": null,
+      "section_path": "9) Repositorio + Controlador WebFlux",
+      "page": null,
       "knowledge_item_id": null,
       "knowledge_version": null,
-      "content": "Scope > In scope ...",
+      "content": "package com.cleargate.http; ...",
       "score": 0.62,
       "bm25_rank": null,
       "vector_rank": null,
-      "metadata": { "section_path": "Scope > In scope" }
+      "metadata": {}
     }
   ],
   "elapsed_ms": 142
 }
 ```
+
+Every hit carries the rich source-side context (``source_filename``,
+``source_title``, ``source_kind``, ``source_uri``, ``section_path``,
+``page``) at the top level so a UI can render citation labels
+directly. ``metadata`` keeps the forward-compatible bag for fields
+the loader emits beyond the structured set above.
 
 ### `AnswerRequest` / `AnswerResponse`
 
@@ -228,12 +240,30 @@ appends a new version (N+1) and flips the previous version to
 
 ```json
 {
-  "answer": "The scope covers the MVP feature set ...",
+  "answer": "The Cleargate policy engine is a deterministic evaluator built on Spring Boot 3 + WebFlux ...",
   "citations": [
-    { "chunk_id": "ch-...", "source_id": "src-...", "content": "Scope > In scope ...", "score": 0.62, "metadata": {} }
+    {
+      "chunk_id": "ch-...",
+      "source_id": "src-...",
+      "source_filename": "Cleargate Business Idea.docx",
+      "source_title": "Cleargate Business Idea",
+      "source_kind": "docx",
+      "section_path": "9) Repositorio + Controlador WebFlux",
+      "page": null,
+      "content": "package com.cleargate.http; ...",
+      "score": 0.62,
+      "metadata": {}
+    }
   ],
   "model": "anthropic:claude-sonnet-4-6",
   "elapsed_ms": 842,
   "no_answer": false
 }
 ```
+
+The citation list reuses the same enriched ``Hit`` shape returned by
+``/search`` -- ``source_filename`` and ``source_title`` give the
+caller a direct human-readable label, and ``section_path`` / ``page``
+locate the exact span the answer drew from. Grounded "I don't know"
+responses look like ``{"answer": "", "citations": []}`` with
+``no_answer: true``.

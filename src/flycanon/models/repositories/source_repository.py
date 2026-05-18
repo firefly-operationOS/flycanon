@@ -47,6 +47,20 @@ class SourceRepository:
         async with self._session_factory() as session:
             return await session.get(SourceRow, source_id)
 
+    async def get_many(self, source_ids: Sequence[str]) -> list[SourceRow]:
+        """Batch lookup -- used by the retrieval hydration step to
+        enrich every chunk hit with its source filename / title /
+        kind without N+1 round-trips.
+        """
+        ids = list(source_ids)
+        if not ids:
+            return []
+        async with self._session_factory() as session:
+            result = await session.execute(
+                select(SourceRow).where(SourceRow.id.in_(ids))
+            )
+            return list(result.scalars().all())
+
     async def get_by_content_sha256(self, content_sha256: str) -> SourceRow | None:
         async with self._session_factory() as session:
             result = await session.execute(

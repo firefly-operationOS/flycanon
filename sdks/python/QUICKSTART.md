@@ -45,12 +45,21 @@ asyncio.run(ingest())
 
 ## 3. Search the corpus
 
+Every hit carries the rich source-side context (filename, title,
+kind, section breadcrumb, page) at the top level — no second
+`get_source(...)` round-trip needed to render a citation label.
+
 ```python
 async def search() -> None:
     async with CanonClient(base_url="http://localhost:8500") as client:
         result = await client.search("what does the document say about scope?", top_k=5)
         for hit in result.hits:
-            print(hit.score, hit.content[:120])
+            label = hit.source_filename or hit.source_title or hit.source_id
+            location = hit.section_path or ""
+            if hit.page:
+                location = f"{location} (page {hit.page})" if location else f"page {hit.page}"
+            print(f"{hit.score:.4f}  [{hit.source_kind}] {label} -- {location}")
+            print(f"        {hit.content[:120]}")
 
 asyncio.run(search())
 ```
@@ -63,7 +72,10 @@ async def ask() -> None:
         answer = await client.answer("Summarise the scope section in three sentences.")
         print(answer.answer)
         for citation in answer.citations:
-            print(" -", citation.source_id, citation.score)
+            label = citation.source_filename or citation.source_title or citation.source_id
+            print(f"  - {label} ({citation.source_kind})"
+                  f" -- section: {citation.section_path or '-'}"
+                  f" -- score: {citation.score:.3f}")
 
 asyncio.run(ask())
 ```

@@ -114,10 +114,27 @@ public final class Models {
     public record KnowledgeItemsPage(List<KnowledgeItem> items, int total, int offset, int limit) {
     }
 
+    /**
+     * Single retrieval hit. Returned by {@code /api/v1/search} as the
+     * page-level list and by {@code /api/v1/query} as the citation
+     * list.
+     *
+     * <p>The structured source-side fields ({@code sourceFilename},
+     * {@code sourceTitle}, {@code sourceKind}, {@code sourceUri},
+     * {@code sectionPath}, {@code page}) are hydrated by flycanon so
+     * the SDK consumer can render citation labels without a second
+     * {@code GET /api/v1/sources/{id}} round-trip.
+     */
     @JsonIgnoreProperties(ignoreUnknown = true)
     public record Hit(
             @JsonProperty("chunk_id") String chunkId,
             @JsonProperty("source_id") String sourceId,
+            @JsonProperty("source_filename") String sourceFilename,
+            @JsonProperty("source_title") String sourceTitle,
+            @JsonProperty("source_kind") String sourceKind,
+            @JsonProperty("source_uri") String sourceUri,
+            @JsonProperty("section_path") String sectionPath,
+            Integer page,
             @JsonProperty("knowledge_item_id") String knowledgeItemId,
             @JsonProperty("knowledge_version") Integer knowledgeVersion,
             String content,
