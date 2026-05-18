@@ -32,6 +32,16 @@ wheels/
 .uv/
 .pip/
 
+# uv.lock is generated locally; CI runs ``uv sync`` (not ``uv sync
+# --frozen``) so the lockfile doesn't need to ride in git.
+uv.lock
+
+# --- Java SDK build artefacts ------------------------------------------------
+sdks/java/target/
+sdks/java/.mvn/
+sdks/java/.flattened-pom.xml
+*.class
+
 # --- Test, lint, type-check caches -------------------------------------------
 .pytest_cache/
 .ruff_cache/

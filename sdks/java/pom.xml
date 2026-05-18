@@ -9,16 +9,25 @@
                              http://maven.apache.org/xsd/maven-4.0.0.xsd">
   <modelVersion>4.0.0</modelVersion>
 
-  <groupId>io.firefly</groupId>
+  <parent>
+    <groupId>org.springframework.boot</groupId>
+    <artifactId>spring-boot-starter-parent</artifactId>
+    <version>3.5.9</version>
+    <relativePath/>
+  </parent>
+
+  <groupId>com.firefly</groupId>
   <artifactId>flycanon-sdk</artifactId>
   <version>26.5.1</version>
   <packaging>jar</packaging>
 
   <name>flycanon-sdk</name>
   <description>
-    Java client for the flycanon Operational Knowledge Repository
-    service. Uses java.net.http.HttpClient + Jackson; no Spring,
-    no reactor, no transitive HTTP-client zoo.
+    Spring-Boot-native Java client for the flycanon Operational
+    Knowledge Repository service. Built on Spring's RestClient (sync,
+    blocking; new Spring Framework 6.1+ default) and Jackson. Ships
+    an @AutoConfiguration so a CanonClient bean is wired straight
+    from flycanon.* properties.
   </description>
   <url>https://github.com/firefly-operationOS/flycanon</url>
 
@@ -35,29 +44,50 @@
   </organization>
 
   <properties>
-    <maven.compiler.source>21</maven.compiler.source>
-    <maven.compiler.target>21</maven.compiler.target>
+    <java.version>25</java.version>
+    <maven.compiler.source>25</maven.compiler.source>
+    <maven.compiler.target>25</maven.compiler.target>
+    <maven.compiler.release>25</maven.compiler.release>
     <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
-    <jackson.version>2.18.0</jackson.version>
-    <junit.version>5.11.0</junit.version>
   </properties>
 
   <dependencies>
+    <!--
+      Spring Boot starter (brings spring-context, spring-boot,
+      autoconfigure, Jackson, logging, ...). Pulled as ``compile`` so
+      consumers that aren't already on Spring Boot still get
+      everything the SDK needs to construct a CanonClient.
+    -->
     <dependency>
-      <groupId>com.fasterxml.jackson.core</groupId>
-      <artifactId>jackson-databind</artifactId>
-      <version>${jackson.version}</version>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter</artifactId>
     </dependency>
+    <!-- RestClient + the rest of the spring-web sync HTTP stack. -->
+    <dependency>
+      <groupId>org.springframework</groupId>
+      <artifactId>spring-web</artifactId>
+    </dependency>
+    <!--
+      JSR-310 Jackson module so the SDK can round-trip Instant /
+      OffsetDateTime payloads that the service emits.
+    -->
     <dependency>
       <groupId>com.fasterxml.jackson.datatype</groupId>
       <artifactId>jackson-datatype-jsr310</artifactId>
-      <version>${jackson.version}</version>
+    </dependency>
+    <!--
+      Annotation processor that emits IDE auto-complete metadata for
+      flycanon.* properties when consumers depend on the SDK.
+    -->
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-configuration-processor</artifactId>
+      <optional>true</optional>
     </dependency>
 
     <dependency>
-      <groupId>org.junit.jupiter</groupId>
-      <artifactId>junit-jupiter</artifactId>
-      <version>${junit.version}</version>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-test</artifactId>
       <scope>test</scope>
     </dependency>
   </dependencies>
@@ -66,8 +96,16 @@
     <plugins>
       <plugin>
         <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-compiler-plugin</artifactId>
+        <configuration>
+          <source>${java.version}</source>
+          <target>${java.version}</target>
+          <release>${java.version}</release>
+        </configuration>
+      </plugin>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
         <artifactId>maven-surefire-plugin</artifactId>
-        <version>3.5.0</version>
       </plugin>
     </plugins>
   </build>
