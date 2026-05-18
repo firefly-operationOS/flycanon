@@ -143,11 +143,7 @@ class CanonCoreConfiguration:
 
     @bean
     def corpus_context(self, settings: CanonSettings) -> CorpusContext:
-        ctx = build_corpus_context(
-            backend=settings.vector_store,
-            corpus_path=settings.corpus_path,
-            dimensions=settings.embedding_dimensions,
-        )
+        ctx = build_corpus_context(settings=settings)
         # Eagerly initialise so the first request doesn't pay the
         # schema-creation cost (and so misconfigured paths fail at
         # boot, not at first hit).
