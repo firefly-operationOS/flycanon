@@ -10,7 +10,9 @@ manager to get clean connection lifecycle:
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+import json as _jsonlib
+from collections.abc import AsyncIterator, Iterable
+from datetime import datetime
 from types import TracebackType
 from typing import Any
 
@@ -22,22 +24,40 @@ from flycanon_sdk._models import (
     AnswerRequest,
     AnswerResponse,
     AuditPage,
+    BillingReport,
+    BulkSourcesResponse,
     CandidateRecord,
     CandidatesPage,
+    ConflictScanRequest,
+    ConflictScanResponse,
+    Conversation,
+    ConversationHeader,
+    ConversationTurn,
+    CreateConversationRequest,
+    CreateConversationTurnRequest,
     CreateKnowledgeRequest,
+    CreateRelationRequest,
     CreateTaxonomyNodeRequest,
+    IngestJob,
+    IngestJobEvent,
+    KnowledgeDiff,
+    KnowledgeGraph,
     KnowledgeItem,
     KnowledgeItemsPage,
+    KnowledgeRelation,
     KnowledgeVersion,
     ProposeCandidateRequest,
     Provenance,
     RejectCandidateRequest,
+    RelationsList,
     RetireKnowledgeRequest,
     SearchRequest,
     SearchResponse,
     SourceRecord,
     SourcesPage,
+    StaleReport,
     SubmitSourceJsonPayload,
+    SuggestionsResponse,
     SupersedeKnowledgeRequest,
     TaxonomyNode,
     TaxonomyTree,
@@ -60,7 +80,7 @@ class CanonClient:
     ) -> None:
         merged_headers: dict[str, str] = {
             "Accept": "application/json",
-            "User-Agent": "flycanon-sdk-python/26.5.1",
+            "User-Agent": "flycanon-sdk-python/26.5.2",
         }
         if api_key:
             merged_headers["Authorization"] = f"Bearer {api_key}"
@@ -134,6 +154,68 @@ class CanonClient:
             },
         )
         return SourcesPage.model_validate(body)
+
+    async def submit_sources_bulk(
+        self,
+        payloads: list[SubmitSourceJsonPayload],
+    ) -> BulkSourcesResponse:
+        """Submit multiple sources in one request -- returns per-item results."""
+        body = await self._request(
+            "POST",
+            "/api/v1/sources:bulk",
+            json={"items": [p.model_dump(exclude_none=True) for p in payloads]},
+        )
+        return BulkSourcesResponse.model_validate(body)
+
+    async def submit_source_async(
+        self,
+        payload: SubmitSourceJsonPayload,
+    ) -> IngestJob:
+        """Enqueue an async ingest job. Stream progress on ``stream_job``."""
+        body = await self._request(
+            "POST",
+            "/api/v1/sources:async",
+            json=payload.model_dump(exclude_none=True),
+        )
+        return IngestJob.model_validate(body)
+
+    async def replace_source(
+        self,
+        source_id: str,
+        payload: SubmitSourceJsonPayload,
+    ) -> SourceRecord:
+        """Re-ingest an existing source in place, preserving the row id."""
+        body = await self._request(
+            "PUT",
+            f"/api/v1/sources/{source_id}",
+            json=payload.model_dump(exclude_none=True),
+        )
+        return SourceRecord.model_validate(body)
+
+    # ------------------------------------------------------------------
+    # Async ingest jobs
+    # ------------------------------------------------------------------
+
+    async def get_job(self, job_id: str) -> IngestJob:
+        body = await self._request("GET", f"/api/v1/jobs/{job_id}")
+        return IngestJob.model_validate(body)
+
+    async def cancel_job(self, job_id: str) -> IngestJob:
+        body = await self._request("POST", f"/api/v1/jobs/{job_id}:cancel")
+        return IngestJob.model_validate(body)
+
+    def stream_job(
+        self,
+        job_id: str,
+        *,
+        cursor: int = 0,
+    ) -> AsyncIterator[IngestJobEvent]:
+        """Stream Server-Sent Events for a job. Reconnect with ``cursor``.
+
+        Returns an async iterator directly -- use as
+        ``async for ev in client.stream_job(job_id): ...``.
+        """
+        return self._sse(f"/api/v1/jobs/{job_id}/stream", params={"cursor": cursor})
 
     # ------------------------------------------------------------------
     # Knowledge
@@ -216,6 +298,117 @@ class CanonClient:
             params={"version": str(version)} if version else None,
         )
         return Provenance.model_validate(body)
+
+    async def get_diff(
+        self,
+        item_id: str,
+        *,
+        from_version: int,
+        to_version: int,
+    ) -> KnowledgeDiff:
+        body = await self._request(
+            "GET",
+            f"/api/v1/knowledge/{item_id}/diff",
+            params={
+                "from_version": str(from_version),
+                "to_version": str(to_version),
+            },
+        )
+        return KnowledgeDiff.model_validate(body)
+
+    # ------------------------------------------------------------------
+    # Knowledge graph (relations + graph view)
+    # ------------------------------------------------------------------
+
+    async def list_relations(self, item_id: str) -> RelationsList:
+        body = await self._request(
+            "GET", f"/api/v1/knowledge/{item_id}/relations"
+        )
+        return RelationsList.model_validate(body)
+
+    async def add_relation(
+        self,
+        item_id: str,
+        request: CreateRelationRequest,
+    ) -> KnowledgeRelation:
+        body = await self._request(
+            "POST",
+            f"/api/v1/knowledge/{item_id}/relations",
+            json=request.model_dump(exclude_none=True),
+        )
+        return KnowledgeRelation.model_validate(body)
+
+    async def remove_relation(self, relation_id: str) -> None:
+        await self._request(
+            "DELETE", f"/api/v1/knowledge/relations/{relation_id}"
+        )
+
+    async def get_graph(
+        self,
+        *,
+        domain: str | None = None,
+        kind: str | None = None,
+        include_sources: bool = False,
+    ) -> KnowledgeGraph:
+        body = await self._request(
+            "GET",
+            "/api/v1/knowledge:graph",
+            params={
+                "domain": domain,
+                "kind": kind,
+                "include_sources": "true" if include_sources else "false",
+            },
+        )
+        return KnowledgeGraph.model_validate(body)
+
+    async def get_graph_mermaid(
+        self,
+        *,
+        domain: str | None = None,
+        kind: str | None = None,
+        include_sources: bool = False,
+    ) -> str:
+        """Return the graph as a Mermaid string (``graph LR ...``)."""
+        cleaned = {
+            k: v
+            for k, v in {
+                "domain": domain,
+                "kind": kind,
+                "include_sources": "true" if include_sources else "false",
+            }.items()
+            if v not in (None, "")
+        }
+        try:
+            response = await self._client.request(
+                "GET",
+                "/api/v1/knowledge:graph",
+                params=cleaned,
+                headers={"Accept": "text/vnd.mermaid"},
+            )
+        except (httpx.NetworkError, httpx.TimeoutException) as exc:
+            raise CanonConnectionError(str(exc)) from exc
+        if 200 <= response.status_code < 300:
+            return response.text
+        await _raise_for_problem(response)
+        return ""  # unreachable
+
+    # ------------------------------------------------------------------
+    # Knowledge quality scans
+    # ------------------------------------------------------------------
+
+    async def scan_stale(self) -> StaleReport:
+        body = await self._request("GET", "/api/v1/knowledge:stale")
+        return StaleReport.model_validate(body)
+
+    async def detect_conflicts(
+        self,
+        request: ConflictScanRequest | None = None,
+    ) -> ConflictScanResponse:
+        payload = (request or ConflictScanRequest()).model_dump(exclude_none=True)
+        body = await self._request(
+            "POST", "/api/v1/knowledge:detect-conflicts", json=payload
+        )
+        return ConflictScanResponse.model_validate(body)
 
     # ------------------------------------------------------------------
     # Candidates
@@ -319,6 +512,115 @@ class CanonClient:
         )
         return AnswerResponse.model_validate(body)
 
+    def stream_answer(
+        self,
+        question: str,
+        *,
+        top_k: int = 8,
+        instructions: str | None = None,
+        model: str | None = None,
+    ) -> AsyncIterator[IngestJobEvent]:
+        """Stream the answer endpoint as Server-Sent Events.
+
+        Each yielded ``IngestJobEvent`` re-uses the generic frame shape
+        ``(cursor, event, data)``. The ``token`` events carry
+        ``{"text": "..."}``; the final ``complete`` event carries
+        ``{"answer": "...", "citations": [...]}``. Returns an async
+        iterator directly -- use as
+        ``async for frame in client.stream_answer(question): ...``.
+        """
+        request = AnswerRequest(
+            question=question,
+            top_k=top_k,
+            instructions=instructions,
+            model=model,
+        )
+        return self._sse(
+            "/api/v1/query:stream",
+            json=request.model_dump(exclude_none=True),
+            method="POST",
+        )
+
+    # ------------------------------------------------------------------
+    # Conversations
+    # ------------------------------------------------------------------
+
+    async def create_conversation(
+        self,
+        request: CreateConversationRequest | None = None,
+    ) -> Conversation:
+        payload = (request or CreateConversationRequest()).model_dump(
+            exclude_none=True
+        )
+        body = await self._request("POST", "/api/v1/conversations", json=payload)
+        return Conversation.model_validate(body)
+
+    async def get_conversation(self, conversation_id: str) -> Conversation:
+        body = await self._request(
+            "GET", f"/api/v1/conversations/{conversation_id}"
+        )
+        return Conversation.model_validate(body)
+
+    async def add_turn(
+        self,
+        conversation_id: str,
+        request: CreateConversationTurnRequest,
+    ) -> ConversationTurn:
+        body = await self._request(
+            "POST",
+            f"/api/v1/conversations/{conversation_id}/turns",
+            json=request.model_dump(exclude_none=True),
+        )
+        return ConversationTurn.model_validate(body)
+
+    async def list_turns(
+        self,
+        conversation_id: str,
+        *,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> list[ConversationTurn]:
+        body = await self._request(
+            "GET",
+            f"/api/v1/conversations/{conversation_id}/turns",
+            params={"limit": str(limit), "offset": str(offset)},
+        )
+        rows = body.get("items", body) if isinstance(body, dict) else body
+        return [ConversationTurn.model_validate(r) for r in rows]
+
+    async def suggest_questions(
+        self,
+        conversation_id: str,
+    ) -> SuggestionsResponse:
+        body = await self._request(
+            "POST", f"/api/v1/conversations/{conversation_id}/suggest"
+        )
+        return SuggestionsResponse.model_validate(body)
+
+    # ------------------------------------------------------------------
+    # Billing
+    # ------------------------------------------------------------------
+
+    async def billing_report(
+        self,
+        *,
+        group_by: Iterable[str] | None = None,
+        actor: str | None = None,
+        since: datetime | str | None = None,
+        until: datetime | str | None = None,
+    ) -> BillingReport:
+        body = await self._request(
+            "GET",
+            "/api/v1/billing",
+            params={
+                "group_by": _csv(group_by) if group_by else None,
+                "actor": actor,
+                "since": _iso(since),
+                "until": _iso(until),
+            },
+        )
+        return BillingReport.model_validate(body)
+
     # ------------------------------------------------------------------
     # Taxonomy
     # ------------------------------------------------------------------
@@ -364,6 +666,73 @@ class CanonClient:
     # ------------------------------------------------------------------
     # Internal: request + error mapping
     # ------------------------------------------------------------------
+
+    async def _sse(
+        self,
+        path: str,
+        *,
+        json: Any | None = None,
+        params: dict[str, Any] | None = None,
+        method: str = "GET",
+    ) -> AsyncIterator[IngestJobEvent]:
+        """Open a Server-Sent Events stream and yield parsed frames.
+
+        Each frame is emitted as :class:`IngestJobEvent` regardless of
+        the source endpoint -- the ``event`` field carries the SSE
+        event type (``stage`` / ``token`` / ``complete`` / ``failed`` /
+        ...) and ``data`` carries the parsed JSON payload. ``cursor``
+        is populated from ``data.cursor`` when present (job streams) or
+        a monotonic counter otherwise (query streams).
+        """
+        cleaned_params: dict[str, str] = {
+            k: str(v) for k, v in (params or {}).items() if v not in (None, "")
+        }
+        cursor_counter = 0
+        try:
+            async with self._client.stream(
+                method,
+                path,
+                json=json,
+                params=cleaned_params,
+                headers={"Accept": "text/event-stream"},
+            ) as response:
+                if response.status_code >= 300:
+                    await response.aread()
+                    await _raise_for_problem(response)
+                event_type = "message"
+                data_lines: list[str] = []
+                async for line in response.aiter_lines():
+                    if line == "":
+                        # Blank line terminates a frame.
+                        if data_lines:
+                            raw = "\n".join(data_lines)
+                            try:
+                                payload = _jsonlib.loads(raw)
+                            except _jsonlib.JSONDecodeError:
+                                payload = {"raw": raw}
+                            cursor = (
+                                int(payload["cursor"])
+                                if isinstance(payload, dict) and "cursor" in payload
+                                else cursor_counter
+                            )
+                            cursor_counter += 1
+                            yield IngestJobEvent(
+                                cursor=cursor,
+                                event=event_type,
+                                data=payload if isinstance(payload, dict) else {"data": payload},
+                            )
+                        event_type = "message"
+                        data_lines = []
+                        continue
+                    if line.startswith(":"):
+                        # Comment / heartbeat -- ignore.
+                        continue
+                    if line.startswith("event:"):
+                        event_type = line[len("event:"):].strip() or "message"
+                    elif line.startswith("data:"):
+                        data_lines.append(line[len("data:"):].lstrip())
+        except (httpx.NetworkError, httpx.TimeoutException) as exc:
+            raise CanonConnectionError(str(exc)) from exc
 
     async def _request(
         self,
@@ -417,3 +786,11 @@ def _csv(value: Iterable[str] | None) -> str | None:
     if not value:
         return None
     return ",".join(value)
+
+
+def _iso(value: datetime | str | None) -> str | None:
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value.isoformat()
+    return value

@@ -183,4 +183,191 @@ public final class Models {
             @JsonProperty("vector_store") String vectorStore,
             @JsonProperty("eda_adapter") String edaAdapter) {
     }
+
+    // ------------------------------------------------------------------
+    // Tier 1 / Tier 2 extensions
+    // ------------------------------------------------------------------
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public record BulkSourcesRequest(List<SubmitSourceJsonPayload> items) {
+    }
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public record BulkSourceResult(
+            int index,
+            boolean ok,
+            @JsonProperty("source_id") String sourceId,
+            @JsonProperty("error_code") String errorCode,
+            @JsonProperty("error_message") String errorMessage) {
+    }
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public record BulkSourcesResponse(
+            List<BulkSourceResult> items,
+            int total,
+            int succeeded,
+            int failed) {
+    }
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public record IngestJob(
+            String id,
+            String status,
+            double progress,
+            String stage,
+            @JsonProperty("source_id") String sourceId,
+            @JsonProperty("error_code") String errorCode,
+            @JsonProperty("error_message") String errorMessage,
+            @JsonProperty("created_at") OffsetDateTime createdAt,
+            @JsonProperty("updated_at") OffsetDateTime updatedAt) {
+    }
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public record KnowledgeFieldChange(
+            String field,
+            @JsonProperty("from") Object fromValue,
+            @JsonProperty("to") Object toValue) {
+    }
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public record KnowledgeDiff(
+            @JsonProperty("knowledge_item_id") String knowledgeItemId,
+            @JsonProperty("from_version") int fromVersion,
+            @JsonProperty("to_version") int toVersion,
+            @JsonProperty("unified_diff") String unifiedDiff,
+            @JsonProperty("field_changes") List<KnowledgeFieldChange> fieldChanges,
+            @JsonProperty("added_citations") List<String> addedCitations,
+            @JsonProperty("removed_citations") List<String> removedCitations) {
+    }
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public record KnowledgeRelation(
+            String id,
+            @JsonProperty("from_item_id") String fromItemId,
+            @JsonProperty("to_item_id") String toItemId,
+            String kind,
+            @JsonProperty("since_version") Integer sinceVersion,
+            String note,
+            String actor,
+            @JsonProperty("created_at") OffsetDateTime createdAt) {
+    }
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public record RelationsList(
+            List<KnowledgeRelation> outgoing,
+            List<KnowledgeRelation> incoming) {
+    }
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public record CreateRelationRequest(
+            @JsonProperty("to_item_id") String toItemId,
+            String kind,
+            @JsonProperty("since_version") Integer sinceVersion,
+            String note,
+            String actor) {
+    }
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public record GraphNode(
+            String id,
+            String label,
+            String kind,
+            String domain) {
+    }
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public record GraphEdge(
+            @JsonProperty("from") String from,
+            @JsonProperty("to") String to,
+            String kind) {
+    }
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public record KnowledgeGraph(List<GraphNode> nodes, List<GraphEdge> edges) {
+    }
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public record ConversationTurn(
+            String id,
+            @JsonProperty("conversation_id") String conversationId,
+            String query,
+            String answer,
+            List<Hit> citations,
+            String model,
+            @JsonProperty("created_at") OffsetDateTime createdAt) {
+    }
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public record Conversation(
+            String id,
+            String title,
+            String summary,
+            List<ConversationTurn> turns,
+            @JsonProperty("created_at") OffsetDateTime createdAt,
+            @JsonProperty("updated_at") OffsetDateTime updatedAt) {
+    }
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public record CreateConversationRequest(String title, String actor) {
+    }
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public record CreateConversationTurnRequest(
+            String query,
+            @JsonProperty("max_chunks") Integer maxChunks,
+            @JsonProperty("hybrid_mode") String hybridMode,
+            String actor) {
+    }
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public record SuggestionsResponse(List<String> questions) {
+    }
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public record StaleItem(
+            @JsonProperty("knowledge_item_id") String knowledgeItemId,
+            String title,
+            String domain,
+            Double score,
+            @JsonProperty("max_similarity") Double maxSimilarity,
+            @JsonProperty("sample_size") int sampleSize,
+            @JsonProperty("computed_at") String computedAt) {
+    }
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public record StaleReport(List<StaleItem> items, int total) {
+    }
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public record ConflictScanRequest(
+            String domain,
+            @JsonProperty("min_similarity") double minSimilarity,
+            @JsonProperty("max_items") int maxItems,
+            String actor) {
+    }
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public record ConflictScanResponse(
+            @JsonProperty("pairs_evaluated") int pairsEvaluated,
+            @JsonProperty("conflicts_found") int conflictsFound,
+            @JsonProperty("candidate_ids") List<String> candidateIds,
+            @JsonProperty("relation_ids") List<String> relationIds) {
+    }
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public record BillingRow(
+            Map<String, Object> group,
+            @JsonProperty("input_tokens") long inputTokens,
+            @JsonProperty("output_tokens") long outputTokens,
+            @JsonProperty("total_tokens") long totalTokens,
+            @JsonProperty("cost_usd") String costUsd,
+            int calls) {
+    }
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public record BillingReport(
+            List<BillingRow> rows,
+            @JsonProperty("total_cost_usd") String totalCostUsd,
+            @JsonProperty("total_calls") int totalCalls) {
+    }
 }

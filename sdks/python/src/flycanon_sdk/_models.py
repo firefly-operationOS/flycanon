@@ -326,3 +326,196 @@ class VersionInfo(BaseModel):
     answer_fallback_model: str
     vector_store: str
     eda_adapter: str
+
+
+# ----------------------------------------------------------------------
+# Tier 1 / Tier 2 extensions
+# ----------------------------------------------------------------------
+
+
+class BulkSourceResult(BaseModel):
+    """Per-item outcome of a bulk ingest."""
+
+    index: int
+    ok: bool
+    source_id: str | None = None
+    error_code: str | None = None
+    error_message: str | None = None
+
+
+class BulkSourcesResponse(BaseModel):
+    items: list[BulkSourceResult]
+    total: int
+    succeeded: int
+    failed: int
+
+
+class IngestJob(BaseModel):
+    """Header view of an async ingest job."""
+
+    id: str
+    status: str
+    progress: float = 0.0
+    stage: str | None = None
+    source_id: str | None = None
+    error_code: str | None = None
+    error_message: str | None = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class IngestJobEvent(BaseModel):
+    """One SSE frame, parsed."""
+
+    cursor: int
+    event: str
+    data: dict[str, Any] = Field(default_factory=dict)
+
+
+class KnowledgeFieldChange(BaseModel):
+    field: str
+    from_value: Any | None = Field(default=None, alias="from")
+    to_value: Any | None = Field(default=None, alias="to")
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
+class KnowledgeDiff(BaseModel):
+    knowledge_item_id: str
+    from_version: int
+    to_version: int
+    unified_diff: str
+    field_changes: list[KnowledgeFieldChange] = Field(default_factory=list)
+    added_citations: list[str] = Field(default_factory=list)
+    removed_citations: list[str] = Field(default_factory=list)
+
+
+class KnowledgeRelation(BaseModel):
+    id: str
+    from_item_id: str
+    to_item_id: str
+    kind: str
+    since_version: int | None = None
+    note: str | None = None
+    actor: str | None = None
+    created_at: datetime
+
+
+class RelationsList(BaseModel):
+    outgoing: list[KnowledgeRelation] = Field(default_factory=list)
+    incoming: list[KnowledgeRelation] = Field(default_factory=list)
+
+
+class CreateRelationRequest(BaseModel):
+    to_item_id: str
+    kind: str
+    since_version: int | None = None
+    note: str | None = None
+    actor: str | None = None
+
+
+class GraphNode(BaseModel):
+    id: str
+    label: str
+    kind: str
+    domain: str | None = None
+
+
+class GraphEdge(BaseModel):
+    from_id: str = Field(alias="from")
+    to_id: str = Field(alias="to")
+    kind: str
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
+class KnowledgeGraph(BaseModel):
+    nodes: list[GraphNode] = Field(default_factory=list)
+    edges: list[GraphEdge] = Field(default_factory=list)
+
+
+class ConversationHeader(BaseModel):
+    id: str
+    title: str | None = None
+    summary: str | None = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class ConversationTurn(BaseModel):
+    id: str
+    conversation_id: str
+    query: str
+    answer: str
+    citations: list[Hit] = Field(default_factory=list)
+    model: str | None = None
+    created_at: datetime
+
+
+class Conversation(BaseModel):
+    id: str
+    title: str | None = None
+    summary: str | None = None
+    turns: list[ConversationTurn] = Field(default_factory=list)
+    created_at: datetime
+    updated_at: datetime
+
+
+class CreateConversationRequest(BaseModel):
+    title: str | None = None
+    actor: str | None = None
+
+
+class CreateConversationTurnRequest(BaseModel):
+    query: str
+    max_chunks: int | None = None
+    hybrid_mode: str | None = None
+    actor: str | None = None
+
+
+class SuggestionsResponse(BaseModel):
+    questions: list[str] = Field(default_factory=list)
+
+
+class StaleItem(BaseModel):
+    knowledge_item_id: str
+    title: str
+    domain: str
+    score: float | None = None
+    max_similarity: float | None = None
+    sample_size: int = 0
+    computed_at: str
+
+
+class StaleReport(BaseModel):
+    items: list[StaleItem] = Field(default_factory=list)
+    total: int = 0
+
+
+class ConflictScanRequest(BaseModel):
+    domain: str | None = None
+    min_similarity: float = 0.85
+    max_items: int = 50
+    actor: str | None = None
+
+
+class ConflictScanResponse(BaseModel):
+    pairs_evaluated: int = 0
+    conflicts_found: int = 0
+    candidate_ids: list[str] = Field(default_factory=list)
+    relation_ids: list[str] = Field(default_factory=list)
+
+
+class BillingRow(BaseModel):
+    group: dict[str, Any] = Field(default_factory=dict)
+    input_tokens: int = 0
+    output_tokens: int = 0
+    total_tokens: int = 0
+    cost_usd: str = "0"
+    calls: int = 0
+
+
+class BillingReport(BaseModel):
+    rows: list[BillingRow] = Field(default_factory=list)
+    total_cost_usd: str = "0"
+    total_calls: int = 0

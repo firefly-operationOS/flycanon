@@ -124,26 +124,9 @@ class IntakeService:
             filename=filename,
         )
         merged_kind, merged_content, merged_metadata = self._merge_artifacts(artifacts, filename)
-        # PII guardrail. The scanner operates on the merged text
-        # (decoded UTF-8) so a contaminated child artefact in an
-        # archive triggers the same policy as a top-level hit.
-        pii_findings: list = []
-        if self._pii_scanner is not None and self._pii_policy != PiiPolicy.disabled:
-            text_view = self._decode_for_scan(merged_content)
-            pii_findings = self._pii_scanner.scan(text_view)
-            if pii_findings:
-                if self._pii_policy == PiiPolicy.reject:
-                    raise PiiPolicyViolation(pii_findings)
-                if self._pii_policy == PiiPolicy.redact:
-                    redacted = pii_redact(text_view, pii_findings)
-                    merged_content = redacted.encode("utf-8")
-                merged_metadata.setdefault(
-                    "pii_findings",
-                    [
-                        {"kind": f.kind, "start": f.start, "end": f.end}
-                        for f in pii_findings
-                    ],
-                )
+        merged_content, merged_metadata = self._apply_pii_policy(
+            merged_content, merged_metadata
+        )
 
         if request.kind != SourceKind.unknown:
             primary_kind = request.kind
@@ -289,6 +272,13 @@ class IntakeService:
         merged_kind, merged_content, merged_metadata = self._merge_artifacts(
             artifacts, filename
         )
+        # PII guardrail runs on the re-ingest path too: a clean v1 of
+        # a file may be replaced with a v2 that introduces emails /
+        # SSNs / etc., and the policy must catch that just like
+        # initial submit. Same scanner + policy resolution as submit().
+        merged_content, merged_metadata = self._apply_pii_policy(
+            merged_content, merged_metadata
+        )
         primary_kind = request.kind if request.kind != SourceKind.unknown else merged_kind
 
         # Build a transient SourceRow carrying the NEW values so the
@@ -399,6 +389,36 @@ class IntakeService:
             updated_row.n_chunks,
         )
         return updated_row
+
+    def _apply_pii_policy(
+        self,
+        content: bytes,
+        metadata: dict[str, Any],
+    ) -> tuple[bytes, dict[str, Any]]:
+        """Run the configured PII scan against ``content`` and apply the policy.
+
+        Returns ``(possibly-redacted-content, metadata-with-findings)``.
+        The scanner operates on the merged text (decoded UTF-8) so a
+        contaminated child artefact in an archive triggers the same
+        policy as a top-level hit. Raises :class:`PiiPolicyViolation`
+        when the policy is ``reject`` and findings are non-empty.
+        """
+        if self._pii_scanner is None or self._pii_policy == PiiPolicy.disabled:
+            return content, metadata
+        text_view = self._decode_for_scan(content)
+        findings = self._pii_scanner.scan(text_view)
+        if not findings:
+            return content, metadata
+        if self._pii_policy == PiiPolicy.reject:
+            raise PiiPolicyViolation(findings)
+        if self._pii_policy == PiiPolicy.redact:
+            redacted = pii_redact(text_view, findings)
+            content = redacted.encode("utf-8")
+        metadata.setdefault(
+            "pii_findings",
+            [{"kind": f.kind, "start": f.start, "end": f.end} for f in findings],
+        )
+        return content, metadata
 
     @staticmethod
     def _decode_for_scan(content: bytes) -> str:

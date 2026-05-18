@@ -76,6 +76,10 @@ Pick the entry point that matches what you're trying to do:
 | [api-reference.md](api-reference.md)              | You're integrating with the HTTP API and need every endpoint, shape, and status code.                                          |
 | [payload-reference.md](payload-reference.md)      | You're composing the request payload — every field, option, and example.                                                       |
 | [eda-events.md](eda-events.md)                    | You're subscribing to the `flycanon.ingest` / `flycanon.knowledge` / `flycanon.audit` topics.                                  |
+| [conversations.md](conversations.md)              | You're building chat-style UX on flycanon -- threads, turns, rolling summary, suggested follow-ups.                            |
+| [async-ingest.md](async-ingest.md)                | You're enqueuing large / bulk ingests and streaming progress via SSE.                                                          |
+| [quality.md](quality.md)                          | You're running staleness scans or conflict detection on the canon.                                                             |
+| [pii.md](pii.md)                                  | You need to understand the PII guardrail (scanner, policy, redaction, findings, RFC 7807 violation shape).                     |
 | [deployment.md](deployment.md)                    | You're running this in production -- env vars, topologies, OCR engines, embedding providers, auth, observability, sizing.       |
 | [cicd.md](cicd.md)                                | You're cutting a release or wiring CI/CD -- PR gate, Docker publish, SDK publish, secrets.                                      |
 | [troubleshooting.md](troubleshooting.md)          | The service / ingest / search / answer surface is misbehaving -- symptom → root cause → fix.                                    |

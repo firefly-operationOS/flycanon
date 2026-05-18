@@ -145,13 +145,26 @@ Rank Fusion over the two channels.
 
 | Concern                                                          | Endpoint(s)                                |
 | ---------------------------------------------------------------- | ------------------------------------------ |
-| Source intake (any format)                                       | `POST /api/v1/sources`                     |
+| Source intake (any format, bytes / base64 / URL)                 | `POST /api/v1/sources`                     |
+| Bulk + async intake (jobs + SSE progress)                        | `POST /api/v1/sources:bulk`, `:async`, `GET /api/v1/jobs/{id}/stream` |
+| Source re-ingest (preserves the row id)                          | `PUT /api/v1/sources/{id}`                 |
 | Source lookup / pagination                                       | `GET /api/v1/sources[/{id}]`               |
 | Knowledge-item lifecycle (draft / published / superseded / retired) | `/api/v1/knowledge/...`                 |
-| Hybrid retrieval                                                 | `POST /api/v1/search`                      |
-| RAG answer with citations                                        | `POST /api/v1/query`                       |
+| Versioned diff between two knowledge versions                    | `GET /api/v1/knowledge/{id}/diff`          |
+| Knowledge graph (typed edges + JSON / Mermaid view)              | `/api/v1/knowledge/{id}/relations`, `GET /api/v1/knowledge:graph` |
+| Hybrid retrieval (+ optional rerank + query expansion)           | `POST /api/v1/search`                      |
+| RAG answer with citations (+ token streaming)                    | `POST /api/v1/query`, `POST /api/v1/query:stream` |
+| Multi-turn conversations + suggested follow-ups                  | `/api/v1/conversations/...`                |
 | Candidate proposals (pre-canonical)                              | `/api/v1/candidates/...`                   |
 | Provenance graph                                                 | `GET /api/v1/knowledge/{id}/provenance`    |
+| Quality scans (staleness + conflict detection)                   | `GET /api/v1/knowledge:stale`, `POST /api/v1/knowledge:detect-conflicts` |
+| Cost / billing rollups                                           | `GET /api/v1/billing` (aggregate)          |
+| Cost drill-down -- per-call events                               | `GET /api/v1/billing/events`               |
+| Cost drill-down -- 24h / 7d / 30d snapshot                       | `GET /api/v1/billing/summary`              |
+| Cost drill-down -- top-N consumers                               | `GET /api/v1/billing/top`                  |
+| Cost drill-down -- per-subject attribution                       | `GET /api/v1/billing/by-subject`           |
+| Cost drill-down -- latency percentiles (p50/p95/p99)             | `GET /api/v1/billing/latency`              |
+| Corpus + queue + cost inventory snapshot                         | `GET /api/v1/stats`                        |
 | Append-only audit log                                            | `GET /api/v1/audit`                        |
 | Taxonomy (domain + jurisdiction)                                 | `/api/v1/taxonomy/...`                     |
 | Identity / model info                                            | `GET /api/v1/version`                      |

@@ -60,7 +60,7 @@ public final class CanonClient {
                 : RestClient.builder())
                 .baseUrl(builder.baseUrl)
                 .defaultHeader(HttpHeaders.ACCEPT, MediaType.APPLICATION_JSON_VALUE)
-                .defaultHeader(HttpHeaders.USER_AGENT, "flycanon-sdk-java/26.5.1");
+                .defaultHeader(HttpHeaders.USER_AGENT, "flycanon-sdk-java/26.5.2");
         Optional.ofNullable(builder.apiKey)
                 .filter(k -> !k.isBlank())
                 .ifPresent(k -> rcb.defaultHeader(HttpHeaders.AUTHORIZATION, "Bearer " + k));
@@ -97,6 +97,44 @@ public final class CanonClient {
         return request("GET", "/api/v1/sources" + queryString(filters), null, Models.SourcesPage.class);
     }
 
+    public Models.BulkSourcesResponse submitSourcesBulk(java.util.List<Models.SubmitSourceJsonPayload> payloads) {
+        return request(
+                "POST",
+                "/api/v1/sources:bulk",
+                new Models.BulkSourcesRequest(payloads),
+                Models.BulkSourcesResponse.class);
+    }
+
+    public Models.IngestJob submitSourceAsync(Models.SubmitSourceJsonPayload payload) {
+        return request("POST", "/api/v1/sources:async", payload, Models.IngestJob.class);
+    }
+
+    public Models.SourceRecord replaceSource(String id, Models.SubmitSourceJsonPayload payload) {
+        return request("PUT", "/api/v1/sources/" + encode(id), payload, Models.SourceRecord.class);
+    }
+
+    // ---------- Async ingest jobs ----------
+
+    public Models.IngestJob getJob(String id) {
+        return request("GET", "/api/v1/jobs/" + encode(id), null, Models.IngestJob.class);
+    }
+
+    public Models.IngestJob cancelJob(String id) {
+        return request("POST", "/api/v1/jobs/" + encode(id) + ":cancel", null, Models.IngestJob.class);
+    }
+
+    /**
+     * Build the URL of the SSE stream for a job. The blocking
+     * {@link RestClient} does not consume Server-Sent Events well; this
+     * helper returns the absolute URL so callers can wire it into
+     * Spring's {@code WebClient} (reactive) or any HTTP/2 streaming
+     * client of their choice. Pass {@code cursor=N} to resume from a
+     * known offset.
+     */
+    public String jobStreamUrl(String id, long cursor) {
+        return "/api/v1/jobs/" + encode(id) + "/stream?cursor=" + cursor;
+    }
+
     // ---------- Knowledge ----------
 
     public Models.KnowledgeItem getKnowledge(String id) {
@@ -105,6 +143,121 @@ public final class CanonClient {
 
     public Models.KnowledgeItemsPage listKnowledge(Map<String, String> filters) {
         return request("GET", "/api/v1/knowledge" + queryString(filters), null, Models.KnowledgeItemsPage.class);
+    }
+
+    public Models.KnowledgeDiff getDiff(String id, int fromVersion, int toVersion) {
+        Map<String, String> q = filters();
+        q.put("from_version", String.valueOf(fromVersion));
+        q.put("to_version", String.valueOf(toVersion));
+        return request(
+                "GET",
+                "/api/v1/knowledge/" + encode(id) + "/diff" + queryString(q),
+                null,
+                Models.KnowledgeDiff.class);
+    }
+
+    // ---------- Knowledge graph (relations + graph view) ----------
+
+    public Models.RelationsList listRelations(String id) {
+        return request(
+                "GET",
+                "/api/v1/knowledge/" + encode(id) + "/relations",
+                null,
+                Models.RelationsList.class);
+    }
+
+    public Models.KnowledgeRelation addRelation(String id, Models.CreateRelationRequest req) {
+        return request(
+                "POST",
+                "/api/v1/knowledge/" + encode(id) + "/relations",
+                req,
+                Models.KnowledgeRelation.class);
+    }
+
+    public void removeRelation(String relationId) {
+        try {
+            restClient.delete()
+                    .uri("/api/v1/knowledge/relations/" + encode(relationId))
+                    .retrieve()
+                    .toBodilessEntity();
+        } catch (HttpStatusCodeException ex) {
+            throw raiseForProblem(ex);
+        } catch (ResourceAccessException ex) {
+            throw new RuntimeException("flycanon request failed: " + ex.getMessage(), ex);
+        }
+    }
+
+    public Models.KnowledgeGraph getGraph(Map<String, String> filters) {
+        return request(
+                "GET",
+                "/api/v1/knowledge:graph" + queryString(filters),
+                null,
+                Models.KnowledgeGraph.class);
+    }
+
+    /**
+     * Fetch the graph as a Mermaid string (``graph LR ...``). Sends
+     * ``Accept: text/vnd.mermaid`` so the controller picks the
+     * Mermaid view.
+     */
+    public String getGraphMermaid(Map<String, String> filters) {
+        try {
+            return restClient.get()
+                    .uri("/api/v1/knowledge:graph" + queryString(filters))
+                    .header(HttpHeaders.ACCEPT, "text/vnd.mermaid")
+                    .retrieve()
+                    .body(String.class);
+        } catch (HttpStatusCodeException ex) {
+            throw raiseForProblem(ex);
+        } catch (ResourceAccessException ex) {
+            throw new RuntimeException("flycanon request failed: " + ex.getMessage(), ex);
+        }
+    }
+
+    // ---------- Knowledge quality scans ----------
+
+    public Models.StaleReport scanStale() {
+        return request("GET", "/api/v1/knowledge:stale", null, Models.StaleReport.class);
+    }
+
+    public Models.ConflictScanResponse detectConflicts(Models.ConflictScanRequest req) {
+        return request(
+                "POST",
+                "/api/v1/knowledge:detect-conflicts",
+                req,
+                Models.ConflictScanResponse.class);
+    }
+
+    // ---------- Conversations ----------
+
+    public Models.Conversation createConversation(Models.CreateConversationRequest req) {
+        return request("POST", "/api/v1/conversations", req, Models.Conversation.class);
+    }
+
+    public Models.Conversation getConversation(String id) {
+        return request("GET", "/api/v1/conversations/" + encode(id), null, Models.Conversation.class);
+    }
+
+    public Models.ConversationTurn addTurn(String conversationId, Models.CreateConversationTurnRequest req) {
+        return request(
+                "POST",
+                "/api/v1/conversations/" + encode(conversationId) + "/turns",
+                req,
+                Models.ConversationTurn.class);
+    }
+
+    public Models.SuggestionsResponse suggestQuestions(String conversationId) {
+        return request(
+                "POST",
+                "/api/v1/conversations/" + encode(conversationId) + "/suggest",
+                null,
+                Models.SuggestionsResponse.class);
+    }
+
+    // ---------- Billing ----------
+
+    public Models.BillingReport billingReport(Map<String, String> filters) {
+        return request("GET", "/api/v1/billing" + queryString(filters), null, Models.BillingReport.class);
     }
 
     // ---------- Query ----------
