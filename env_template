@@ -57,12 +57,41 @@ FLYCANON_RETRIEVAL_RRF_K=60
 # ----------------------------------------------------------------------------
 # Vector store
 # ----------------------------------------------------------------------------
-# ``sqlite-vec`` is the default. Set to ``pgvector`` and install the
-# ``pgvector`` extra to use the operational Postgres instead.
+# Backend selector. Every option implements the agentic
+# VectorStoreProtocol and is wired first-class in
+# ``core/services/retrieval/corpus_factory.py``.
+#
+#   sqlite-vec  -- single-file SQLite (FTS5 + sqlite-vec). Default.
+#   pgvector    -- HNSW index in the canonical Postgres (extension
+#                  ``vector`` required). Install with
+#                  ``uv sync --extra pgvector``.
+#   chroma      -- ChromaDB (managed or self-hosted).
+#   qdrant      -- Qdrant (self-hosted or Cloud).
+#   pinecone    -- Pinecone Serverless.
+#   memory      -- in-memory, ephemeral (test-only).
 FLYCANON_VECTOR_STORE=sqlite-vec
-# SQLite path the default corpus uses. The directory is created on
-# startup if it does not exist.
+# SQLite path the BM25 corpus + sqlite-vec backend use. The directory
+# is created on startup if it does not exist. The BM25 corpus file is
+# also created for the non-sqlite-vec backends -- it's the BM25 index
+# projection, not the source of truth.
 FLYCANON_CORPUS_PATH=./local_data/corpus.db
+
+# --- pgvector backend (FLYCANON_VECTOR_STORE=pgvector) ----------------------
+FLYCANON_PGVECTOR_TABLE=canon_chunk_vectors
+FLYCANON_PGVECTOR_HNSW_M=16
+FLYCANON_PGVECTOR_HNSW_EF_CONSTRUCTION=64
+
+# --- Chroma backend (FLYCANON_VECTOR_STORE=chroma) --------------------------
+FLYCANON_CHROMA_COLLECTION=flycanon
+
+# --- Qdrant backend (FLYCANON_VECTOR_STORE=qdrant) --------------------------
+FLYCANON_QDRANT_URL=http://localhost:6333
+FLYCANON_QDRANT_COLLECTION=flycanon
+# FLYCANON_QDRANT_API_KEY=
+
+# --- Pinecone backend (FLYCANON_VECTOR_STORE=pinecone) ----------------------
+FLYCANON_PINECONE_INDEX=flycanon
+# FLYCANON_PINECONE_API_KEY=
 
 # ----------------------------------------------------------------------------
 # Ingestion

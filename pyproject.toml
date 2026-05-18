@@ -98,13 +98,29 @@ dev = [
     "python-docx>=1.1",
 ]
 
-# Optional ``pgvector`` adapter for the retrieval store. The default
-# vector backend is the in-tree ``SqliteCorpus`` from the agentic
-# framework, which is enough for single-node deployments. Pull this
-# extra when you want to point flycanon at a Postgres + pgvector
-# cluster instead.
+# Optional ``pgvector`` adapter for the dense-vector projection.
+# Activates when FLYCANON_VECTOR_STORE=pgvector. Co-locates the
+# vector store inside the canonical Postgres instance (no extra
+# service to operate). Requires the ``vector`` Postgres extension.
 pgvector = [
     "pgvector>=0.3.6",
+]
+
+# Optional Chroma adapter (managed or self-hosted ChromaDB). Activates
+# when FLYCANON_VECTOR_STORE=chroma.
+chroma = [
+    "chromadb>=0.5.0",
+]
+
+# Optional Qdrant adapter (self-hosted or Qdrant Cloud). Activates
+# when FLYCANON_VECTOR_STORE=qdrant.
+qdrant = [
+    "qdrant-client>=1.12.0",
+]
+
+# Optional Pinecone adapter. Activates when FLYCANON_VECTOR_STORE=pinecone.
+pinecone = [
+    "pinecone>=5.0.0",
 ]
 
 [build-system]

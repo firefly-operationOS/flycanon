@@ -97,17 +97,38 @@ class CanonSettings(BaseSettings):
     retrieval_rrf_k: int = Field(default=60, ge=1, le=1000)
 
     # -- Vector store ---------------------------------------------------
-    # ``sqlite-vec`` keeps the deployment single-node-friendly. Switch
-    # to ``pgvector`` and install the ``pgvector`` extra when the
-    # corpus exceeds what one SQLite file can serve comfortably.
+    # Backend selector. Every option implements the agentic
+    # ``VectorStoreProtocol``; BM25 stays on SQLite regardless of the
+    # vector backend (the corpus file is an index projection, not a
+    # source of truth).
     vector_store: str = Field(
         default="sqlite-vec",
-        description="``sqlite-vec`` (default) or ``pgvector``.",
+        description=(
+            "``sqlite-vec`` (default) | ``pgvector`` | ``chroma`` | "
+            "``qdrant`` | ``pinecone`` | ``memory``."
+        ),
     )
     corpus_path: str = Field(
         default="./local_data/corpus.db",
-        description="SQLite path used by the default sqlite-vec backend.",
+        description="SQLite path used by the BM25 corpus + sqlite-vec backend.",
     )
+
+    # -- pgvector backend ----------------------------------------------
+    pgvector_table: str = "canon_chunk_vectors"
+    pgvector_hnsw_m: int = Field(default=16, ge=4, le=64)
+    pgvector_hnsw_ef_construction: int = Field(default=64, ge=8, le=1024)
+
+    # -- Chroma backend ------------------------------------------------
+    chroma_collection: str = "flycanon"
+
+    # -- Qdrant backend ------------------------------------------------
+    qdrant_url: str = "http://localhost:6333"
+    qdrant_collection: str = "flycanon"
+    qdrant_api_key: str | None = None
+
+    # -- Pinecone backend ----------------------------------------------
+    pinecone_index: str = "flycanon"
+    pinecone_api_key: str | None = None
 
     # -- Ingestion ------------------------------------------------------
     chunk_size_tokens: int = Field(default=1200, ge=128, le=8192)
