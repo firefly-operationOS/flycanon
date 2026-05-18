@@ -101,10 +101,16 @@ class CanonSettings(BaseSettings):
     # ``VectorStoreProtocol``; BM25 stays on SQLite regardless of the
     # vector backend (the corpus file is an index projection, not a
     # source of truth).
+    #
+    # ``pgvector`` is the default because flycanon already runs
+    # Postgres for the canonical store -- co-locating the vector
+    # projection avoids an extra service to operate. Flip to
+    # ``sqlite-vec`` for single-node / dev / test deployments.
     vector_store: str = Field(
-        default="sqlite-vec",
+        default="pgvector",
         description=(
-            "``sqlite-vec`` (default) | ``pgvector`` | ``chroma`` | "
+            "``pgvector`` (default; co-located in Postgres) | "
+            "``sqlite-vec`` (single-file dev) | ``chroma`` | "
             "``qdrant`` | ``pinecone`` | ``memory``."
         ),
     )

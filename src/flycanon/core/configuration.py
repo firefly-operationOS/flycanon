@@ -20,6 +20,7 @@ import logging
 
 from pyfly.container import bean, configuration
 from pyfly.data.relational.health import SqlAlchemyHealthIndicator
+from pyfly.eda import EventPublisher
 
 from flycanon.config import CanonSettings, get_settings
 from flycanon.core.services.audit import AuditService
@@ -188,17 +189,21 @@ class CanonCoreConfiguration:
     def audit_service(
         self,
         audit_repository: AuditRepository,
+        event_publisher: EventPublisher,
         settings: CanonSettings,
     ) -> AuditService:
-        # EventPublisher is registered upstream by pyfly's
-        # EdaAutoConfiguration; we pass ``None`` to the bean factory
-        # here -- the framework rebinds the dependency at startup
-        # via the dynamic context. AuditService treats the publisher
-        # as best-effort, so a None during the bootstrap window is
-        # equivalent to "audit-only, no broadcast".
+        """``AuditService`` -- persists rows + broadcasts on flycanon.audit.
+
+        The :class:`EventPublisher` is registered upstream by pyfly's
+        :class:`EdaAutoConfiguration` (Postgres outbox by default;
+        see ``pyfly.yaml``). Taking it as a bean argument lets the
+        DI container inject the real publisher; AuditService still
+        swallows publish failures so the durable audit row in
+        Postgres remains the source of truth.
+        """
         return AuditService(
             repository=audit_repository,
-            event_publisher=None,
+            event_publisher=event_publisher,
             settings=settings,
         )
 
@@ -207,12 +212,13 @@ class CanonCoreConfiguration:
         self,
         knowledge_repository: KnowledgeRepository,
         audit_service: AuditService,
+        event_publisher: EventPublisher,
         settings: CanonSettings,
     ) -> KnowledgeService:
         return KnowledgeService(
             repository=knowledge_repository,
             audit=audit_service,
-            event_publisher=None,
+            event_publisher=event_publisher,
             settings=settings,
         )
 
@@ -268,6 +274,7 @@ class CanonCoreConfiguration:
         chunk_repository: ChunkRepository,
         knowledge_service: KnowledgeService,
         audit_service: AuditService,
+        event_publisher: EventPublisher,
         settings: CanonSettings,
     ) -> CandidateService:
         return CandidateService(
@@ -277,7 +284,7 @@ class CanonCoreConfiguration:
             chunk_repository=chunk_repository,
             knowledge=knowledge_service,
             audit=audit_service,
-            event_publisher=None,
+            event_publisher=event_publisher,
             settings=settings,
         )
 
@@ -342,6 +349,7 @@ class CanonCoreConfiguration:
         source_repository: SourceRepository,
         chunk_repository: ChunkRepository,
         audit_service: AuditService,
+        event_publisher: EventPublisher,
         settings: CanonSettings,
     ) -> IntakeService:
         return IntakeService(
@@ -353,6 +361,6 @@ class CanonCoreConfiguration:
             source_repository=source_repository,
             chunk_repository=chunk_repository,
             audit=audit_service,
-            event_publisher=None,
+            event_publisher=event_publisher,
             settings=settings,
         )

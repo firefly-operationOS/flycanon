@@ -15,7 +15,11 @@ x-build: &service-build
 
 services:
   postgres:
-    image: postgres:16-alpine
+    # pgvector ships an official image that bundles the ``vector``
+    # extension on top of stock Postgres 16. flycanon defaults to
+    # FLYCANON_VECTOR_STORE=pgvector so the canonical store + the
+    # dense-vector projection live in one operational Postgres.
+    image: pgvector/pgvector:pg16
     environment:
       POSTGRES_USER: canon
       POSTGRES_PASSWORD: canon
