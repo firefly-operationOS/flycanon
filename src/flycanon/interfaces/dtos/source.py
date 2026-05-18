@@ -248,3 +248,36 @@ class SourcesPage(BaseModel):
     total: int = Field(ge=0, description="Total rows matching the filters.")
     offset: int = Field(ge=0)
     limit: int = Field(ge=1, le=500)
+
+
+class BulkSourceResult(BaseModel):
+    """Per-entry outcome of a bulk ingest call.
+
+    Either ``source`` is populated (on success) or
+    ``error_code`` + ``error_message`` are (on failure). The
+    ``index`` field matches the input array position so callers
+    can correlate failures with their batch.
+    """
+
+    index: int = Field(ge=0, description="Position in the request array.")
+    status: str = Field(
+        description="``succeeded`` or ``failed`` for this entry.",
+        examples=["succeeded", "failed"],
+    )
+    source: SourceRecord | None = Field(default=None)
+    error_code: str | None = Field(default=None)
+    error_message: str | None = Field(default=None)
+
+
+class BulkSourcesResponse(BaseModel):
+    """Aggregate response for ``POST /api/v1/sources:bulk``.
+
+    Entries are processed sequentially -- failures are isolated to
+    their own entry and never abort the batch. The caller inspects
+    each ``BulkSourceResult`` to retry / inspect failures.
+    """
+
+    results: list[BulkSourceResult] = Field(default_factory=list)
+    total: int = Field(ge=0)
+    succeeded: int = Field(ge=0)
+    failed: int = Field(ge=0)

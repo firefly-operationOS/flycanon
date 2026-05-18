@@ -164,4 +164,42 @@ class RetireKnowledgeRequest(BaseModel):
     actor: str | None = Field(default=None)
 
 
+class FieldChange(BaseModel):
+    """One field's old -> new transition between two versions."""
+
+    field: str = Field(description="Name of the changed field.")
+    before: Any | None = Field(default=None)
+    after: Any | None = Field(default=None)
+
+
+class KnowledgeVersionDiff(BaseModel):
+    """Diff between two versions of the same knowledge item.
+
+    Returned by ``GET /api/v1/knowledge/{id}/diff?from=X&to=Y``.
+    The body diff is a Unix-style unified diff with three lines of
+    context (the same shape ``git diff`` emits) so an audit tool or
+    a UI can render it without parsing the wire form. Per-field
+    changes cover the scalar columns that don't fit in a body diff
+    (title, summary, domain, jurisdiction, tags). Citations are
+    diffed at the set level since their order does not carry
+    canonical meaning.
+    """
+
+    knowledge_item_id: str
+    from_version: int = Field(ge=1)
+    to_version: int = Field(ge=1)
+    body_diff: str = Field(
+        description=(
+            "Unified diff of the version body. Empty string when the "
+            "two versions share an identical body."
+        )
+    )
+    field_changes: list[FieldChange] = Field(
+        default_factory=list,
+        description="Scalar-field changes (title, summary, domain, jurisdiction, tags).",
+    )
+    citations_added: list[Citation] = Field(default_factory=list)
+    citations_removed: list[Citation] = Field(default_factory=list)
+
+
 Provenance.model_rebuild()

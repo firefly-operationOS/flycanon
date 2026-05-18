@@ -18,12 +18,17 @@ from flycanon.core.mappers import (
     to_knowledge_item,
     to_knowledge_version,
 )
-from flycanon.core.services.knowledge import KnowledgeService, ProvenanceService
+from flycanon.core.services.knowledge import (
+    KnowledgeDiffService,
+    KnowledgeService,
+    ProvenanceService,
+)
 from flycanon.interfaces.dtos.knowledge import (
     CreateKnowledgeRequest,
     KnowledgeItem,
     KnowledgeItemsPage,
     KnowledgeVersion,
+    KnowledgeVersionDiff,
     Provenance,
     RetireKnowledgeRequest,
     SupersedeKnowledgeRequest,
@@ -237,9 +242,33 @@ class GetProvenanceHandler(QueryHandler[GetProvenanceQuery, Provenance]):
         return Provenance.model_validate(raw)
 
 
+@dataclass(frozen=True)
+class GetKnowledgeDiffQuery(Query[KnowledgeVersionDiff]):
+    item_id: str
+    from_version: int
+    to_version: int
+
+
+@query_handler
+@service
+class GetKnowledgeDiffHandler(QueryHandler[GetKnowledgeDiffQuery, KnowledgeVersionDiff]):
+    def __init__(self, diff_service: KnowledgeDiffService) -> None:
+        super().__init__()
+        self._diff = diff_service
+
+    async def do_handle(self, query: GetKnowledgeDiffQuery) -> KnowledgeVersionDiff:
+        return await self._diff.diff(
+            item_id=query.item_id,
+            from_version=query.from_version,
+            to_version=query.to_version,
+        )
+
+
 __all__ = [
     "CreateKnowledgeCommand",
     "CreateKnowledgeHandler",
+    "GetKnowledgeDiffHandler",
+    "GetKnowledgeDiffQuery",
     "GetKnowledgeHandler",
     "GetKnowledgeHistoryHandler",
     "GetKnowledgeHistoryQuery",

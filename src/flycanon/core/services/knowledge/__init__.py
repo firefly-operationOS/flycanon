@@ -9,6 +9,7 @@ audit log through :class:`AuditService`.
 
 from __future__ import annotations
 
+from flycanon.core.services.knowledge.diff_service import KnowledgeDiffService
 from flycanon.core.services.knowledge.errors import (
     KnowledgeItemAlreadyRetired,
     KnowledgeItemNotFound,
@@ -18,6 +19,7 @@ from flycanon.core.services.knowledge.knowledge_service import KnowledgeService
 from flycanon.core.services.knowledge.provenance_service import ProvenanceService
 
 __all__ = [
+    "KnowledgeDiffService",
     "KnowledgeItemAlreadyRetired",
     "KnowledgeItemNotFound",
     "KnowledgeService",
