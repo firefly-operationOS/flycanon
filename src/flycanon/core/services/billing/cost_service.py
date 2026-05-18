@@ -256,7 +256,7 @@ class CostService:
             if not latencies:
                 continue
             latencies.sort()
-            record = {name: value for name, value in zip(groups, key, strict=True)}
+            record: dict[str, Any] = dict(zip(groups, key, strict=True))
             record["count"] = len(latencies)
             record["p50_ms"] = int(_percentile(latencies, 0.50))
             record["p95_ms"] = int(_percentile(latencies, 0.95))

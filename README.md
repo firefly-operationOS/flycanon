@@ -14,7 +14,7 @@ with citations — all behind a single HTTP service.
 [![agentic](https://img.shields.io/badge/genai-fireflyframework--agentic-purple)](https://github.com/fireflyframework/fireflyframework-agentic)
 [![OpenAPI](https://img.shields.io/badge/api-openapi%203.1-green)](docs/api-reference.md)
 [![pgvector](https://img.shields.io/badge/default--vector--store-pgvector-336791)](docs/architecture.md#pluggable-retrieval-backends)
-[![Version](https://img.shields.io/badge/version-26.5.1-green.svg)](#)
+[![Version](https://img.shields.io/badge/version-26.5.4-green.svg)](#)
 [![License](https://img.shields.io/badge/license-Proprietary-lightgrey.svg)](LICENSE)
 
 </div>
@@ -63,13 +63,20 @@ object that carries, for every interaction:
 
 | Layer                       | What it tells you                                                                                                                              |
 | --------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Sources**                 | `SourceRecord` per ingested artefact (id, kind, status, content sha256, chunk count, ancestry chain when the artefact came out of a bundle).   |
-| **Knowledge items**         | Canonical pointer (status, current version, domain, jurisdiction). Updates append a new version; the previous one flips to `superseded`.       |
+| **Sources**                 | `SourceRecord` per ingested artefact (id, kind, status, content sha256, chunk count, ancestry chain when the artefact came out of a bundle). Bulk + async ingest variants return per-item results / a job id; `PUT /api/v1/sources/{id}` re-ingests in place and preserves the row id. |
+| **Knowledge items**         | Canonical pointer (status, current version, domain, jurisdiction). Updates append a new version; the previous one flips to `superseded`. `GET /api/v1/knowledge/{id}/diff` returns a unified diff + field changes + citation set deltas between any two versions. |
 | **Knowledge versions**      | Append-only revisions of a knowledge item. Citations to source chunks travel with the edge.                                                    |
+| **Knowledge graph**         | Typed edges between items (`related` / `depends_on` / `conflicts_with` / `replaces`) over `/api/v1/knowledge/{id}/relations`, plus a whole-canon view at `/api/v1/knowledge:graph` (JSON or `Accept: text/vnd.mermaid`). Conflict detection materialises `conflicts_with` edges automatically. |
 | **Candidates**              | Pre-canonical LLM proposals tied to a source. Accept / reject lifecycle materialises them into the knowledge chain.                            |
-| **Hybrid retrieval**        | `SearchResponse` with BM25 (Postgres `tsvector` + GIN by default; SQLite FTS5 when the vector backend lives elsewhere) + dense vectors fused via Reciprocal Rank Fusion (RRF). Each hit carries `chunk_id`, `source_id`, `source_filename`, `source_title`, `source_kind`, `source_uri`, `section_path`, `page`, the matching `content`, and the fused `score` — UIs can render citation labels without a second `GET /api/v1/sources/{id}`. |
-| **Grounded RAG answers**    | `AnswerResponse` with the answer + citation list (same enriched `Hit` shape — filename / title / kind / section / page populated), `model`, `elapsed_ms`. A grounded "I don't know" is `answer == ""` with empty citations — flycanon never hallucinates. |
+| **Hybrid retrieval**        | `SearchResponse` with BM25 (Postgres `tsvector` + GIN by default; SQLite FTS5 when the vector backend lives elsewhere) + dense vectors fused via Reciprocal Rank Fusion (RRF), optional cross-encoder rerank (Cohere / Voyage), and optional LLM query expansion. Each hit carries `chunk_id`, `source_id`, `source_filename`, `source_title`, `source_kind`, `source_uri`, `section_path`, `page`, the matching `content`, and the fused `score` — UIs can render citation labels without a second `GET /api/v1/sources/{id}`. |
+| **Grounded RAG answers**    | `AnswerResponse` with the answer + citation list (same enriched `Hit` shape — filename / title / kind / section / page populated), `model`, `elapsed_ms`. `POST /api/v1/query:stream` emits the same payload as Server-Sent Events. A grounded "I don't know" is `answer == ""` with empty citations — flycanon never hallucinates. |
+| **Conversations**           | Multi-turn threads at `/api/v1/conversations/...` with rolling summary + last-N-turn context windowing. Each turn returns the same enriched citation set as `/query`; `:suggest` proposes 3-5 grounded follow-up questions. |
 | **Provenance**              | Resolved citation graph for one knowledge version plus the source summaries it touches plus the version chain of its item.                     |
+| **Async ingest jobs**       | `IngestJob` row + SSE event stream for any large or bulk ingest. Status / stage / progress / source id / RFC 7807 error envelope all surface through `GET /api/v1/jobs/{id}` and `GET /api/v1/jobs/{id}/stream` (cursor-resumable). |
+| **Knowledge quality**       | `GET /api/v1/knowledge:stale` returns per-item staleness scores (cosine vs fresh sources, 6h cached); `POST /api/v1/knowledge:detect-conflicts` runs an LLM-judged pairwise conflict scan, queues confirmed conflicts as candidates, and auto-creates the matching `conflicts_with` edges. |
+| **PII guardrail**           | Configurable regex scanner with four policies (`disabled` / `warn` / `redact` / `reject`). Runs on every intake path (initial submit, bulk, async, replace). `reject` returns RFC 7807 + `findings[]` so callers can surface a precise diagnostic. |
+| **Billing + cost stream**   | `/api/v1/billing` aggregates spend; `/events` drills into per-call breadcrumbs (correlation id, subject, latency); `/summary` returns 24h / 7d / 30d snapshots; `/top` and `/by-subject` answer "who" and "where did it go"; `/latency` returns p50 / p95 / p99 from the same cost-event stream. |
+| **Corpus inventory**        | `GET /api/v1/stats` -- one-shot snapshot covering sources (by kind + status + bytes), knowledge items (by status + domain), versions, candidates, chunks (embedded coverage), ingest jobs (by status + avg attempts), and the cost headline (24h / 30d). |
 | **Append-only audit log**   | Every mutation (`/api/v1/audit`) with correlation id, actor, payload, and W3C trace context.                                                   |
 | **EDA topics**              | Three durable topics published via the Postgres outbox: `flycanon.ingest`, `flycanon.knowledge`, `flycanon.audit`.                              |
 | **RFC 7807 error envelope** | Every non-2xx response is a ProblemDetails payload with a stable `code` field for branching.                                                   |
@@ -238,7 +245,7 @@ task openapi             # /openapi.json
 
 ## SDKs
 
-Both SDKs pin their version to the service's CalVer (`26.5.1`), so
+Both SDKs pin their version to the service's CalVer (`26.5.4`), so
 the client and server upgrade in lockstep.
 
 | SDK | Highlights |

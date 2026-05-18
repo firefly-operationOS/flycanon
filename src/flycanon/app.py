@@ -16,7 +16,7 @@ from pyfly.starters.core import enable_core_stack
 @enable_core_stack
 @pyfly_application(
     name="flycanon",
-    version="26.5.1",
+    version="26.5.4",
     description=(
         "flycanon -- Operational Knowledge Repository. Versioned, "
         "provenance-tracked canonical knowledge with hybrid retrieval "

@@ -342,7 +342,7 @@ PAT needs at minimum the `read:packages` scope.
 ### Python SDK: `uv add https://.../flycanon_sdk-*.whl` fails with 404
 
 The release asset URL the install snippet shows uses the **PEP 440
-normalised** version (`26.5.1`), not the tag version (`v26.05.01`).
+normalised** version (`26.5.4`), not the tag version (`v26.05.04`).
 Leading zeros are stripped.
 
 **Fix.** Use the URL from the release notes (it's pre-computed
@@ -350,10 +350,10 @@ correctly) or rebuild it:
 
 ```bash
 # Wrong (tag form):
-uv add https://github.com/.../v26.05.01/flycanon_sdk-26.05.01-py3-none-any.whl
+uv add https://github.com/.../v26.05.04/flycanon_sdk-26.05.04-py3-none-any.whl
 
 # Right (PEP 440):
-uv add https://github.com/.../v26.05.01/flycanon_sdk-26.5.1-py3-none-any.whl
+uv add https://github.com/.../v26.05.04/flycanon_sdk-26.5.4-py3-none-any.whl
 ```
 
 ---

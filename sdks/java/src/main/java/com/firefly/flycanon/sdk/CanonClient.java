@@ -60,7 +60,7 @@ public final class CanonClient {
                 : RestClient.builder())
                 .baseUrl(builder.baseUrl)
                 .defaultHeader(HttpHeaders.ACCEPT, MediaType.APPLICATION_JSON_VALUE)
-                .defaultHeader(HttpHeaders.USER_AGENT, "flycanon-sdk-java/26.5.2");
+                .defaultHeader(HttpHeaders.USER_AGENT, "flycanon-sdk-java/26.5.4");
         Optional.ofNullable(builder.apiKey)
                 .filter(k -> !k.isBlank())
                 .ifPresent(k -> rcb.defaultHeader(HttpHeaders.AUTHORIZATION, "Bearer " + k));
@@ -258,6 +258,32 @@ public final class CanonClient {
 
     public Models.BillingReport billingReport(Map<String, String> filters) {
         return request("GET", "/api/v1/billing" + queryString(filters), null, Models.BillingReport.class);
+    }
+
+    public Models.CostEventsPage listCostEvents(Map<String, String> filters) {
+        return request("GET", "/api/v1/billing/events" + queryString(filters), null, Models.CostEventsPage.class);
+    }
+
+    public Models.BillingSummary billingSummary(Map<String, String> filters) {
+        return request("GET", "/api/v1/billing/summary" + queryString(filters), null, Models.BillingSummary.class);
+    }
+
+    public Models.TopConsumersReport billingTop(Map<String, String> filters) {
+        return request("GET", "/api/v1/billing/top" + queryString(filters), null, Models.TopConsumersReport.class);
+    }
+
+    public Models.SubjectCostReport billingBySubject(Map<String, String> filters) {
+        return request("GET", "/api/v1/billing/by-subject" + queryString(filters), null, Models.SubjectCostReport.class);
+    }
+
+    public Models.LatencyReport billingLatency(Map<String, String> filters) {
+        return request("GET", "/api/v1/billing/latency" + queryString(filters), null, Models.LatencyReport.class);
+    }
+
+    // ---------- Corpus inventory ----------
+
+    public Models.CorpusStats stats() {
+        return request("GET", "/api/v1/stats", null, Models.CorpusStats.class);
     }
 
     // ---------- Query ----------

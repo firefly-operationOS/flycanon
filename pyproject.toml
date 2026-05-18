@@ -1,8 +1,8 @@
 [project]
 name = "flycanon"
 # CalVer YY.MM.PP -- bumped per release. Note that PEP 440 normalises
-# ``26.05.01`` -> ``26.5.1`` in the built wheel filename.
-version = "26.5.1"
+# ``26.05.04`` -> ``26.5.4`` in the built wheel filename.
+version = "26.5.4"
 description = "Operational Knowledge Repository -- versioned, provenance-tracked canonical knowledge with hybrid retrieval and RAG, exposed as a standalone HTTP microservice over fireflyframework-pyfly and -agentic. Part of Firefly OperationOS, platform-agnostic by design."
 readme = "README.md"
 requires-python = ">=3.13"
@@ -204,8 +204,14 @@ exclude = ["tests/**", "**/__pycache__/**", "vendor/**"]
 
 # Execution-environment overrides silence false positives that come
 # from framework-level metaprogramming pyright can't follow. pyfly's
-# ``Body[T]`` / ``Valid[T]`` / ``PathVar[T]`` are runtime
-# ``Generic[T]`` classes the framework strips at injection time.
+# ``Body[T]`` / ``Valid[T]`` / ``PathVar[T]`` / ``QueryParam[T]`` are
+# runtime ``Generic[T]`` classes the framework unwraps at injection
+# time -- the controller method sees the inner ``T``, but pyright
+# (which can't follow the metaprogramming) sees the wrapper. Both
+# ``reportArgumentType`` and ``reportAttributeAccessIssue`` end up
+# firing on every controller; silence both here.
 [[tool.pyright.executionEnvironments]]
 root = "src/flycanon/web/controllers"
 reportArgumentType = "none"
+reportAttributeAccessIssue = "none"
+reportOperatorIssue = "none"

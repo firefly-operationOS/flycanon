@@ -84,6 +84,17 @@ human-readable catalogue.
 | Method | Path | Description |
 |--------|------|-------------|
 | `GET`  | `/api/v1/billing` | Aggregated cost report. Query: `group_by` (csv of `date`/`model`/`agent_name`/`actor`), `actor`, `since`, `until`. |
+| `GET`  | `/api/v1/billing/events` | Per-call drill-down (correlation id + subject + latency). Query: `actor`, `agent_name`, `since`, `until`, `limit` (1-500), `offset`. |
+| `GET`  | `/api/v1/billing/summary` | Rolling-window snapshot (24h / 7d / 30d) with top model + top actor per window. Query: `actor`. |
+| `GET`  | `/api/v1/billing/top` | Top-N consumers by cost. Query: `dimension` (`model` / `agent_name` / `actor`), `since`, `until`, `limit` (1-100). |
+| `GET`  | `/api/v1/billing/by-subject` | Cost attribution per `(subject_kind, subject_id)`. Query: `subject_kind`, `since`, `until`, `limit` (1-200). |
+| `GET`  | `/api/v1/billing/latency` | p50 / p95 / p99 latency per group. Query: `group_by` (csv of `model` / `agent_name` / `actor`), `since`, `until`. |
+
+## Inventory
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET`  | `/api/v1/stats` | One-shot corpus + queue + cost-stream snapshot (sources, knowledge items, versions, candidates, chunks, ingest jobs, cost headline). |
 
 ## Taxonomy
 
