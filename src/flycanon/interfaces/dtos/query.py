@@ -114,6 +114,57 @@ class Hit(BaseModel):
 
     chunk_id: str = Field(description="Stable id of the matched chunk.")
     source_id: str = Field(description="Id of the source the chunk belongs to.")
+    source_filename: str | None = Field(
+        default=None,
+        description=(
+            "Original filename the source was ingested as "
+            "(``Manifiesto.pdf``, ``Cleargate.docx``, ...). Lets a UI "
+            "render a human-readable label without a second "
+            "``/api/v1/sources/{id}`` round-trip."
+        ),
+        examples=["Cleargate Business Idea.docx"],
+    )
+    source_title: str | None = Field(
+        default=None,
+        description=(
+            "Caller-supplied ``metadata.title`` or, when absent, the "
+            "extractor-derived title from the document's embedded "
+            "metadata (PyMuPDF / python-docx / python-pptx). Use as "
+            "the citation label in answer UIs."
+        ),
+        examples=["Cleargate Business Idea"],
+    )
+    source_kind: str | None = Field(
+        default=None,
+        description=(
+            "``SourceKind`` value of the source the chunk came from "
+            "(``pdf`` / ``docx`` / ``pptx`` / ``image`` / ...). Lets "
+            "the caller pick a file-type icon without re-fetching."
+        ),
+        examples=["pdf"],
+    )
+    source_uri: str | None = Field(
+        default=None,
+        description=(
+            "Original URI of the source when it was submitted via URL "
+            "rather than inline bytes. ``null`` for inline uploads."
+        ),
+    )
+    section_path: str | None = Field(
+        default=None,
+        description=(
+            "Section breadcrumb derived from the document headings "
+            "(``Scope > In scope``, ``9) Repositorio + Controlador "
+            "WebFlux``, ...). Mirrors ``canon_chunks.section_path``."
+        ),
+        examples=["Scope > In scope"],
+    )
+    page: int | None = Field(
+        default=None,
+        ge=1,
+        description="1-based page number when the chunk's source has paginated layout (PDF, PPTX). ``null`` otherwise.",
+        examples=[2],
+    )
     knowledge_item_id: str | None = Field(
         default=None,
         description=(
@@ -153,12 +204,13 @@ class Hit(BaseModel):
     metadata: dict[str, str] = Field(
         default_factory=dict,
         description=(
-            "Chunk-level metadata projected from the corpus index "
-            "(``section_path``, ``page``, ``source_kind``, ...) so "
-            "the caller can render breadcrumbs without a second "
-            "lookup."
+            "Free-form chunk metadata projected from the corpus index. "
+            "The structured fields ``source_filename`` / "
+            "``source_title`` / ``source_kind`` / ``section_path`` / "
+            "``page`` are exposed as top-level attributes; this dict "
+            "carries everything else the loader emitted."
         ),
-        examples=[{"section_path": "Scope > In scope", "page": "2"}],
+        examples=[{"source_kind": "pdf"}],
     )
 
 

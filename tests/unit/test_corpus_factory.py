@@ -36,6 +36,7 @@ def _settings(**overrides) -> CanonSettings:
         "qdrant_api_key": "",
         "pinecone_index": "flycanon",
         "pinecone_api_key": "",
+        "bm25_text_search_config": "simple",
     }
     base.update(overrides)
     return SimpleNamespace(**base)  # type: ignore[return-value]
@@ -74,13 +75,22 @@ class TestBackendSelection:
             vector_store="pgvector", corpus_path=str(tmp_path / "corpus.sqlite")
         )
         with (
-            patch("fireflyframework_agentic.rag.corpus.SqliteCorpus"),
+            patch(
+                "flycanon.core.services.retrieval.postgres_corpus.PostgresCorpus"
+            ) as pg_corpus_mock,
             patch(
                 "flycanon.core.services.retrieval.pgvector_store.PgVectorVectorStore"
             ) as pgvec_mock,
         ):
             ctx = corpus_factory.build_corpus_context(settings=settings)
         assert ctx.backend == "pgvector"
+        # The pgvector path uses the Postgres-native BM25 corpus
+        # (tsvector + GIN on canon_chunks) instead of the file-backed
+        # SQLite FTS5 corpus -- co-located with the dense projection.
+        pg_corpus_mock.assert_called_once_with(
+            database_url=settings.database_url,
+            search_config=settings.bm25_text_search_config,
+        )
         pgvec_mock.assert_called_once_with(
             database_url=settings.database_url,
             dimension=settings.embedding_dimensions,

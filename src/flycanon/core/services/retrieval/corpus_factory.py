@@ -61,20 +61,29 @@ def build_corpus_context(
     *,
     settings: CanonSettings,
 ) -> CorpusContext:
-    """Resolve ``FLYCANON_VECTOR_STORE`` into a populated context."""
-    from fireflyframework_agentic.rag.corpus import SqliteCorpus
+    """Resolve ``FLYCANON_VECTOR_STORE`` into a populated context.
 
-    backend = (settings.vector_store or "sqlite-vec").strip().lower()
+    BM25 corpus selection is co-located with the vector store: when
+    Postgres is the dense store (``pgvector``, default) the BM25
+    projection rides on the same Postgres via the GENERATED ``tsv``
+    column on ``canon_chunks`` (see migration ``0003_bm25_tsv``).
+    SQLite-backed deployments stay on the file-backed FTS5 corpus
+    shipped by ``fireflyframework-agentic``. Remote vector stores
+    (chroma / qdrant / pinecone / memory) fall back to the SQLite
+    BM25 corpus -- consumers that need the BM25 projection co-resident
+    in their own service should switch to ``pgvector``.
+    """
+    backend = (settings.vector_store or "pgvector").strip().lower()
     corpus_path = Path(settings.corpus_path)
     corpus_path.parent.mkdir(parents=True, exist_ok=True)
 
-    corpus = SqliteCorpus(corpus_path)
+    corpus = _build_corpus(settings=settings, backend=backend, corpus_path=corpus_path)
     vector_store = _build_vector_store(settings=settings, backend=backend)
 
     logger.info(
         "retrieval index ready backend=%s corpus=%s dim=%d",
         backend,
-        corpus_path,
+        type(corpus).__name__,
         settings.embedding_dimensions,
     )
     return CorpusContext(
@@ -83,6 +92,31 @@ def build_corpus_context(
         backend=backend,
         path=corpus_path,
     )
+
+
+def _build_corpus(
+    *,
+    settings: CanonSettings,
+    backend: str,
+    corpus_path: Path,
+) -> object:
+    """Pick the BM25 corpus implementation.
+
+    ``pgvector`` -- Postgres-native ``tsvector`` + GIN on the
+    canonical ``canon_chunks`` table (no extra service to operate).
+    Everything else falls back to the agentic ``SqliteCorpus`` (FTS5
+    on a file-backed SQLite db) for portability.
+    """
+    if backend == "pgvector":
+        from flycanon.core.services.retrieval.postgres_corpus import PostgresCorpus
+
+        return PostgresCorpus(
+            database_url=settings.database_url,
+            search_config=settings.bm25_text_search_config,
+        )
+    from fireflyframework_agentic.rag.corpus import SqliteCorpus
+
+    return SqliteCorpus(corpus_path)
 
 
 def _build_vector_store(*, settings: CanonSettings, backend: str) -> object:

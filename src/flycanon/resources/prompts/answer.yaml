@@ -6,7 +6,9 @@
 # Variables:
 #   * question         -- caller's question.
 #   * extra_instructions -- optional caller steering.
-#   * hits             -- list of {chunk_id, section_path, page, content, source_id}.
+#   * hits             -- list of {chunk_id, source_id, source_filename,
+#                         source_title, source_kind, section_path, page,
+#                         content}.
 
 system: |
   You are the answer engine of an Operational Knowledge Repository.
@@ -33,7 +35,7 @@ user: |
 
   RELEVANT CHUNKS:
   {% for hit in hits -%}
-  --- chunk_id: {{ hit.chunk_id }} (source: {{ hit.source_id }}, section: {{ hit.section_path or "-" }}{% if hit.page %}, page {{ hit.page }}{% endif %}) ---
+  --- chunk_id: {{ hit.chunk_id }} | source: {{ hit.source_filename or hit.source_title or hit.source_id }}{% if hit.source_kind %} ({{ hit.source_kind }}){% endif %} | section: {{ hit.section_path or "-" }}{% if hit.page %} | page {{ hit.page }}{% endif %} ---
   {{ hit.content }}
 
   {% endfor %}

@@ -88,11 +88,25 @@ System.out.println(source.id() + " ingested with " + source.nChunks() + " chunks
 
 ## 5. Search
 
+Every hit carries the rich source-side context (filename, title,
+kind, section breadcrumb, page) at the top level -- no second
+`getSource(...)` round-trip needed to render a citation label.
+
 ```java
 import com.firefly.flycanon.sdk.model.Models.SearchResponse;
 
 SearchResponse hits = canon.search("scope", 5);
-hits.hits().forEach(h -> System.out.println(h.score() + "  " + h.content()));
+hits.hits().forEach(h -> {
+    String label = h.sourceFilename() != null ? h.sourceFilename()
+            : (h.sourceTitle() != null ? h.sourceTitle() : h.sourceId());
+    String location = h.sectionPath() != null ? h.sectionPath() : "-";
+    if (h.page() != null) {
+        location = location + " (page " + h.page() + ")";
+    }
+    System.out.printf("%.4f  [%s] %s -- %s%n",
+            h.score(), h.sourceKind(), label, location);
+    System.out.println("        " + h.content().substring(0, Math.min(120, h.content().length())));
+});
 ```
 
 ## 6. Ask a grounded question
@@ -102,8 +116,14 @@ import com.firefly.flycanon.sdk.model.Models.AnswerResponse;
 
 AnswerResponse answer = canon.answer("Summarise the scope section in three sentences.");
 System.out.println(answer.answer());
-answer.citations().forEach(c ->
-        System.out.println(" - " + c.sourceId() + " " + c.score()));
+answer.citations().forEach(c -> {
+    String label = c.sourceFilename() != null ? c.sourceFilename()
+            : (c.sourceTitle() != null ? c.sourceTitle() : c.sourceId());
+    System.out.printf(" - %s (%s) -- section: %s -- score: %.3f%n",
+            label, c.sourceKind(),
+            c.sectionPath() != null ? c.sectionPath() : "-",
+            c.score());
+});
 ```
 
 ## 7. Error handling

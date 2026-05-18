@@ -43,14 +43,36 @@ def _filters_from_request(request: SearchRequest) -> RetrievalFilters:
 
 
 def _hit_dto(hit) -> Hit:
+    """Project a retrieval ``Hit`` into the public DTO.
+
+    The structured source-side fields (``source_filename``,
+    ``source_title``, ``source_kind``, ``source_uri``,
+    ``section_path``, ``page``) are promoted from the
+    ``hit.metadata`` dict that the retrieval pipeline hydrates so
+    callers don't need a second ``GET /api/v1/sources/{id}`` for
+    rendering citation labels. Anything else the loader emitted
+    stays in ``metadata`` for forward-compat.
+    """
+    metadata = dict(hit.metadata or {})
+    page_raw = metadata.pop("page", None)
+    try:
+        page = int(page_raw) if page_raw not in (None, "") else None
+    except (TypeError, ValueError):
+        page = None
     return Hit(
         chunk_id=hit.chunk_id,
         source_id=hit.source_id,
+        source_filename=metadata.pop("source_filename", None) or None,
+        source_title=metadata.pop("source_title", None) or None,
+        source_kind=metadata.pop("source_kind", None) or None,
+        source_uri=metadata.pop("source_uri", None) or None,
+        section_path=metadata.pop("section_path", None) or None,
+        page=page,
         knowledge_item_id=hit.knowledge_item_id,
         knowledge_version=hit.knowledge_version,
         content=hit.content,
         score=hit.score,
         bm25_rank=hit.bm25_rank,
         vector_rank=hit.vector_rank,
-        metadata=dict(hit.metadata or {}),
+        metadata=metadata,
     )

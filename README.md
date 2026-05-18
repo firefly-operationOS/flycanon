@@ -67,8 +67,8 @@ object that carries, for every interaction:
 | **Knowledge items**         | Canonical pointer (status, current version, domain, jurisdiction). Updates append a new version; the previous one flips to `superseded`.       |
 | **Knowledge versions**      | Append-only revisions of a knowledge item. Citations to source chunks travel with the edge.                                                    |
 | **Candidates**              | Pre-canonical LLM proposals tied to a source. Accept / reject lifecycle materialises them into the knowledge chain.                            |
-| **Hybrid retrieval**        | `SearchResponse` with BM25 (SQLite FTS5) + dense vectors fused via Reciprocal Rank Fusion (RRF). Each hit carries `chunk_id`, `source_id`, the matching `content`, and the fused `score`. |
-| **Grounded RAG answers**    | `AnswerResponse` with the answer, citation list, `model`, `elapsed_ms`. A grounded "I don't know" is `answer == ""` with empty citations — flycanon never hallucinates. |
+| **Hybrid retrieval**        | `SearchResponse` with BM25 (Postgres `tsvector` + GIN by default; SQLite FTS5 when the vector backend lives elsewhere) + dense vectors fused via Reciprocal Rank Fusion (RRF). Each hit carries `chunk_id`, `source_id`, `source_filename`, `source_title`, `source_kind`, `source_uri`, `section_path`, `page`, the matching `content`, and the fused `score` — UIs can render citation labels without a second `GET /api/v1/sources/{id}`. |
+| **Grounded RAG answers**    | `AnswerResponse` with the answer + citation list (same enriched `Hit` shape — filename / title / kind / section / page populated), `model`, `elapsed_ms`. A grounded "I don't know" is `answer == ""` with empty citations — flycanon never hallucinates. |
 | **Provenance**              | Resolved citation graph for one knowledge version plus the source summaries it touches plus the version chain of its item.                     |
 | **Append-only audit log**   | Every mutation (`/api/v1/audit`) with correlation id, actor, payload, and W3C trace context.                                                   |
 | **EDA topics**              | Three durable topics published via the Postgres outbox: `flycanon.ingest`, `flycanon.knowledge`, `flycanon.audit`.                              |
@@ -107,17 +107,29 @@ section markers, so chunks remain attributable via
 
 ## Backend-agnostic retrieval
 
-BM25 stays on a file-backed SQLite FTS5 index (portable, no extra
-service, sufficient for the BM25 channel). The dense projection is
-chosen at boot via `FLYCANON_VECTOR_STORE`:
+The BM25 corpus is co-located with the dense projection so hybrid
+retrieval is single-host in the default deployment:
+
+- **`pgvector` (default)** — BM25 rides on a `tsvector` + GIN index
+  on `canon_chunks.tsv` (a Postgres GENERATED column derived from
+  `content`). No extra service, no SQLite file — both projections
+  live in the same operational Postgres. Text-search config is
+  `simple` by default (multilingual); switch to `english` /
+  `spanish` / … via `FLYCANON_BM25_TEXT_SEARCH_CONFIG`.
+- **`sqlite-vec` / `chroma` / `qdrant` / `pinecone` / `memory`** —
+  BM25 falls back to the file-backed SQLite FTS5 corpus shipped by
+  `fireflyframework-agentic` (portable, single-file, no extra
+  service).
+
+The dense projection is chosen at boot via `FLYCANON_VECTOR_STORE`:
 
 | Backend      | Use case                                                                                                                                |
 | ------------ | --------------------------------------------------------------------------------------------------------------------------------------- |
-| **`pgvector`**   | **Default.** PostgreSQL + pgvector extension. HNSW index on `vector_cosine_ops`, tuneable `m` / `ef_construction`. Same operational Postgres as the canonical store. |
+| **`pgvector`**   | **Default.** PostgreSQL + pgvector extension. HNSW index on `vector_cosine_ops`, tuneable `m` / `ef_construction`. Same operational Postgres as the canonical store AND the BM25 projection. |
 | `chroma`     | Self-hosted Chroma server. Namespaced by `FLYCANON_CHROMA_COLLECTION`.                                                                  |
 | `qdrant`     | Self-hosted or Qdrant Cloud. `FLYCANON_QDRANT_URL` + optional API key.                                                                  |
 | `pinecone`   | Pinecone Serverless. `FLYCANON_PINECONE_INDEX` + `FLYCANON_PINECONE_API_KEY`.                                                            |
-| `sqlite-vec` | Laptop / single-process deployments. Same SQLite file as the FTS5 index.                                                                |
+| `sqlite-vec` | Laptop / single-process deployments. Same SQLite file as the FTS5 BM25 index.                                                           |
 | `memory`     | Tests only — evicted on process exit.                                                                                                   |
 
 Switching backends is a config change — the application code only

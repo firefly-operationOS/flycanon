@@ -235,8 +235,24 @@ class CreateTaxonomyNodeRequest(BaseModel):
 
 
 class Hit(BaseModel):
+    """Single retrieval hit.
+
+    Returned by ``/api/v1/search`` as the page-level list and by
+    ``/api/v1/query`` as the citation list. The structured source-side
+    fields (``source_filename`` / ``source_title`` / ``source_kind`` /
+    ``source_uri`` / ``section_path`` / ``page``) are hydrated by
+    flycanon so the SDK consumer can render citation labels without a
+    second ``GET /api/v1/sources/{id}`` round-trip.
+    """
+
     chunk_id: str
     source_id: str
+    source_filename: str | None = None
+    source_title: str | None = None
+    source_kind: str | None = None
+    source_uri: str | None = None
+    section_path: str | None = None
+    page: int | None = None
     knowledge_item_id: str | None = None
     knowledge_version: int | None = None
     content: str
