@@ -79,9 +79,9 @@ class RetrievalService:
         default_top_k: int,
         default_per_query_k: int,
         rrf_k: int,
-        reranker: "Reranker | None" = None,
+        reranker: Reranker | None = None,
         reranker_top_n: int = 20,
-        query_expander: "QueryExpander | None" = None,
+        query_expander: QueryExpander | None = None,
         query_expansion_n: int = 1,
     ) -> None:
         self._context = context

@@ -158,9 +158,11 @@ class IngestionService:
             return SourceKind.epub
         if "text/plain" in ct or name.endswith((".txt", ".text")):
             return SourceKind.text
-        if ct.startswith("image/") or name.endswith(
-            (".png", ".jpg", ".jpeg", ".gif", ".webp", ".heic", ".heif", ".avif", ".tif", ".tiff", ".bmp", ".svg")
-        ):
+        _image_exts = (
+            ".png", ".jpg", ".jpeg", ".gif", ".webp", ".heic", ".heif",
+            ".avif", ".tif", ".tiff", ".bmp", ".svg",
+        )
+        if ct.startswith("image/") or name.endswith(_image_exts):
             return SourceKind.image
         if "zip" in ct or name.endswith((".zip", ".7z", ".tar", ".gz", ".tgz")):
             return SourceKind.archive

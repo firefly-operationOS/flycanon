@@ -118,21 +118,18 @@ class ArchiveUnpacker:
 
     def _iter_tar(self, data: bytes, filename: str | None) -> Iterator[tuple[str, bytes]]:
         try:
-            tf = tarfile.open(fileobj=io.BytesIO(data), mode="r:*")
+            with tarfile.open(fileobj=io.BytesIO(data), mode="r:*") as tf:
+                for member in tf.getmembers():
+                    if not member.isfile():
+                        continue
+                    handle = tf.extractfile(member)
+                    if handle is None:
+                        continue
+                    payload = handle.read()
+                    if payload:
+                        yield member.name, payload
         except tarfile.TarError as exc:
             raise ArchiveExtractionError(f"corrupt tar: {exc}", filename=filename) from exc
-        try:
-            for member in tf.getmembers():
-                if not member.isfile():
-                    continue
-                handle = tf.extractfile(member)
-                if handle is None:
-                    continue
-                payload = handle.read()
-                if payload:
-                    yield member.name, payload
-        finally:
-            tf.close()
 
     def _iter_gz(self, data: bytes, filename: str | None) -> Iterator[tuple[str, bytes]]:
         try:

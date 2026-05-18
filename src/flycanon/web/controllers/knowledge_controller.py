@@ -23,8 +23,6 @@ from flycanon.core.services.knowledge.handlers import (
     AddKnowledgeRelationCommand,
     CreateKnowledgeCommand,
     GetKnowledgeDiffQuery,
-    GetKnowledgeGraphMermaidQuery,
-    GetKnowledgeGraphQuery,
     GetKnowledgeHistoryQuery,
     GetKnowledgeQuery,
     GetProvenanceQuery,
@@ -35,7 +33,6 @@ from flycanon.core.services.knowledge.handlers import (
     SupersedeKnowledgeCommand,
     UpdateKnowledgeCommand,
 )
-from flycanon.interfaces.dtos.graph import KnowledgeGraph, MermaidGraph
 from flycanon.interfaces.dtos.knowledge import (
     CreateKnowledgeRequest,
     KnowledgeItem,

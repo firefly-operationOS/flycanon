@@ -34,7 +34,6 @@ from flycanon.core.services.binary.errors import (
 from flycanon.core.services.binary.normalizer import BinaryNormalizer
 from flycanon.interfaces.enums import SourceKind
 
-
 # ---------------------------------------------------------------------------
 # Stubs
 # ---------------------------------------------------------------------------

@@ -113,7 +113,7 @@ class TestTagsFilter:
 
 
 class TestComposedFilters:
-    def test_filters_compose_with_AND(self):
+    def test_filters_compose_with_and(self):
         h = _hit(
             chunk_id="ch-1",
             source_id="src-A",

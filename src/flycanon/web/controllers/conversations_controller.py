@@ -17,7 +17,6 @@ from flycanon.core.services.conversations import (
 )
 from flycanon.interfaces.dtos.conversation import (
     Conversation,
-    ConversationTurn,
     CreateConversationRequest,
     CreateTurnRequest,
     TurnResponse,

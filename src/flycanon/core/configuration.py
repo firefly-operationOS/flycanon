@@ -16,12 +16,14 @@ picked up by a stereotype decorator
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 
 from pyfly.container import bean, configuration
 from pyfly.data.relational.health import SqlAlchemyHealthIndicator
 
 from flycanon.config import CanonSettings, get_settings
+
 # AuditService / KnowledgeService / CandidateService / IntakeService /
 # TaxonomyService / ProvenanceService are no longer constructed via
 # @bean factories here -- they carry their own ``@service`` decorators
@@ -29,17 +31,15 @@ from flycanon.config import CanonSettings, get_settings
 # retained for the type hints used in the remaining @bean signatures.
 from flycanon.core.services.audit import AuditService  # noqa: F401
 from flycanon.core.services.binary import (
-    BinaryNormalizer,
     GotenbergConverter,
     LibreOfficeConverter,
     OfficeConverter,
 )
 from flycanon.core.services.binary.office_converter import NoOpOfficeConverter
 from flycanon.core.services.consolidation import (
-    CandidateService,
     Consolidator,
 )
-from flycanon.core.services.consolidation.prompt_loader import PromptTemplate, load_prompt
+from flycanon.core.services.consolidation.prompt_loader import load_prompt
 from flycanon.core.services.embeddings import EmbeddingService, build_embedding_service
 from flycanon.core.services.ingestion import (
     Chunker,
@@ -48,7 +48,6 @@ from flycanon.core.services.ingestion import (
 )
 from flycanon.core.services.ingestion.chunker import build_default_chunker
 from flycanon.core.services.ingestion.loaders import default_registry
-from flycanon.core.services.knowledge import KnowledgeService, ProvenanceService
 from flycanon.core.services.query import AnswerService, SearchService
 from flycanon.core.services.retrieval import (
     CorpusContext,
@@ -58,8 +57,6 @@ from flycanon.core.services.retrieval import (
 )
 from flycanon.core.services.retrieval.query_expander import QueryExpander
 from flycanon.core.services.retrieval.reranker import build_reranker
-from flycanon.core.services.sources import IntakeService
-from flycanon.core.services.taxonomy import TaxonomyService
 from flycanon.models.repositories import (
     AuditRepository,
     CandidateRepository,
@@ -183,13 +180,11 @@ class CanonCoreConfiguration:
         ctx = build_corpus_context(settings=settings)
         # Eagerly initialise so the first request doesn't pay the
         # schema-creation cost (and so misconfigured paths fail at
-        # boot, not at first hit).
-        try:
+        # boot, not at first hit). The RuntimeError branch covers
+        # the cold-start case where no running loop exists yet --
+        # pyfly will drive initialisation when the app starts.
+        with contextlib.suppress(RuntimeError):
             asyncio.get_event_loop().run_until_complete(ctx.initialise())
-        except RuntimeError:
-            # No running loop yet (cold-start); pyfly will drive
-            # initialisation when the app starts.
-            pass
         return ctx
 
     @bean

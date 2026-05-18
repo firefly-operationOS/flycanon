@@ -162,7 +162,10 @@ class Hit(BaseModel):
     page: int | None = Field(
         default=None,
         ge=1,
-        description="1-based page number when the chunk's source has paginated layout (PDF, PPTX). ``null`` otherwise.",
+        description=(
+            "1-based page number when the chunk's source has paginated "
+            "layout (PDF, PPTX). ``null`` otherwise."
+        ),
         examples=[2],
     )
     knowledge_item_id: str | None = Field(

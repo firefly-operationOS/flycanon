@@ -13,6 +13,20 @@ The per-turn answer call goes through the existing
 transparently). The rolling ``summary`` field on the
 conversation row is updated after every turn so future turns
 stay within the model's context window even after 20+ turns.
+
+**Memory architecture.** Conversations are persisted to
+``canon_conversations`` + ``canon_conversation_turns`` (Postgres
+in prod, SQLite in tests) so they survive restarts -- the
+in-process ``fireflyframework_agentic.memory.ConversationMemory``
+would not fit a horizontally-scaled microservice. We *do*
+leverage agentic where it makes sense, though: the last few prior
+turns are translated into pydantic-ai ``ModelRequest`` /
+``ModelResponse`` messages and forwarded to the answer agent via
+the native ``message_history`` slot (see
+:class:`flycanon.core.services.query.AnswerService`). The rolling
+summary continues to ride on the system-instructions slot so
+older turns the model wouldn't otherwise see still inform the
+answer.
 """
 
 from __future__ import annotations
@@ -107,15 +121,20 @@ class ConversationService:
             raise ConversationNotFound(conversation_id)
 
         prior = await self._repository.list_turns(conversation_id)
-        # Compose the rolling-summary + last-few-turns context the
-        # answer-stage prompt prepends to the chunk grounding. The
-        # rolling summary keeps long sessions bounded; the last two
-        # turns provide the conversational micro-context.
+        # Two-pronged context delivery:
+        # * Older context lives in the rolling ``summary`` and rides on
+        #   the system-instructions slot (alongside any caller-supplied
+        #   ``instructions``).
+        # * The last two turns ride on pydantic-ai's native
+        #   ``message_history`` slot via ``prior_turns``. The model
+        #   then sees them as alternating user / assistant messages,
+        #   which produces noticeably better continuity on Claude /
+        #   GPT than flattening everything into one system prompt.
         steering = self._build_steering(
             conversation=conversation,
-            prior_turns=prior,
             extra_instructions=request.instructions,
         )
+        message_history = self._recent_turns_for_history(prior)
 
         answer_response = await self._answer.answer(
             AnswerRequest(
@@ -123,7 +142,8 @@ class ConversationService:
                 top_k=request.top_k,
                 instructions=steering,
                 model=conversation.model,
-            )
+            ),
+            prior_turns=message_history,
         )
 
         turn_row = ConversationTurnRow(
@@ -185,32 +205,48 @@ class ConversationService:
     def _build_steering(
         *,
         conversation: ConversationRow,
-        prior_turns: Sequence[ConversationTurnRow],
         extra_instructions: str | None,
     ) -> str:
-        """Compose the per-turn answer-prompt steering.
+        """Compose the system-instructions slot for this turn.
 
         Layers, in order:
 
         1. Caller-supplied ``instructions`` (highest precedence).
-        2. Last 2 turns verbatim -- ``user: ... / assistant: ...``
-           -- so an immediate ``"and what about Y?"`` resolves
-           correctly.
-        3. Rolling summary -- one-line synopsis of every turn so
-           older context isn't lost.
+        2. Rolling summary -- one-line synopsis of every turn so
+           older context isn't lost once it falls outside the
+           ``message_history`` window.
+
+        The last few turns no longer ride here -- they are forwarded
+        through ``message_history`` instead, see
+        :meth:`_recent_turns_for_history`.
         """
         lines: list[str] = []
         if extra_instructions:
             lines.append(extra_instructions.strip())
         if conversation.summary:
             lines.append("Prior conversation summary:\n" + conversation.summary.strip())
-        if prior_turns:
-            lines.append("Most recent turns:")
-            for turn in prior_turns[-2:]:
-                lines.append(f"user: {turn.question}")
-                if turn.answer:
-                    lines.append(f"assistant: {turn.answer}")
         return "\n\n".join(line for line in lines if line)
+
+    @staticmethod
+    def _recent_turns_for_history(
+        prior_turns: Sequence[ConversationTurnRow],
+        *,
+        max_turns: int = 2,
+    ) -> list[tuple[str, str]]:
+        """Convert the tail of the turn log into pydantic-ai-friendly
+        ``(user, assistant)`` pairs.
+
+        Empty / errored turns are dropped so the model never sees a
+        half-finished exchange. ``max_turns`` caps the slice -- two
+        is enough for anaphora resolution ("and what about Y?")
+        without ballooning the prompt.
+        """
+        out: list[tuple[str, str]] = []
+        for turn in prior_turns[-max_turns:]:
+            if not turn.question or not turn.answer:
+                continue
+            out.append((turn.question, turn.answer))
+        return out
 
     @staticmethod
     def _next_summary(

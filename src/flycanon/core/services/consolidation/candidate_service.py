@@ -16,7 +16,6 @@ The :class:`CandidateService` materialises LLM proposals as
 from __future__ import annotations
 
 import logging
-from collections.abc import Sequence
 from datetime import UTC, datetime
 from typing import Any
 
@@ -88,8 +87,8 @@ class CandidateService:
     ) -> list[CandidateRow]:
         source = await self._sources.get(request.source_id)
         if source is None:
-            from flycanon.models.entities.source import SourceRow as _SourceRow  # noqa: F401
             from flycanon.core.services.consolidation.errors import ConsolidationError
+            from flycanon.models.entities.source import SourceRow as _SourceRow  # noqa: F401
 
             raise ConsolidationError(f"source {request.source_id!r} not found")
         chunks = await self._chunks.list_for_source(request.source_id)

@@ -19,7 +19,7 @@ def conv_repo(repositories):
 class TestConversationLifecycle:
     @pytest.mark.asyncio
     async def test_add_and_get_round_trip(self, conv_repo):
-        row = await conv_repo.add(
+        await conv_repo.add(
             ConversationRow(
                 id="conv-1", title="t", actor="u", model="anthropic:claude"
             )

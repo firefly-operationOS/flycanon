@@ -16,9 +16,9 @@ from pyfly.cqrs import Command, CommandHandler, Query, QueryHandler, command_han
 from flycanon.core.mappers import (
     to_citation,
     to_knowledge_item,
+    to_knowledge_relation,
     to_knowledge_version,
 )
-from flycanon.core.mappers import to_knowledge_relation
 from flycanon.core.services.knowledge import (
     KnowledgeDiffService,
     KnowledgeGraphService,
@@ -45,7 +45,6 @@ from flycanon.interfaces.dtos.relation import (
 )
 from flycanon.interfaces.enums import Domain, Jurisdiction, KnowledgeStatus
 from flycanon.models.repositories import KnowledgeRepository
-
 
 # ---------------------------------------------------------------------------
 # Commands

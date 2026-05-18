@@ -127,12 +127,11 @@ class PgVectorVectorStore:
         rows = [_doc_to_row(doc, namespace) for doc in documents]
         if not rows:
             return
-        async with factory() as session:
-            async with session.begin():
-                # Bulk upsert via INSERT ... ON CONFLICT (id) DO UPDATE.
-                await session.execute(
-                    text(
-                        f"""
+        async with factory() as session, session.begin():
+            # Bulk upsert via INSERT ... ON CONFLICT (id) DO UPDATE.
+            await session.execute(
+                text(
+                    f"""
                         INSERT INTO {self._table} (id, namespace, embedding, metadata, text)
                         VALUES (:id, :namespace, :embedding, CAST(:metadata AS jsonb), :text)
                         ON CONFLICT (id) DO UPDATE
@@ -141,9 +140,9 @@ class PgVectorVectorStore:
                             metadata  = EXCLUDED.metadata,
                             text      = EXCLUDED.text
                         """
-                    ),
-                    rows,
-                )
+                ),
+                rows,
+            )
 
     async def search(
         self,
@@ -204,14 +203,13 @@ class PgVectorVectorStore:
         if not ids:
             return
         factory = await self._ensure_engine()
-        async with factory() as session:
-            async with session.begin():
-                await session.execute(
-                    text(
-                        f"DELETE FROM {self._table} WHERE namespace = :namespace AND id = ANY(:ids)"
-                    ),
-                    {"namespace": namespace, "ids": list(ids)},
-                )
+        async with factory() as session, session.begin():
+            await session.execute(
+                text(
+                    f"DELETE FROM {self._table} WHERE namespace = :namespace AND id = ANY(:ids)"
+                ),
+                {"namespace": namespace, "ids": list(ids)},
+            )
 
     async def close(self) -> None:
         if self._engine is not None:

@@ -18,6 +18,7 @@ detection than MarkItDown's H1-H6 inference.
 
 from __future__ import annotations
 
+import contextlib
 import io
 import logging
 import re
@@ -302,10 +303,8 @@ class PdfLoader:
                     )
                     results[page_idx] = ""
         finally:
-            try:
+            with contextlib.suppress(Exception):
                 doc.close()
-            except Exception:
-                pass
         return results
 
     def _ocr_pages_docling(

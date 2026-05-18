@@ -238,7 +238,7 @@ class SourcesController:
             # ``https://x.com/docs/Manifiesto.pdf?ts=1``.
             url_filename = payload.filename
             if not url_filename:
-                from urllib.parse import urlparse, unquote
+                from urllib.parse import unquote, urlparse
 
                 terminal = urlparse(fetched.final_url).path.rsplit("/", 1)[-1]
                 if terminal:

@@ -201,7 +201,7 @@ class IngestWorker:
                     family,
                     int((time.perf_counter() - started) * 1000),
                 )
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 logger.warning(
                     "worker handler timed out family=%s timeout_s=%.1f event_type=%s",
                     family,
@@ -233,7 +233,7 @@ class IngestWorker:
                 asyncio.gather(*list(self._inflight), return_exceptions=True),
                 timeout=grace,
             )
-        except asyncio.TimeoutError:
+        except TimeoutError:
             logger.warning(
                 "worker drain timed out -- cancelling %d inflight task(s)",
                 len(self._inflight),

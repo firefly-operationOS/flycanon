@@ -128,10 +128,7 @@ class IntakeService:
             merged_content, merged_metadata
         )
 
-        if request.kind != SourceKind.unknown:
-            primary_kind = request.kind
-        else:
-            primary_kind = merged_kind
+        primary_kind = request.kind if request.kind != SourceKind.unknown else merged_kind
 
         source = SourceRow(
             id=str(uuid.uuid4()),

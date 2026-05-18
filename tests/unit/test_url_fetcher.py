@@ -19,7 +19,7 @@ import httpx
 import pytest
 import respx
 
-from flycanon.core.services.sources.url_fetcher import UrlFetchError, UrlFetcher
+from flycanon.core.services.sources.url_fetcher import UrlFetcher, UrlFetchError
 
 
 def _settings(*, max_bytes: int = 1024, timeout_s: float = 5.0):

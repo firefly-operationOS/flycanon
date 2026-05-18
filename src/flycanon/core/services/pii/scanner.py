@@ -32,13 +32,13 @@ from __future__ import annotations
 import logging
 import re
 from dataclasses import dataclass
-from enum import Enum
+from enum import StrEnum
 from typing import Protocol
 
 logger = logging.getLogger(__name__)
 
 
-class PiiPolicy(str, Enum):
+class PiiPolicy(StrEnum):
     warn = "warn"
     redact = "redact"
     reject = "reject"
@@ -53,7 +53,7 @@ class PiiPolicyViolation(Exception):
     code = "pii_detected"
     http_status = 422
 
-    def __init__(self, findings: list["PiiFinding"]) -> None:
+    def __init__(self, findings: list[PiiFinding]) -> None:
         kinds = sorted({f.kind for f in findings})
         super().__init__(f"pii detected: {kinds}")
         self.findings = findings

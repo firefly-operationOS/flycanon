@@ -19,7 +19,6 @@ from flycanon.config import CanonSettings
 from flycanon.core.services.audit import AuditService
 from flycanon.core.services.knowledge.errors import KnowledgeItemNotFound
 from flycanon.interfaces.dtos.relation import CreateRelationRequest
-from flycanon.interfaces.enums import RelationKind
 from flycanon.models.entities.knowledge_relation import KnowledgeRelationRow
 from flycanon.models.repositories.knowledge_repository import KnowledgeRepository
 from flycanon.models.repositories.relation_repository import RelationRepository

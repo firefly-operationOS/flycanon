@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any
 
 from pyfly.container import service
 from pyfly.cqrs import Command, CommandHandler, Query, QueryHandler, command_handler, query_handler

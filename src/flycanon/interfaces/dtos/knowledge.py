@@ -49,7 +49,7 @@ class Provenance(BaseModel):
         default_factory=list,
         description="Compact source views (id, kind, title, content_sha256).",
     )
-    history: list["KnowledgeVersion"] = Field(default_factory=list)
+    history: list[KnowledgeVersion] = Field(default_factory=list)
 
 
 class KnowledgeVersion(BaseModel):

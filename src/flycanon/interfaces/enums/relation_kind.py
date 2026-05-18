@@ -11,10 +11,10 @@ unknown values).
 
 from __future__ import annotations
 
-from enum import Enum
+from enum import StrEnum
 
 
-class RelationKind(str, Enum):
+class RelationKind(StrEnum):
     """Semantic kind of a knowledge_item -> knowledge_item edge.
 
     * ``related`` -- soft "see also" link. Symmetrical in intent

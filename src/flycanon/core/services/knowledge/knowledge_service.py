@@ -122,11 +122,20 @@ class KnowledgeService:
             correlation_id=correlation_id,
             payload={"version": 1, "domain": request.domain.value, "title": request.title},
         )
+        event_type = (
+            self._settings.knowledge_published_event
+            if request.publish
+            else "KnowledgeItemDrafted"
+        )
         await self._publish_lifecycle(
-            event_type=self._settings.knowledge_published_event if request.publish else "KnowledgeItemDrafted",
+            event_type=event_type,
             item_id=item_id,
             version=1,
-            payload={"title": request.title, "domain": request.domain.value, "status": status.value},
+            payload={
+                "title": request.title,
+                "domain": request.domain.value,
+                "status": status.value,
+            },
         )
         logger.info("knowledge created id=%s version=1 status=%s", item_id, status.value)
         return stored_version
