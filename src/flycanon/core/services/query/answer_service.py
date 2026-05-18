@@ -17,6 +17,8 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+from flycanon.config import CanonSettings
+from flycanon.core.agents import build_agent
 from flycanon.core.services.consolidation.prompt_loader import PromptTemplate
 from flycanon.core.services.query.search_service import _filters_from_request
 from flycanon.core.services.retrieval.retrieval_service import RetrievalService
@@ -49,11 +51,13 @@ class AnswerService:
         prompt: PromptTemplate,
         default_model: str,
         fallback_model: str | None,
+        settings: CanonSettings,
     ) -> None:
         self._retrieval = retrieval
         self._prompt = prompt
         self._default_model = default_model
         self._fallback_model = fallback_model
+        self._settings = settings
 
     async def answer(self, request: AnswerRequest) -> AnswerResponse:
         start = time.perf_counter()
@@ -139,14 +143,19 @@ class AnswerService:
         )
 
     async def _call_model(self, system_text: str, user_text: str, model_id: str) -> AnswerOutput:
-        from fireflyframework_agentic.agents import FireflyAgent
-
-        agent = FireflyAgent(
-            "flycanon-answerer",
+        # The answer stage emits a single grounded response + citation
+        # list -- usually shorter than the consolidator's structured
+        # output -- but bumping max_tokens past the 4096 provider
+        # default still matters for long multi-paragraph answers.
+        # Honours the per-stage ``answer_max_output_tokens`` override
+        # when set, else the global ``agent_max_output_tokens`` (8192).
+        agent = build_agent(
+            name="flycanon-answerer",
             model=model_id,
-            instructions=system_text,
             output_type=AnswerOutput,
-            auto_register=False,
+            instructions=system_text,
+            settings=self._settings,
+            max_output_tokens=self._settings.answer_max_output_tokens,
         )
         result = await agent.run(user_text)
         output: Any = getattr(result, "output", result)

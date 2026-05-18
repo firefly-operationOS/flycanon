@@ -66,6 +66,18 @@ class CanonSettings(BaseSettings):
     retry_base_delay_s: float = 5.0
     retry_max_delay_s: float = 300.0
 
+    # Worker concurrency knobs. The IngestWorker subscribes to four
+    # event families (Source*, Knowledge*, Candidate*, audit) and
+    # dispatches each delivery through a bounded semaphore so a burst
+    # of events doesn't blow up an LLM provider's rate limit or
+    # exhaust the async pool. Handlers run with a wall-clock timeout
+    # so a stuck downstream call can't pin a worker slot indefinitely;
+    # graceful shutdown waits ``worker_shutdown_grace_s`` for inflight
+    # tasks to drain before cancelling.
+    worker_max_concurrency: int = Field(default=8, ge=1, le=128)
+    worker_handler_timeout_s: float = Field(default=120.0, gt=0.0)
+    worker_shutdown_grace_s: float = Field(default=30.0, ge=0.0)
+
     # -- Embeddings + RAG ----------------------------------------------
     # Embedding provider identifier in
     # ``<provider>:<model>`` form. Any value
@@ -89,6 +101,24 @@ class CanonSettings(BaseSettings):
     # Answer-stage model used by the RAG query endpoint.
     answer_model: str = "anthropic:claude-sonnet-4-6"
     answer_fallback_model: str | None = "openai:gpt-4o"
+
+    # Output-token budget for every FireflyAgent we build. Anthropic's
+    # API defaults to ``max_tokens=4096`` and OpenAI clamps similarly --
+    # too tight for the consolidation stage (which emits structured
+    # multi-candidate arrays running 6-10k tokens for dense business
+    # docs) and the answer stage (long multi-paragraph answers with
+    # citations). 8192 is the public ceiling for Sonnet 4.6 and
+    # matches the budget flydocs/flyradar use for their structured
+    # extractors; raising it stops the model from silently truncating
+    # mid-array and falling back to empty results. Operators on
+    # models with a higher ceiling (e.g. Sonnet 4.6 with the long
+    # output beta, or GPT-4o with the 16k window) can bump it.
+    agent_max_output_tokens: int = Field(default=8192, ge=512, le=64000)
+    # Per-stage overrides for when a specific stage needs more room
+    # than the global default (or wants to cap below it). ``None``
+    # falls back to ``agent_max_output_tokens``.
+    consolidator_max_output_tokens: int | None = Field(default=None)
+    answer_max_output_tokens: int | None = Field(default=None)
 
     # Hybrid retrieval knobs. The retriever fuses BM25 + vector ranks
     # via Reciprocal Rank Fusion with parameter ``k`` (``rrf_k``).

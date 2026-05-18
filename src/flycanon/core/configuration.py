@@ -217,9 +217,16 @@ class CanonCoreConfiguration:
         # container resolves @bean params by TYPE, so two beans
         # returning the same ``PromptTemplate`` type would overwrite
         # each other under the same key.
+        #
+        # The ``settings`` are threaded into the Consolidator so the
+        # central agent builder can read the
+        # ``agent_max_output_tokens`` / ``consolidator_max_output_tokens``
+        # knobs -- avoids the 4096 default truncating structured
+        # multi-candidate arrays mid-emit.
         return Consolidator(
             prompt=load_prompt("consolidation"),
             default_model=settings.answer_model,
+            settings=settings,
         )
 
     # CandidateService is ``@service``-decorated; auto-discovered.
@@ -236,11 +243,15 @@ class CanonCoreConfiguration:
     ) -> AnswerService:
         # Prompt is loaded inline -- see ``consolidator`` above for the
         # rationale (avoid type-based DI collision on PromptTemplate).
+        # ``settings`` are threaded through so the central agent
+        # builder can honor the ``answer_max_output_tokens`` /
+        # ``agent_max_output_tokens`` knobs.
         return AnswerService(
             retrieval=retrieval_service,
             prompt=load_prompt("answer"),
             default_model=settings.answer_model,
             fallback_model=settings.answer_fallback_model,
+            settings=settings,
         )
 
     # ------------------------------------------------------------------
