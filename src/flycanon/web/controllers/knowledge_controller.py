@@ -12,6 +12,7 @@ from pyfly.web import (
     PathVar,
     QueryParam,
     Valid,
+    delete_mapping,
     get_mapping,
     post_mapping,
     put_mapping,
@@ -19,16 +20,22 @@ from pyfly.web import (
 )
 
 from flycanon.core.services.knowledge.handlers import (
+    AddKnowledgeRelationCommand,
     CreateKnowledgeCommand,
     GetKnowledgeDiffQuery,
+    GetKnowledgeGraphMermaidQuery,
+    GetKnowledgeGraphQuery,
     GetKnowledgeHistoryQuery,
     GetKnowledgeQuery,
     GetProvenanceQuery,
     ListKnowledgeQuery,
+    ListKnowledgeRelationsQuery,
+    RemoveKnowledgeRelationCommand,
     RetireKnowledgeCommand,
     SupersedeKnowledgeCommand,
     UpdateKnowledgeCommand,
 )
+from flycanon.interfaces.dtos.graph import KnowledgeGraph, MermaidGraph
 from flycanon.interfaces.dtos.knowledge import (
     CreateKnowledgeRequest,
     KnowledgeItem,
@@ -39,6 +46,11 @@ from flycanon.interfaces.dtos.knowledge import (
     RetireKnowledgeRequest,
     SupersedeKnowledgeRequest,
     UpdateKnowledgeRequest,
+)
+from flycanon.interfaces.dtos.relation import (
+    CreateRelationRequest,
+    KnowledgeRelation,
+    KnowledgeRelations,
 )
 from flycanon.interfaces.enums import Domain, Jurisdiction, KnowledgeStatus
 
@@ -193,6 +205,55 @@ class KnowledgeController:
             RetireKnowledgeCommand(
                 item_id=item_id,
                 request=request,
+                correlation_id=get_correlation_id(),
+            )
+        )
+
+    # -- Relations -----------------------------------------------------
+
+    @get_mapping("/{item_id}/relations")
+    async def list_relations(self, item_id: PathVar[str]) -> KnowledgeRelations:
+        """Outgoing + incoming relations for ``{item_id}``.
+
+        The response splits by direction so a UI can render
+        ``Depends on`` and ``Required by`` sections without
+        filtering client-side.
+        """
+        return await self._queries.query(
+            ListKnowledgeRelationsQuery(item_id=item_id)
+        )
+
+    @post_mapping("/{item_id}/relations", status_code=201)
+    async def add_relation(
+        self,
+        item_id: PathVar[str],
+        request: Valid[Body[CreateRelationRequest]],
+    ) -> KnowledgeRelation:
+        """Attach a typed relation rooted at ``{item_id}``.
+
+        ``kind`` is one of ``related`` / ``depends_on`` /
+        ``conflicts_with`` / ``replaces``. ``(from, to, kind)`` is
+        unique -- re-asserting the same edge returns ``409
+        relation_already_exists``.
+        """
+        return await self._commands.send(
+            AddKnowledgeRelationCommand(
+                from_item_id=item_id,
+                request=request,
+                correlation_id=get_correlation_id(),
+            )
+        )
+
+    @delete_mapping("/{item_id}/relations/{relation_id}", status_code=204)
+    async def remove_relation(
+        self,
+        item_id: PathVar[str],  # noqa: ARG002 -- part of the URL contract
+        relation_id: PathVar[str],
+    ) -> None:
+        """Drop one relation by id."""
+        await self._commands.send(
+            RemoveKnowledgeRelationCommand(
+                relation_id=relation_id,
                 correlation_id=get_correlation_id(),
             )
         )

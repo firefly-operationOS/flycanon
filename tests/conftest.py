@@ -21,6 +21,7 @@ from flycanon.models.repositories.audit_repository import AuditRepository
 from flycanon.models.repositories.candidate_repository import CandidateRepository
 from flycanon.models.repositories.chunk_repository import ChunkRepository
 from flycanon.models.repositories.knowledge_repository import KnowledgeRepository
+from flycanon.models.repositories.relation_repository import RelationRepository
 from flycanon.models.repositories.source_repository import SourceRepository
 from flycanon.models.repositories.taxonomy_repository import TaxonomyRepository
 
@@ -54,6 +55,7 @@ async def repositories(engine, session_factory):
         "candidate": _wrap(session_factory, engine, CandidateRepository),
         "audit": _wrap(session_factory, engine, AuditRepository),
         "taxonomy": _wrap(session_factory, engine, TaxonomyRepository),
+        "relation": _wrap(session_factory, engine, RelationRepository),
     }
 
 

@@ -15,6 +15,7 @@ from flycanon.models.entities.candidate import CandidateRow
 from flycanon.models.entities.citation import CitationRow
 from flycanon.models.entities.knowledge_chunk import KnowledgeChunkRow
 from flycanon.models.entities.knowledge_item import KnowledgeItemRow
+from flycanon.models.entities.knowledge_relation import KnowledgeRelationRow
 from flycanon.models.entities.knowledge_version import KnowledgeVersionRow
 from flycanon.models.entities.source import SourceRow
 from flycanon.models.entities.taxonomy_node import TaxonomyNodeRow
@@ -26,6 +27,7 @@ __all__ = [
     "CitationRow",
     "KnowledgeChunkRow",
     "KnowledgeItemRow",
+    "KnowledgeRelationRow",
     "KnowledgeVersionRow",
     "SourceRow",
     "TaxonomyNodeRow",

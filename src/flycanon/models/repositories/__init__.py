@@ -13,6 +13,7 @@ from flycanon.models.repositories.audit_repository import AuditRepository
 from flycanon.models.repositories.candidate_repository import CandidateRepository
 from flycanon.models.repositories.chunk_repository import ChunkRepository
 from flycanon.models.repositories.knowledge_repository import KnowledgeRepository
+from flycanon.models.repositories.relation_repository import RelationRepository
 from flycanon.models.repositories.source_repository import SourceRepository
 from flycanon.models.repositories.taxonomy_repository import TaxonomyRepository
 
@@ -21,6 +22,7 @@ __all__ = [
     "CandidateRepository",
     "ChunkRepository",
     "KnowledgeRepository",
+    "RelationRepository",
     "SourceRepository",
     "TaxonomyRepository",
 ]

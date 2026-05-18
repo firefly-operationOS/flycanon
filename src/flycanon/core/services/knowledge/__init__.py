@@ -15,14 +15,26 @@ from flycanon.core.services.knowledge.errors import (
     KnowledgeItemNotFound,
     KnowledgeServiceError,
 )
+from flycanon.core.services.knowledge.graph_service import KnowledgeGraphService
 from flycanon.core.services.knowledge.knowledge_service import KnowledgeService
 from flycanon.core.services.knowledge.provenance_service import ProvenanceService
+from flycanon.core.services.knowledge.relation_service import (
+    InvalidRelationError,
+    KnowledgeRelationService,
+    RelationConflictError,
+    RelationNotFoundError,
+)
 
 __all__ = [
+    "InvalidRelationError",
     "KnowledgeDiffService",
+    "KnowledgeGraphService",
     "KnowledgeItemAlreadyRetired",
     "KnowledgeItemNotFound",
+    "KnowledgeRelationService",
     "KnowledgeService",
     "KnowledgeServiceError",
     "ProvenanceService",
+    "RelationConflictError",
+    "RelationNotFoundError",
 ]

@@ -63,6 +63,7 @@ from flycanon.models.repositories import (
     CandidateRepository,
     ChunkRepository,
     KnowledgeRepository,
+    RelationRepository,
     SourceRepository,
     TaxonomyRepository,
 )
@@ -117,6 +118,10 @@ class CanonCoreConfiguration:
     @bean
     def taxonomy_repository(self, settings: CanonSettings) -> TaxonomyRepository:
         return TaxonomyRepository.from_url(settings.database_url)
+
+    @bean
+    def relation_repository(self, settings: CanonSettings) -> RelationRepository:
+        return RelationRepository.from_url(settings.database_url)
 
     @bean(name="database_health")
     def database_health(self, source_repository: SourceRepository) -> SqlAlchemyHealthIndicator:
