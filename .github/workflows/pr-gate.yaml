@@ -1,0 +1,210 @@
+# Copyright 2026 Firefly Software Solutions Inc
+#
+# PR gate -- runs on every pull request and on workflow_dispatch.
+# Checks:
+#   1. lint        : ruff (check + format)
+#   2. typecheck   : pyright (best-effort, advisory)
+#   3. unit        : pytest tests/unit
+#   4. docker-build: single-arch Docker build smoke (no push)
+#   5. sdk-python  : ruff + pytest under sdks/python
+#   6. sdk-java    : mvn verify under sdks/java
+#
+# The Dockerfile uses BuildKit named contexts for the sibling pyfly +
+# fireflyframework-agentic checkouts. The matrix below clones those
+# repos into ./vendor/ and points buildx at them via --build-context.
+
+name: PR gate
+
+on:
+  pull_request:
+    branches: [main, develop]
+    paths-ignore:
+      - "**.md"
+      - "LICENSE"
+      - ".gitignore"
+      - "docs/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pr-gate-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PYTHON_VERSION: "3.13"
+  # Pin pyfly + agentic to a matching git ref. When the framework
+  # repos publish releases we'll switch to ``pip install ...`` here.
+  PYFLY_REF: main
+  AGENTIC_REF: main
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: Check out sibling firefly framework repos
+        run: |
+          git clone --depth=1 --branch "$PYFLY_REF" \
+            https://github.com/fireflyframework/fireflyframework-pyfly.git \
+            ./vendor/pyfly
+          git clone --depth=1 --branch "$AGENTIC_REF" \
+            https://github.com/fireflyframework/fireflyframework-agentic.git \
+            ./vendor/fireflyframework-agentic
+      - name: Repoint uv path sources at ./vendor
+        run: |
+          sed -i \
+            -e 's|path = "\.\./\.\./fireflyframework/fireflyframework-pyfly"|path = "./vendor/pyfly"|' \
+            -e 's|path = "\.\./\.\./fireflyframework/fireflyframework-agentic"|path = "./vendor/fireflyframework-agentic"|' \
+            pyproject.toml
+      - name: uv sync (dev)
+        run: uv sync --extra dev
+      - name: ruff check
+        run: uv run ruff check .
+      - name: ruff format --check
+        run: uv run ruff format --check .
+
+  typecheck:
+    name: Typecheck (advisory)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: Check out sibling firefly framework repos
+        run: |
+          git clone --depth=1 --branch "$PYFLY_REF" \
+            https://github.com/fireflyframework/fireflyframework-pyfly.git \
+            ./vendor/pyfly
+          git clone --depth=1 --branch "$AGENTIC_REF" \
+            https://github.com/fireflyframework/fireflyframework-agentic.git \
+            ./vendor/fireflyframework-agentic
+      - name: Repoint uv path sources at ./vendor
+        run: |
+          sed -i \
+            -e 's|path = "\.\./\.\./fireflyframework/fireflyframework-pyfly"|path = "./vendor/pyfly"|' \
+            -e 's|path = "\.\./\.\./fireflyframework/fireflyframework-agentic"|path = "./vendor/fireflyframework-agentic"|' \
+            pyproject.toml
+      - name: uv sync (dev)
+        run: uv sync --extra dev
+      - name: pyright
+        run: uv run pyright src/flycanon
+
+  unit:
+    name: Unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: Check out sibling firefly framework repos
+        run: |
+          git clone --depth=1 --branch "$PYFLY_REF" \
+            https://github.com/fireflyframework/fireflyframework-pyfly.git \
+            ./vendor/pyfly
+          git clone --depth=1 --branch "$AGENTIC_REF" \
+            https://github.com/fireflyframework/fireflyframework-agentic.git \
+            ./vendor/fireflyframework-agentic
+      - name: Repoint uv path sources at ./vendor
+        run: |
+          sed -i \
+            -e 's|path = "\.\./\.\./fireflyframework/fireflyframework-pyfly"|path = "./vendor/pyfly"|' \
+            -e 's|path = "\.\./\.\./fireflyframework/fireflyframework-agentic"|path = "./vendor/fireflyframework-agentic"|' \
+            pyproject.toml
+      - name: uv sync (dev)
+        run: uv sync --extra dev
+      - name: pytest tests/unit
+        env:
+          # The unit suite runs against in-memory SQLite + stubbed
+          # agentic primitives; no provider credentials are required.
+          # Dummy values are set only so pydantic-ai providers can
+          # instantiate without raising at import time.
+          OPENAI_API_KEY: sk-dummy-key
+          ANTHROPIC_API_KEY: sk-dummy-key
+          AWS_DEFAULT_REGION: eu-west-1
+        run: uv run pytest -q tests/unit
+
+  docker-build:
+    name: Docker build smoke (single-arch)
+    runs-on: ubuntu-latest
+    needs: [lint, unit]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check out sibling firefly framework repos
+        run: |
+          git clone --depth=1 --branch "$PYFLY_REF" \
+            https://github.com/fireflyframework/fireflyframework-pyfly.git \
+            ./vendor/pyfly
+          git clone --depth=1 --branch "$AGENTIC_REF" \
+            https://github.com/fireflyframework/fireflyframework-agentic.git \
+            ./vendor/fireflyframework-agentic
+      - uses: docker/setup-buildx-action@v3
+      - name: docker buildx build (linux/amd64, load)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          push: false
+          load: true
+          tags: flycanon:pr-${{ github.event.pull_request.number }}
+          platforms: linux/amd64
+          build-contexts: |
+            pyfly=./vendor/pyfly
+            fireflyframework-agentic=./vendor/fireflyframework-agentic
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  sdk-python:
+    name: SDK Python
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: sdks/python
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: uv sync (dev)
+        run: uv sync --extra dev
+      - name: ruff check
+        run: uv run ruff check src tests
+      - name: pytest
+        run: uv run pytest -q
+
+  sdk-java:
+    name: SDK Java
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: sdks/java
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Java 21 (Temurin)
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+      - name: mvn verify
+        run: mvn -B -ntp verify
