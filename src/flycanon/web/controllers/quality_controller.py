@@ -23,6 +23,14 @@ class ConflictScanResponse(BaseModel):
     pairs_evaluated: int = Field(ge=0)
     conflicts_found: int = Field(ge=0)
     candidate_ids: list[str] = Field(default_factory=list)
+    relation_ids: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Knowledge-graph ``conflicts_with`` edge ids materialised "
+            "alongside the inbox candidates. Empty when the detector "
+            "is wired without a KnowledgeRelationService binding."
+        ),
+    )
 
 
 class StaleItem(BaseModel):
@@ -107,4 +115,5 @@ class KnowledgeQualityController:
             pairs_evaluated=int(result.get("pairs_evaluated", 0)),
             conflicts_found=int(result.get("conflicts_found", 0)),
             candidate_ids=list(result.get("candidate_ids", []) or []),
+            relation_ids=list(result.get("relation_ids", []) or []),
         )

@@ -35,6 +35,9 @@ from flycanon.config import CanonSettings
 from flycanon.core.agents import build_agent
 from flycanon.core.services.audit import AuditService
 from flycanon.core.services.embeddings import EmbeddingService
+from flycanon.core.services.knowledge.relation_service import KnowledgeRelationService
+from flycanon.interfaces.dtos.relation import CreateRelationRequest
+from flycanon.interfaces.enums import RelationKind
 from flycanon.models.entities.candidate import CandidateRow
 from flycanon.models.entities.knowledge_item import KnowledgeItemRow
 from flycanon.models.repositories.candidate_repository import CandidateRepository
@@ -68,12 +71,18 @@ class ConflictDetector:
         embeddings: EmbeddingService,
         audit: AuditService,
         settings: CanonSettings,
+        relations: KnowledgeRelationService | None = None,
     ) -> None:
         self._knowledge = knowledge_repository
         self._candidates = candidate_repository
         self._embeddings = embeddings
         self._audit = audit
         self._settings = settings
+        # Optional: when wired, the detector also materialises a
+        # ``conflicts_with`` relation alongside the CandidateRow so
+        # the knowledge graph + provenance views surface the link
+        # immediately, not after a human accepts the candidate.
+        self._relations = relations
 
     async def detect(
         self,
@@ -127,6 +136,7 @@ class ConflictDetector:
         items_by_id = {item.id: item for item in items}
         conflicts_found = 0
         candidate_ids: list[str] = []
+        relation_ids: list[str] = []
         for pair in pairs:
             judgment = await self._judge(
                 items_by_id[pair.from_id], items_by_id[pair.to_id]
@@ -142,6 +152,16 @@ class ConflictDetector:
             )
             candidate_ids.append(row.id)
             conflicts_found += 1
+            # Also materialise the conflicts_with edge so the
+            # knowledge graph + provenance views surface the link
+            # immediately. We swallow the conflict-exists case --
+            # the relation already covers it.
+            if self._relations is not None:
+                rel = await self._link_relation(
+                    pair=pair, judgment=judgment, actor=actor
+                )
+                if rel is not None:
+                    relation_ids.append(rel)
 
         await self._audit.record(
             event_type="knowledge.conflict_scan",
@@ -159,6 +179,7 @@ class ConflictDetector:
             "pairs_evaluated": len(pairs),
             "conflicts_found": conflicts_found,
             "candidate_ids": candidate_ids,
+            "relation_ids": relation_ids,
         }
 
     async def _judge(
@@ -238,6 +259,42 @@ class ConflictDetector:
         )
         stored_rows = await self._candidates.add_many([row])
         return stored_rows[0]
+
+    async def _link_relation(
+        self,
+        *,
+        pair: _ConflictPair,
+        judgment: ConflictJudgment,
+        actor: str | None,
+    ) -> str | None:
+        """Materialise the ``conflicts_with`` edge for the pair.
+
+        Returns the relation id, or ``None`` on any failure (including
+        the "relation already exists" case -- a prior scan or human
+        edit may have linked the items already, and that's fine: the
+        existing edge already carries the meaning we wanted to record).
+        """
+        if self._relations is None:
+            return None
+        try:
+            row = await self._relations.add(
+                pair.from_id,
+                CreateRelationRequest(
+                    to_item_id=pair.to_id,
+                    kind=RelationKind.conflicts_with,
+                    note=(judgment.reasoning or "")[:2000] or None,
+                    actor=actor,
+                ),
+            )
+            return row.id
+        except Exception as exc:  # noqa: BLE001
+            logger.info(
+                "conflict relation skipped from=%s to=%s: %s",
+                pair.from_id,
+                pair.to_id,
+                exc,
+            )
+            return None
 
 
 def _cosine(a: list[float], b: list[float]) -> float:
