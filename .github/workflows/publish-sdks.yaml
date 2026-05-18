@@ -1,0 +1,227 @@
+# Copyright 2026 Firefly Software Solutions Inc
+#
+# Publish the Java + Python SDKs.
+#
+#   * Versioning: CalVer ``YY.MM.PP`` -- e.g. ``26.05.01`` for the first
+#     patch in May 2026. Tag form is ``v<version>`` so the pattern
+#     ``v*.*.*`` below catches both legacy SemVer tags and the new
+#     CalVer ones without special-casing.
+#
+#   * Triggers
+#       - push of a ``v*.*.*`` tag           -> publishes a release
+#       - workflow_dispatch                  -> manual re-publish
+#
+#   * Java SDK -> ``mvn deploy`` to GitHub Packages
+#       (https://maven.pkg.github.com/firefly-operationOS/flycanon)
+#
+#   * Python SDK -> build sdist + wheel with ``uv build`` and attach
+#                  both to the GitHub Release. We do NOT publish to
+#                  PyPI -- users install directly from the release URL
+#                  with uv:
+#
+#                      uv add https://github.com/firefly-operationOS/flycanon/releases/download/v26.05.01/flycanon_sdk-26.5.1-py3-none-any.whl
+#
+#                  (or pin in pyproject.toml under [tool.uv.sources]).
+#
+# Docs-only commits do not trigger this workflow (we run on tags only).
+
+name: Publish SDKs
+
+on:
+  push:
+    tags: ["v*.*.*"]
+  workflow_dispatch:
+    inputs:
+      java:
+        description: "Publish the Java SDK to GitHub Packages?"
+        required: false
+        default: "true"
+      python:
+        description: "Publish the Python SDK?"
+        required: false
+        default: "true"
+
+permissions:
+  contents: write   # attach assets to the GitHub Release
+  packages: write   # push to GitHub Packages
+
+concurrency:
+  group: publish-sdks-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  # --------------------------------------------------------------------
+  # Java -> GitHub Packages
+  # --------------------------------------------------------------------
+  publish-java-sdk:
+    if: ${{ github.event_name == 'push' || github.event.inputs.java != 'false' }}
+    name: Publish flycanon-sdk (Java) to GitHub Packages
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: sdks/java
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Java 25 (Temurin) + Maven settings.xml
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "25"
+          # Pre-populates ~/.m2/settings.xml with a ``github`` server
+          # entry that ``mvn deploy`` will pick up. The username is the
+          # actor (any GitHub identity with packages:write on the repo)
+          # and the password is the workflow's GITHUB_TOKEN.
+          server-id: github
+          server-username: GITHUB_ACTOR
+          server-password: GITHUB_TOKEN
+          cache: maven
+
+      - name: Override version from tag (if applicable)
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          TAG="${GITHUB_REF#refs/tags/v}"
+          echo "Setting Maven version to ${TAG}"
+          mvn -B -q versions:set -DnewVersion="${TAG}" -DgenerateBackupPoms=false
+
+      - name: Build + deploy to GitHub Packages
+        env:
+          GITHUB_ACTOR: ${{ github.actor }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: mvn -B -ntp deploy
+
+      - name: Summary
+        run: |
+          {
+            echo "### Published Java SDK"
+            echo
+            echo "**Coordinates**: \`com.firefly:flycanon-sdk:$(mvn -B -q -DforceStdout help:evaluate -Dexpression=project.version)\`"
+            echo "**Repository**: https://maven.pkg.github.com/firefly-operationOS/flycanon"
+            echo
+            echo "Add to your \`pom.xml\`:"
+            echo '```xml'
+            echo "<dependency>"
+            echo "  <groupId>com.firefly</groupId>"
+            echo "  <artifactId>flycanon-sdk</artifactId>"
+            echo "  <version>$(mvn -B -q -DforceStdout help:evaluate -Dexpression=project.version)</version>"
+            echo "</dependency>"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # --------------------------------------------------------------------
+  # Python -> GitHub Release assets
+  # --------------------------------------------------------------------
+  publish-python-sdk:
+    if: ${{ github.event_name == 'push' || github.event.inputs.python != 'false' }}
+    name: Publish flycanon-sdk (Python)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: sdks/python
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+
+      - name: Override version from tag (if applicable)
+        # The Python SDK ships its version in two places: the
+        # ``project.version`` field of ``pyproject.toml`` and the
+        # ``__version__`` constant in ``src/flycanon_sdk/__init__.py``.
+        # Both are kept in sync so ``flycanon_sdk.__version__`` always
+        # matches the wheel's distribution version.
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          TAG="${GITHUB_REF#refs/tags/v}"
+          echo "Setting Python SDK version to ${TAG}"
+          python - <<PY
+          import re, pathlib
+          tag = "${TAG}"
+          for p in (
+              pathlib.Path("pyproject.toml"),
+              pathlib.Path("src/flycanon_sdk/__init__.py"),
+          ):
+              if not p.exists():
+                  continue
+              text = p.read_text()
+              text = re.sub(r'^(version\s*=\s*")[^"]+(")', rf'\g<1>{tag}\g<2>', text, count=1, flags=re.MULTILINE)
+              text = re.sub(r'^(__version__\s*=\s*")[^"]+(")', rf'\g<1>{tag}\g<2>', text, count=1, flags=re.MULTILINE)
+              p.write_text(text)
+          PY
+
+      - name: Build sdist + wheel with uv
+        run: |
+          uv build
+          ls -lh dist/
+
+      - name: Compute install URL for the release notes
+        if: startsWith(github.ref, 'refs/tags/v')
+        id: install_url
+        run: |
+          TAG="${GITHUB_REF#refs/tags/}"          # e.g. v26.05.01
+          # PEP 440 strips leading zeros, so the wheel filename uses
+          # the normalised form. Compute both: ``TAG_VERSION`` matches
+          # the git tag (used in install URLs we hand to users), and
+          # ``WHEEL_VERSION`` is what hatchling actually writes onto
+          # the wheel filename. uv installs from the wheel URL so the
+          # release-notes step uses ``WHEEL_VERSION``.
+          TAG_VERSION="${TAG#v}"                  # e.g. 26.05.01
+          WHEEL_VERSION="$(python -c 'import sys; v=sys.argv[1]; print(".".join(str(int(p)) for p in v.split(".")))' "$TAG_VERSION")"
+          echo "TAG_VERSION=$TAG_VERSION"
+          echo "WHEEL_VERSION=$WHEEL_VERSION"
+          echo "wheel_url=https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG}/flycanon_sdk-${WHEEL_VERSION}-py3-none-any.whl" >> "$GITHUB_OUTPUT"
+
+      - name: Attach build artifacts to the GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          # Users install directly from these URLs with ``uv add``;
+          # no PyPI publish step -- by design.
+          files: sdks/python/dist/*
+          generate_release_notes: true
+          append_body: true
+          body: |
+
+            ### Python SDK
+
+            Install the wheel for this release with `uv`:
+
+            ```bash
+            uv add ${{ steps.install_url.outputs.wheel_url }}
+            ```
+
+            Or pin it in your `pyproject.toml`:
+
+            ```toml
+            [project]
+            dependencies = ["flycanon-sdk"]
+
+            [tool.uv.sources]
+            flycanon-sdk = { url = "${{ steps.install_url.outputs.wheel_url }}" }
+            ```
+
+            ### Java SDK
+
+            ```xml
+            <dependency>
+              <groupId>com.firefly</groupId>
+              <artifactId>flycanon-sdk</artifactId>
+              <version>${{ github.ref_name }}</version>
+            </dependency>
+            ```
+
+            Resolve from GitHub Packages -- add to your `pom.xml`:
+
+            ```xml
+            <repositories>
+              <repository>
+                <id>github-firefly-operationOS</id>
+                <url>https://maven.pkg.github.com/firefly-operationOS/flycanon</url>
+              </repository>
+            </repositories>
+            ```

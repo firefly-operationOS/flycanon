@@ -21,13 +21,11 @@ from __future__ import annotations
 import io
 import logging
 import re
-
-from PIL import Image as _PILImage
 from dataclasses import dataclass, field
 from typing import Protocol
 
 from bs4 import BeautifulSoup
-from pypdf import PdfReader
+from PIL import Image as _PILImage
 
 from flycanon.core.services.ingestion.errors import CorruptSource, EmptySource
 from flycanon.interfaces.enums import SourceKind
@@ -139,25 +137,44 @@ class DocxLoader:
 
 
 class PdfLoader:
-    """PDF loader with the **flydocs strategy**: PyMuPDF text-layer
-    extraction + Tesseract OCR fallback for image-only pages.
+    """PDF loader supporting both PDF kinds with a two-phase strategy.
 
-    PyMuPDF (``pymupdf``, aka ``fitz``) is the canonical PDF engine
-    used by flydocs's :class:`PyMuPDFWordExtractor` -- it returns the
-    full text stream per page in microseconds without rendering. For
-    born-digital PDFs that's all we need.
+    flycanon ingests two flavours of PDF:
 
-    Pages whose extracted text is shorter than
-    :attr:`_MIN_CHARS_PER_PAGE` are treated as image-only. For those
-    we rasterise the page with PyMuPDF (matching flydocs's
-    :class:`TesseractOcrEngine` pattern) and pipe the PNG bytes into
-    Tesseract via ``pytesseract.image_to_string``. The OCR language
-    is the same composed string (``eng+spa`` by default,
-    overridable via ``FLYCANON_OCR_LANG``).
+    * **Full Digital Text PDFs** -- born-digital documents whose text
+      content is stored as encoded glyphs in the page stream
+      (Word / LibreOffice / LaTeX exports, browser "Save as PDF",
+      PDFs produced by reporting pipelines). Text extraction is
+      lossless and effectively free.
+
+    * **PDF-Images (scanned PDFs)** -- pages that carry only a
+      raster image of the original document (scanned contracts, fax
+      output, photos of receipts, mobile-camera captures). The page
+      stream has no encoded text; reading the words requires Optical
+      Character Recognition.
+
+    Phase 1 -- text-layer extraction. PyMuPDF (``pymupdf``, aka
+    ``fitz``) returns the document's encoded text stream per page in
+    microseconds without rendering. For born-digital PDFs that's all
+    we need.
+
+    Phase 2 -- per-page OCR fallback. Pages whose extracted text is
+    shorter than :attr:`_MIN_CHARS_PER_PAGE` are flagged as
+    image-only. For each flagged page we rasterise via PyMuPDF at
+    :attr:`_OCR_DPI` and pipe the PNG bytes into Tesseract
+    (``pytesseract.image_to_string``). The OCR language is composed
+    as ``eng+spa`` by default and overridable via
+    ``FLYCANON_OCR_LANG``. The engine is selectable via
+    ``FLYCANON_PDF_OCR_ENGINE`` (``tesseract`` default; ``docling``
+    after installing the ``docling`` extra for layout-aware OCR with
+    native multi-column / table handling). The two phases compose:
+    a hybrid PDF (text on some pages, scans on others) gets text
+    extraction where available and OCR where needed.
 
     pypdf is intentionally NOT used here -- it is reserved for
-    :class:`PdfGuard`'s lightweight encryption / corruption pre-flight.
-    MarkItDown is also not on the PDF path.
+    :class:`PdfGuard`'s lightweight encryption / corruption
+    pre-flight. MarkItDown is also not on the PDF path; it remains
+    the last-resort fallback for exotic formats only.
     """
 
     kind = SourceKind.pdf
@@ -191,10 +208,9 @@ class PdfLoader:
 
         page_count = doc.page_count
 
-        # Phase 1: PyMuPDF text-layer extraction. ``get_text()`` with no
-        # mode returns the document's encoded text stream in reading
-        # order -- the same path flydocs's PyMuPDFWordExtractor walks
-        # for word-level bboxes.
+        # Phase 1: PyMuPDF text-layer extraction. ``get_text()`` with
+        # no mode returns the document's encoded text stream in
+        # reading order; for born-digital PDFs that's all we need.
         text_per_page: list[str] = []
         try:
             for page_index in range(page_count):
@@ -233,11 +249,11 @@ class PdfLoader:
     def _ocr_pages(self, pdf_bytes: bytes, page_indices: list[int]) -> dict[int, str]:
         """Render ``page_indices`` and OCR them.
 
-        Mirrors flydocs's pattern. The OCR engine is selected via
-        ``FLYCANON_PDF_OCR_ENGINE`` (default ``tesseract``; set to
-        ``docling`` after installing the ``docling`` extra to get
-        layout-aware OCR with native multi-column / table handling).
-        Both engines rasterise via PyMuPDF at the configured DPI.
+        Engine selection: ``FLYCANON_PDF_OCR_ENGINE`` (default
+        ``tesseract``; set to ``docling`` after installing the
+        ``docling`` extra to get layout-aware OCR with native
+        multi-column / table handling). Both engines rasterise via
+        PyMuPDF at the configured DPI.
         """
         import os as _os
 
@@ -254,6 +270,7 @@ class PdfLoader:
     ) -> dict[int, str]:
         try:
             import os as _os
+
             import pymupdf
             import pytesseract
         except ImportError as exc:

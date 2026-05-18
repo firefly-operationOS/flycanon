@@ -109,4 +109,19 @@
       </plugin>
     </plugins>
   </build>
+
+  <!--
+    GitHub Packages deploy target. The matching server entry
+    (``<id>github</id>``) is provisioned by ``actions/setup-java``
+    in ``.github/workflows/publish-sdks.yaml``; locally, install the
+    same entry into ``~/.m2/settings.xml`` with your username + a
+    personal access token (``read:packages``, ``write:packages``).
+  -->
+  <distributionManagement>
+    <repository>
+      <id>github</id>
+      <name>GitHub Packages -- firefly-operationOS/flycanon</name>
+      <url>https://maven.pkg.github.com/firefly-operationOS/flycanon</url>
+    </repository>
+  </distributionManagement>
 </project>

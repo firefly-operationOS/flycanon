@@ -44,10 +44,13 @@ canon_taxonomy_nodes    domain / jurisdiction tree (closure via parent_id)
 All tables are prefixed `canon_` so a multi-service Postgres remains
 auditable. Knowledge content is never mutated in place -- updates
 append a new `canon_knowledge_versions` row and flip the previous one
-to `superseded`. The BM25 / FTS5 projection lives in a file-backed
-SQLite corpus (`FLYCANON_CORPUS_PATH`) for portability; the dense
-vector projection is fully pluggable -- see _Pluggable retrieval
-backends_ below.
+to `superseded`. The BM25 projection is Postgres-native by default
+(a `tsvector` GENERATED column on `canon_chunks.content` with a GIN
+index -- see migration `0003_bm25_tsv`) so both retrieval channels
+share the same operational Postgres; the file-backed SQLite FTS5
+corpus is only used when the `sqlite-vec` vector backend is selected.
+The dense vector projection is fully pluggable -- see _Pluggable
+retrieval backends_ below.
 
 ## The seven workshop features
 
@@ -80,7 +83,9 @@ routes the payload through a fixed matrix:
 | Class           | Examples                                  | Strategy                                                                 |
 |-----------------|-------------------------------------------|--------------------------------------------------------------------------|
 | Plain text      | `text/plain`, `text/markdown`, `text/csv` | Pass-through -- decoded via charset detection.                           |
-| PDF             | `application/pdf`                         | Encrypted / corrupt PDFs rejected with `unsupported_binary`; otherwise pass-through to MarkItDown. |
+| PDF -- digital text | Born-digital PDFs (Word / LibreOffice / LaTeX exports, browser "Save as PDF", reporting output) | **Phase 1 (PyMuPDF text-layer):** `pymupdf.get_text()` per page returns the encoded text stream in reading order. No rendering, microseconds per page. |
+| PDF -- image / scanned | Scanned contracts, photographed pages, fax output, mobile camera captures (raster pages, no encoded text) | **Phase 2 (OCR fallback):** pages under `_MIN_CHARS_PER_PAGE` rasterised by PyMuPDF at `_OCR_DPI` and piped through Tesseract (`pytesseract.image_to_string`) or Docling (with `FLYCANON_PDF_OCR_ENGINE=docling`). Composes with Phase 1 page-by-page for hybrid PDFs. |
+| PDF -- guard rail | Encrypted or corrupt PDFs | Rejected up-front by `PdfGuard` (lightweight `pypdf` pre-flight) with `error_code=encrypted_pdf` / `corrupt_source`. |
 | Office          | DOCX / XLSX / PPTX / ODT / ODS / ODP / RTF | `office_converter=none` (default) feeds MarkItDown directly; `gotenberg` (HTTP sidecar) or `libreoffice` (in-container `soffice`) render to PDF first. |
 | Raster images   | PNG / JPG / WEBP                          | Pass-through to `ImageLoader` (Tesseract OCR).                           |
 | Converted images| HEIC / AVIF / TIFF / SVG / BMP            | Pillow + pillow-heif + cairosvg -> PNG, then OCR.                        |
@@ -152,8 +157,10 @@ Rank Fusion (RRF) over the two channels.
                       v                                              v
         +----------------------------+                   +--------------------------+
         |  models/repositories       |                   |  HybridRetriever:        |
-        |  AsyncEngine + Repository  |                   |  - SQLite FTS5 (BM25)    |
-        |  shared across the layer   |                   |  - pluggable vector store|
+        |  AsyncEngine + Repository  |                   |  - Postgres tsv+GIN BM25 |
+        |  shared across the layer   |                   |    (file-backed FTS5     |
+        |                            |                   |    only for sqlite-vec)  |
+        |                            |                   |  - pluggable vector store|
         +----------------------------+                   +--------------------------+
                       |                                              |
                       v                                              v

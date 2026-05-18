@@ -74,12 +74,23 @@ def _citation_dict(row) -> dict:
 
 def _source_summary(row: SourceRow) -> dict:
     metadata = dict(row.metadata_json or {})
+    extracted = dict(metadata.get("extracted") or {})
     return {
         "id": row.id,
         "kind": row.kind,
-        "title": metadata.get("title") or row.filename or row.uri,
+        # Title falls back to extractor-derived title, then filename, then uri.
+        "title": metadata.get("title") or extracted.get("title") or row.filename or row.uri,
+        "filename": row.filename,
+        "uri": row.uri,
         "content_sha256": row.content_sha256,
+        "content_bytes": row.content_bytes,
         "n_chunks": row.n_chunks,
+        # Surface the most useful extractor fields directly so callers
+        # don't need ``GET /api/v1/sources/{id}`` to render the badge.
+        "author": extracted.get("author"),
+        "language": extracted.get("language"),
+        "page_count": extracted.get("page_count"),
+        "word_count": extracted.get("word_count"),
     }
 
 

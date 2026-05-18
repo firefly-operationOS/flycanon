@@ -14,7 +14,9 @@ treats every format uniformly:
    or the universal MarkitdownLoader fallback).
 4. Chunk into retrieval-grade fragments with heading-path metadata.
 5. Embed every chunk via the configured provider.
-6. Index BM25 (SQLite FTS5) + dense vectors (pgvector / sqlite-vec /
+6. Index BM25 (Postgres tsvector + GIN on ``canon_chunks`` for the
+   default pgvector backend; SQLite FTS5 for the file-backed
+   ``sqlite-vec`` backend) + dense vectors (pgvector / sqlite-vec /
    chroma / qdrant / pinecone -- backend selectable).
 7. Audit + broadcast ``SourceIngested`` on ``flycanon.ingest``.
 

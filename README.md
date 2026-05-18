@@ -88,7 +88,10 @@ matrix before the parse / chunk / embed / index pipeline runs:
 | Class            | Examples                                          | Strategy                                                                                                                                                          |
 | ---------------- | ------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Plain text       | `text/plain`, `text/markdown`, `text/csv`, JSON, XML | Pass-through.                                                                                                                                                     |
-| PDF              | `application/pdf`                                 | Encrypted / corrupt PDFs rejected with `unsupported_binary`; otherwise straight to MarkItDown.                                                                    |
+| **PDF — Full Digital Text** | Born-digital PDFs (Word / LibreOffice / LaTeX exports, browser "Save as PDF", reporting pipelines) | **Phase 1 (PyMuPDF text-layer):** `pymupdf.get_text()` per page returns the encoded text stream in reading order. No rendering, microseconds per page. |
+| **PDF — Image (scanned)** | Scanned contracts, fax output, photographed pages, mobile-camera captures — pages are raster images of the original | **Phase 2 (OCR fallback):** pages under `_MIN_CHARS_PER_PAGE` rasterised by PyMuPDF at `_OCR_DPI` (200) and OCR'd via Tesseract (`pytesseract.image_to_string`) — engine selectable via `FLYCANON_PDF_OCR_ENGINE` (`tesseract` default; `docling` for layout-aware OCR with the `docling` extra). Languages default to `eng+spa`, override via `FLYCANON_OCR_LANG`. |
+| **PDF — Hybrid** | Mixed: typed body + scanned signature page, or any blend of digital and image pages | Phase 1 runs on every page; Phase 2 only fires for pages flagged as image-only. The two phases compose page-by-page. |
+| PDF — guard rail | Encrypted or corrupt PDFs                       | Rejected up-front by `PdfGuard` (lightweight `pypdf` pre-flight) with `error_code=encrypted_pdf` / `corrupt_source`.                                              |
 | Office           | DOCX / XLSX / PPTX / ODT / ODS / ODP / RTF        | `office_converter=none` (default) feeds MarkItDown directly; `gotenberg` (HTTP sidecar) or `libreoffice` (in-container `soffice`) render to PDF first.            |
 | Raster images    | PNG / JPG / WEBP                                  | Pass-through to OCR (Tesseract, multi-language).                                                                                                                  |
 | Converted images | HEIC / AVIF / TIFF / SVG / BMP                    | Pillow + pillow-heif + cairosvg → PNG, then OCR.                                                                                                                  |
@@ -253,6 +256,9 @@ public class CopilotService {
 | [docs/api-reference.md](docs/api-reference.md) | You're integrating with the HTTP API and need every endpoint, shape, and status code. |
 | [docs/payload-reference.md](docs/payload-reference.md) | You're composing the request payload — every field, option, and example. |
 | [docs/eda-events.md](docs/eda-events.md) | You're subscribing to the `flycanon.ingest` / `flycanon.knowledge` / `flycanon.audit` topics. |
+| [docs/deployment.md](docs/deployment.md) | You're running this in production — env vars, topologies, OCR engines, embedding providers, auth, observability, sizing. |
+| [docs/cicd.md](docs/cicd.md) | You're cutting a release or wiring CI/CD — the three GitHub Actions workflows, release cookbook, required secrets. |
+| [docs/troubleshooting.md](docs/troubleshooting.md) | The service / ingest / search / answer surface is misbehaving — symptom → root cause → fix. |
 | [docs/glossary.md](docs/glossary.md) | You need a precise definition for a term the API or docs use. |
 | [sdks/python/README.md](sdks/python/README.md) | You're integrating from Python — async-first SDK with Pydantic typing. |
 | [sdks/java/README.md](sdks/java/README.md) | You're integrating from Java / Spring Boot — Spring Boot 3.5.9, `com.firefly` groupId, `@AutoConfiguration`. |
