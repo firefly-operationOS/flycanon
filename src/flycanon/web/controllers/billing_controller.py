@@ -22,7 +22,7 @@ from datetime import datetime
 from decimal import Decimal
 
 from pyfly.container import rest_controller
-from pyfly.kernel import BadRequestException
+from pyfly.kernel import InvalidRequestException
 from pyfly.web import QueryParam, get_mapping, request_mapping
 
 from flycanon.core.services.billing import CostService
@@ -194,7 +194,7 @@ class BillingController:
         provided window.
         """
         if dimension not in _TOP_DIMENSIONS:
-            raise BadRequestException(
+            raise InvalidRequestException(
                 f"unknown billing top dimension {dimension!r}; "
                 f"expected one of: {sorted(_TOP_DIMENSIONS)}"
             )
@@ -273,7 +273,7 @@ class BillingController:
         groups = [g.strip() for g in (group_by or "").split(",") if g.strip()]
         invalid = [g for g in groups if g not in _TOP_DIMENSIONS]
         if invalid:
-            raise BadRequestException(
+            raise InvalidRequestException(
                 f"unknown latency group_by columns: {invalid}; "
                 f"expected one or more of: {sorted(_TOP_DIMENSIONS)}"
             )
