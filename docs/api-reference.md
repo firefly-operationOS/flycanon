@@ -1,4 +1,12 @@
-# API reference
+<div align="center">
+
+<img src="assets/logo.png" alt="flycanon" width="380" />
+
+### **API reference**
+
+</div>
+
+---
 
 The OpenAPI document is the canonical source -- visit `/openapi.json`
 or the Swagger UI at `/docs` on a running instance. This page is the

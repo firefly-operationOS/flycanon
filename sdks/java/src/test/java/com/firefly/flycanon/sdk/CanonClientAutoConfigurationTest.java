@@ -48,8 +48,9 @@ class CanonClientAutoConfigurationTest {
                 });
     }
 
+    @org.springframework.context.annotation.Configuration
     static class CustomClientConfiguration {
-        org.springframework.context.annotation.Bean
+        @org.springframework.context.annotation.Bean
         CanonClient canonClient() {
             return CanonClient.builder().baseUrl("http://override").build();
         }

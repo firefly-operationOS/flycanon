@@ -1,4 +1,12 @@
-# flycanon-sdk quickstart
+<div align="center">
+
+<img src="../../docs/assets/logo.png" alt="flycanon" width="380" />
+
+### **Python SDK quickstart**
+
+</div>
+
+---
 
 Five-minute tour of the async Python client. Assumes the flycanon
 service is running on `http://localhost:8500` (see the service-level

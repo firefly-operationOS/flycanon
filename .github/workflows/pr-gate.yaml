@@ -193,18 +193,18 @@ jobs:
         run: uv run pytest -q
 
   sdk-java:
-    name: SDK Java
+    name: SDK Java (25 + Spring Boot 3.5.9)
     runs-on: ubuntu-latest
     defaults:
       run:
         working-directory: sdks/java
     steps:
       - uses: actions/checkout@v4
-      - name: Set up Java 21 (Temurin)
+      - name: Set up Java 25 (Temurin)
         uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: "21"
+          java-version: "25"
           cache: maven
       - name: mvn verify
         run: mvn -B -ntp verify

@@ -7,10 +7,7 @@ import pytest
 
 from flycanon.core.services.ingestion import IngestionService
 from flycanon.core.services.ingestion.chunker import ParagraphChunker
-from flycanon.core.services.ingestion.errors import (
-    EmptySource,
-    UnsupportedSourceKind,
-)
+from flycanon.core.services.ingestion.errors import EmptySource
 from flycanon.core.services.ingestion.loaders import default_registry
 from flycanon.interfaces.enums import SourceKind, SourceStatus
 from flycanon.models.entities.source import SourceRow
@@ -55,7 +52,11 @@ def test_ingest_markdown_emits_chunks_with_section_path(fixtures_dir):
     assert any("Scope" in (c.section_path or "") for c in result.chunks)
 
 
-def test_ingest_rejects_unknown_kind():
+def test_ingest_unknown_kind_falls_through_to_universal_loader():
+    # The default registry installs ``MarkitdownLoader`` as the
+    # fallback, so an unknown kind no longer raises -- it routes
+    # through MarkItDown like any other format. We assert the source
+    # is ingested rather than rejected.
     source = SourceRow(
         id="src-1",
         kind=SourceKind.unknown.value,
@@ -63,8 +64,9 @@ def test_ingest_rejects_unknown_kind():
         content_sha256="",
         content_bytes=0,
     )
-    with pytest.raises(UnsupportedSourceKind):
-        _service().ingest(source=source, content=b"hello")
+    result = _service().ingest(source=source, content=b"hello world\n\nsecond paragraph")
+    assert result.source.status == SourceStatus.ingested.value
+    assert result.source.n_chunks > 0
 
 
 def test_ingest_raises_empty_source_on_no_content():

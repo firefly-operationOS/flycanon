@@ -1,4 +1,12 @@
-# EDA events
+<div align="center">
+
+<img src="assets/logo.png" alt="flycanon" width="380" />
+
+### **EDA events**
+
+</div>
+
+---
 
 Three topics, all routed through `pyfly.eda.EventPublisher` and
 backed by the durable Postgres outbox by default

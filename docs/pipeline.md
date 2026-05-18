@@ -1,27 +1,51 @@
+<div align="center">
+
+<img src="assets/logo.png" alt="flycanon" width="380" />
+
+### **Pipeline**
+
+</div>
+
+---
+
 # Pipeline
 
 ```
-                          ┌────────────────────────────┐
-   POST /api/v1/sources ─►│ SubmitSourceHandler        │
-                          │  └─► IntakeService.submit  │
-                          │       ┌─ IngestionService ─┐
-                          │       │  loader + chunker  │
-                          │       └────────────────────┘
-                          │       ┌─ EmbeddingService ─┐
-                          │       │  batch embed       │
-                          │       └────────────────────┘
-                          │       ┌─ IndexService      ┐
-                          │       │  SqliteCorpus +    │
-                          │       │  sqlite-vec        │
-                          │       └────────────────────┘
-                          │       ┌─ AuditService      ┐
-                          │       │  source.ingested   │
-                          │       └────────────────────┘
-                          │       ┌─ EventPublisher    ┐
-                          │       │  flycanon.ingest   │
-                          │       └────────────────────┘
-                          └─► SourceRecord
+                          +-------------------------------+
+   POST /api/v1/sources ->| SubmitSourceHandler           |
+                          |  └-> IntakeService.submit     |
+                          |       +- BinaryNormalizer    -+
+                          |       |  magic-byte sniff     |
+                          |       |  + Office / archive / |
+                          |       |  email / image route  |
+                          |       +-----------------------+
+                          |       +- IngestionService    -+
+                          |       |  loader + chunker     |
+                          |       +-----------------------+
+                          |       +- EmbeddingService    -+
+                          |       |  batch embed          |
+                          |       +-----------------------+
+                          |       +- IndexService        -+
+                          |       |  SQLite FTS5 (BM25) + |
+                          |       |  vector store         |
+                          |       |  (pgvector default)   |
+                          |       +-----------------------+
+                          |       +- AuditService        -+
+                          |       |  source.ingested      |
+                          |       +-----------------------+
+                          |       +- EventPublisher      -+
+                          |       |  flycanon.ingest      |
+                          |       +-----------------------+
+                          +-> SourceRecord
 ```
+
+The intake stage accepts **any file format**. The binary normaliser
+detects the media type from the magic bytes and routes the payload
+through the matrix documented in
+[`architecture.md`](architecture.md#universal-binary-normaliser)
+(Office to Markdown, archives expanded, images OCR'd, emails
+decomposed). Multi-artefact intakes are merged with `## Artifact:`
+section markers so each chunk remains attributable.
 
 ```
 POST /api/v1/candidates:propose
@@ -48,7 +72,9 @@ POST /api/v1/search    (raw hybrid retrieval)
   → SearchKnowledgeHandler → SearchService.search
       → RetrievalService.search
           → HybridRetriever (agentic):
-                BM25 over SqliteCorpus + dense over sqlite-vec,
+                BM25 over SQLite FTS5 + dense over the pluggable
+                VectorStoreProtocol (pgvector / chroma / qdrant /
+                pinecone / sqlite-vec / memory),
                 fused via Reciprocal Rank Fusion (k = FLYCANON_RETRIEVAL_RRF_K)
           → hydrate hits with Postgres rows; apply caller filters
       → SearchResponse { hits, elapsed_ms }
