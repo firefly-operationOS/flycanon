@@ -98,5 +98,26 @@ services:
       api:
         condition: service_healthy
 
+  # Optional Gotenberg sidecar for high-fidelity Office -> PDF
+  # conversion. Off by default -- the binary normaliser uses MarkItDown
+  # in-process which is sufficient for DOCX / XLSX / PPTX / HTML.
+  # Enable when source documents have complex layout (PowerPoint
+  # decks with images, multi-tab spreadsheets, &c.) and you want the
+  # PDF render path:
+  #   docker compose --profile office up
+  #   FLYCANON_OFFICE_CONVERTER=gotenberg
+  #   FLYCANON_GOTENBERG_URL=http://gotenberg:3000
+  gotenberg:
+    image: gotenberg/gotenberg:8
+    container_name: flycanon-gotenberg
+    profiles: ["office"]
+    ports:
+      - "${GOTENBERG_PORT:-3500}:3000"
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost:3000/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 12
+
 volumes:
   postgres_data:
