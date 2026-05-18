@@ -52,8 +52,16 @@ def _hit_dto(hit) -> Hit:
     callers don't need a second ``GET /api/v1/sources/{id}`` for
     rendering citation labels. Anything else the loader emitted
     stays in ``metadata`` for forward-compat.
+
+    Internal filter-only keys prefixed with an underscore
+    (``_knowledge_status``, ``_knowledge_domain``,
+    ``_knowledge_jurisdiction``, ``_knowledge_tags``) are stripped
+    -- they exist solely so :meth:`RetrievalService._apply_filters`
+    can match against the live knowledge dimensions without a
+    per-hit repo round-trip, and they are not part of the public
+    metadata contract.
     """
-    metadata = dict(hit.metadata or {})
+    metadata = {k: v for k, v in (hit.metadata or {}).items() if not k.startswith("_")}
     page_raw = metadata.pop("page", None)
     try:
         page = int(page_raw) if page_raw not in (None, "") else None
