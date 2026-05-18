@@ -108,6 +108,52 @@ See [QUICKSTART.md](QUICKSTART.md) for the full tour, including a
 multi-tenant pattern (one `CanonClient` per tenant via
 `flycanon.auto-configure=false` and an explicit `@Bean`).
 
+## What the client covers
+
+Every public flycanon endpoint has a typed method on `CanonClient`.
+Highlights of the Tier 1 / Tier 2 surfaces:
+
+```java
+// Bulk + async + replace intake
+Models.BulkSourcesResponse bulk = canon.submitSourcesBulk(List.of(p1, p2));
+Models.IngestJob job = canon.submitSourceAsync(payload);
+String sseUrl = canon.jobStreamUrl(job.id(), 0);
+// (Use Spring's WebClient or any HTTP/2 streaming client against
+// sseUrl -- RestClient is blocking and unsuitable for live SSE.)
+Models.SourceRecord updated = canon.replaceSource(sourceId, newPayload);
+
+// Knowledge graph + diff
+Models.KnowledgeDiff diff = canon.getDiff(itemId, 1, 2);
+Models.RelationsList rels = canon.listRelations(itemId);
+canon.addRelation(itemId, new Models.CreateRelationRequest(
+        otherId, "depends_on", null, null, null));
+Models.KnowledgeGraph graph = canon.getGraph(Map.of("domain", "compliance"));
+String mermaid = canon.getGraphMermaid(Map.of("domain", "compliance"));
+
+// Conversations
+Models.Conversation conv = canon.createConversation(
+        new Models.CreateConversationRequest("Onboarding", null));
+Models.ConversationTurn turn = canon.addTurn(conv.id(),
+        new Models.CreateConversationTurnRequest(
+                "What about scope?", null, null, null));
+Models.SuggestionsResponse suggestions = canon.suggestQuestions(conv.id());
+
+// Quality scans
+Models.StaleReport stale = canon.scanStale();
+Models.ConflictScanResponse conflicts = canon.detectConflicts(
+        new Models.ConflictScanRequest("compliance", 0.85, 50, null));
+
+// Billing + corpus inventory
+Models.BillingSummary summary = canon.billingSummary(Map.of());
+Models.TopConsumersReport top = canon.billingTop(Map.of("dimension", "model"));
+Models.LatencyReport lat = canon.billingLatency(Map.of("group_by", "model"));
+Models.CorpusStats snapshot = canon.stats();
+```
+
+Every return is a Jackson-deserialised record (`@JsonIgnoreProperties`
+keeps the SDK forward-compatible with new fields the service ships on
+a minor version).
+
 ## Error handling
 
 Every non-2xx response is parsed as RFC 7807 ProblemDetails and
