@@ -18,7 +18,7 @@
 
   <groupId>com.firefly</groupId>
   <artifactId>flycanon-sdk</artifactId>
-  <version>26.5.4</version>
+  <version>26.5.5</version>
   <packaging>jar</packaging>
 
   <name>flycanon-sdk</name>
@@ -66,6 +66,24 @@
     <dependency>
       <groupId>org.springframework</groupId>
       <artifactId>spring-web</artifactId>
+    </dependency>
+    <!--
+      Reactive HTTP stack: WebClient + Reactor + Reactor Netty.
+      Marked optional so consumers that only want the synchronous
+      CanonClient don't pull the reactor / netty fat. To use the
+      reactive variant (ReactiveCanonClient), add
+      spring-boot-starter-webflux to your own pom; it brings both
+      transitively.
+    -->
+    <dependency>
+      <groupId>org.springframework</groupId>
+      <artifactId>spring-webflux</artifactId>
+      <optional>true</optional>
+    </dependency>
+    <dependency>
+      <groupId>io.projectreactor.netty</groupId>
+      <artifactId>reactor-netty-http</artifactId>
+      <optional>true</optional>
     </dependency>
     <!--
       JSR-310 Jackson module so the SDK can round-trip Instant /

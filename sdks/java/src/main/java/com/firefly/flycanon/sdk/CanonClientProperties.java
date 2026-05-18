@@ -47,11 +47,21 @@ public class CanonClientProperties {
     private Duration timeout = Duration.ofSeconds(60);
 
     /**
-     * Whether the autoconfiguration registers the CanonClient bean. Set
-     * to false when you build the client manually (e.g. for multi-tenant
-     * deployments that point at different bases per tenant).
+     * Whether the autoconfiguration registers the (blocking)
+     * {@link CanonClient} bean. Set to false when you build the
+     * client manually (e.g. for multi-tenant deployments that point
+     * at different bases per tenant).
      */
     private boolean autoConfigure = true;
+
+    /**
+     * Whether the autoconfiguration registers the reactive
+     * {@link ReactiveCanonClient} bean. Off by default so consumers
+     * that don't depend on Spring WebFlux don't pay for the bean.
+     * Set to ``true`` (and depend on ``spring-webflux`` +
+     * ``reactor-netty-http``) to opt in.
+     */
+    private boolean reactiveAutoConfigure = false;
 
     public String getBaseUrl() {
         return baseUrl;
@@ -83,5 +93,13 @@ public class CanonClientProperties {
 
     public void setAutoConfigure(boolean autoConfigure) {
         this.autoConfigure = autoConfigure;
+    }
+
+    public boolean isReactiveAutoConfigure() {
+        return reactiveAutoConfigure;
+    }
+
+    public void setReactiveAutoConfigure(boolean reactiveAutoConfigure) {
+        this.reactiveAutoConfigure = reactiveAutoConfigure;
     }
 }
