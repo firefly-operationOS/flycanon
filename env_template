@@ -37,6 +37,22 @@ FLYCANON_KNOWLEDGE_TOPIC=flycanon.knowledge
 FLYCANON_AUDIT_TOPIC=flycanon.audit
 
 # ----------------------------------------------------------------------------
+# Worker concurrency
+# ----------------------------------------------------------------------------
+# The IngestWorker subscribes to four event families (Source*, Knowledge*,
+# Candidate*, audit) and dispatches each delivery through a bounded
+# semaphore so a burst doesn't blow up the async pool or an LLM rate
+# limit. Tune these for the bandwidth of your downstream services.
+#   max_concurrency    -- inflight handler tasks cap.
+#   handler_timeout_s  -- per-handler wall-clock cap (a stuck downstream
+#                         call cannot pin a worker slot indefinitely).
+#   shutdown_grace_s   -- on stop, wait this long for inflight to drain
+#                         before cancelling.
+FLYCANON_WORKER_MAX_CONCURRENCY=8
+FLYCANON_WORKER_HANDLER_TIMEOUT_S=120
+FLYCANON_WORKER_SHUTDOWN_GRACE_S=30
+
+# ----------------------------------------------------------------------------
 # Embeddings + RAG
 # ----------------------------------------------------------------------------
 # Embedding provider, used by the chunk indexer and the query stage.
@@ -48,6 +64,18 @@ FLYCANON_EMBEDDING_DIMENSIONS=1536
 # Answer model for the RAG query endpoint. Any pydantic-ai provider id.
 FLYCANON_ANSWER_MODEL=anthropic:claude-sonnet-4-6
 FLYCANON_ANSWER_FALLBACK_MODEL=openai:gpt-4o
+
+# Output-token budget for every FireflyAgent. Anthropic / OpenAI default
+# to 4096 which silently truncates the consolidator's structured
+# candidate arrays (the model writes a valid prefix, the JSON parser
+# rejects the half-output, and the request returns 0 candidates with
+# input_tokens=4096 in the logs). 8192 is Sonnet 4.6's public ceiling
+# and matches flydocs/flyradar. Bump for models with a higher ceiling
+# (long-output betas, GPT-4o 16k) when needed. The two per-stage
+# overrides let you tune one stage independently of the global default.
+FLYCANON_AGENT_MAX_OUTPUT_TOKENS=8192
+# FLYCANON_CONSOLIDATOR_MAX_OUTPUT_TOKENS=  # default: agent_max_output_tokens
+# FLYCANON_ANSWER_MAX_OUTPUT_TOKENS=        # default: agent_max_output_tokens
 
 # Hybrid retrieval knobs.
 FLYCANON_RETRIEVAL_TOP_K=10

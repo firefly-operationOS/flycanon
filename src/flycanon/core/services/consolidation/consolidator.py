@@ -20,6 +20,8 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+from flycanon.config import CanonSettings
+from flycanon.core.agents import build_agent
 from flycanon.core.services.consolidation.errors import ConsolidationError
 from flycanon.core.services.consolidation.prompt_loader import PromptTemplate
 from flycanon.interfaces.enums import Domain, Jurisdiction
@@ -65,9 +67,11 @@ class Consolidator:
         *,
         prompt: PromptTemplate,
         default_model: str,
+        settings: CanonSettings,
     ) -> None:
         self._prompt = prompt
         self._default_model = default_model
+        self._settings = settings
 
     async def propose(
         self,
@@ -126,17 +130,22 @@ class Consolidator:
         return output
 
     def _build_agent(self, system_text: str, model: str | None) -> Any:
+        # Per-stage override pulled from ``consolidator_max_output_tokens``
+        # when set, else the global ``agent_max_output_tokens`` default
+        # (8192). The consolidator is the most likely stage to need a
+        # larger budget -- dense business documents routinely produce
+        # multi-candidate arrays that overflow the 4096 provider default.
         try:
-            from fireflyframework_agentic.agents import FireflyAgent
-        except ImportError as exc:
-            raise ConsolidationError(f"FireflyAgent unavailable: {exc}") from exc
-        return FireflyAgent(
-            "flycanon-consolidator",
-            model=model or self._default_model,
-            instructions=system_text,
-            output_type=ConsolidationOutput,
-            auto_register=False,
-        )
+            return build_agent(
+                name="flycanon-consolidator",
+                model=model or self._default_model,
+                output_type=ConsolidationOutput,
+                instructions=system_text,
+                settings=self._settings,
+                max_output_tokens=self._settings.consolidator_max_output_tokens,
+            )
+        except RuntimeError as exc:
+            raise ConsolidationError(str(exc)) from exc
 
     @staticmethod
     def _extract_output(result: Any) -> ConsolidationOutput:
