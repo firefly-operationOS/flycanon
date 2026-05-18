@@ -64,6 +64,7 @@ from flycanon.models.repositories import (
     AuditRepository,
     CandidateRepository,
     ChunkRepository,
+    ConversationRepository,
     IngestJobRepository,
     KnowledgeRepository,
     RelationRepository,
@@ -129,6 +130,12 @@ class CanonCoreConfiguration:
     @bean
     def ingest_job_repository(self, settings: CanonSettings) -> IngestJobRepository:
         return IngestJobRepository.from_url(settings.database_url)
+
+    @bean
+    def conversation_repository(
+        self, settings: CanonSettings
+    ) -> ConversationRepository:
+        return ConversationRepository.from_url(settings.database_url)
 
     @bean(name="database_health")
     def database_health(self, source_repository: SourceRepository) -> SqlAlchemyHealthIndicator:
