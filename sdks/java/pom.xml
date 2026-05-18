@@ -1,0 +1,74 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+    Copyright 2026 Firefly Software Solutions Inc.
+    Licensed under the Apache License, Version 2.0.
+-->
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0
+                             http://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <groupId>io.firefly</groupId>
+  <artifactId>flycanon-sdk</artifactId>
+  <version>26.5.1</version>
+  <packaging>jar</packaging>
+
+  <name>flycanon-sdk</name>
+  <description>
+    Java client for the flycanon Operational Knowledge Repository
+    service. Uses java.net.http.HttpClient + Jackson; no Spring,
+    no reactor, no transitive HTTP-client zoo.
+  </description>
+  <url>https://github.com/firefly-operationOS/flycanon</url>
+
+  <licenses>
+    <license>
+      <name>Apache License, Version 2.0</name>
+      <url>https://www.apache.org/licenses/LICENSE-2.0</url>
+    </license>
+  </licenses>
+
+  <organization>
+    <name>Firefly Software Solutions Inc</name>
+    <url>https://github.com/firefly-operationOS</url>
+  </organization>
+
+  <properties>
+    <maven.compiler.source>21</maven.compiler.source>
+    <maven.compiler.target>21</maven.compiler.target>
+    <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+    <jackson.version>2.18.0</jackson.version>
+    <junit.version>5.11.0</junit.version>
+  </properties>
+
+  <dependencies>
+    <dependency>
+      <groupId>com.fasterxml.jackson.core</groupId>
+      <artifactId>jackson-databind</artifactId>
+      <version>${jackson.version}</version>
+    </dependency>
+    <dependency>
+      <groupId>com.fasterxml.jackson.datatype</groupId>
+      <artifactId>jackson-datatype-jsr310</artifactId>
+      <version>${jackson.version}</version>
+    </dependency>
+
+    <dependency>
+      <groupId>org.junit.jupiter</groupId>
+      <artifactId>junit-jupiter</artifactId>
+      <version>${junit.version}</version>
+      <scope>test</scope>
+    </dependency>
+  </dependencies>
+
+  <build>
+    <plugins>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-surefire-plugin</artifactId>
+        <version>3.5.0</version>
+      </plugin>
+    </plugins>
+  </build>
+</project>
