@@ -75,9 +75,7 @@ class KnowledgeController:
         """Paginated, filterable list of knowledge items."""
         statuses = [KnowledgeStatus(s) for s in _split_csv(status)] if status else []
         domains = [Domain(d) for d in _split_csv(domain)] if domain else []
-        jurisdictions = (
-            [Jurisdiction(j) for j in _split_csv(jurisdiction)] if jurisdiction else []
-        )
+        jurisdictions = [Jurisdiction(j) for j in _split_csv(jurisdiction)] if jurisdiction else []
         return await self._queries.query(
             ListKnowledgeQuery(
                 statuses=statuses,
@@ -109,9 +107,7 @@ class KnowledgeController:
         version: QueryParam[int] = 0,
     ) -> Provenance:
         """Resolve the citation graph for ``(item_id, version)``."""
-        return await self._queries.query(
-            GetProvenanceQuery(item_id=item_id, version=version or None)
-        )
+        return await self._queries.query(GetProvenanceQuery(item_id=item_id, version=version or None))
 
     @get_mapping("/{item_id}/diff")
     async def get_diff(
@@ -216,9 +212,7 @@ class KnowledgeController:
         ``Depends on`` and ``Required by`` sections without
         filtering client-side.
         """
-        return await self._queries.query(
-            ListKnowledgeRelationsQuery(item_id=item_id)
-        )
+        return await self._queries.query(ListKnowledgeRelationsQuery(item_id=item_id))
 
     @post_mapping("/{item_id}/relations", status_code=201)
     async def add_relation(

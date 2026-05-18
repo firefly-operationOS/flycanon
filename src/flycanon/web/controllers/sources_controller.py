@@ -249,9 +249,7 @@ class SourcesController:
                 url_filename,
             )
 
-        raise ValueError(
-            "either content_base64 (inline bytes) or uri (URL to fetch) is required"
-        )
+        raise ValueError("either content_base64 (inline bytes) or uri (URL to fetch) is required")
 
     @get_mapping("/{source_id}")
     async def get_source(self, source_id: PathVar[str]) -> SourceRecord:
@@ -323,9 +321,7 @@ class SourcesController:
                         correlation_id=correlation_id,
                     )
                 )
-                results.append(
-                    BulkSourceResult(index=index, status="succeeded", source=source)
-                )
+                results.append(BulkSourceResult(index=index, status="succeeded", source=source))
                 succeeded += 1
             except Exception as exc:  # noqa: BLE001
                 code = getattr(exc, "code", None) or type(exc).__name__
@@ -379,9 +375,7 @@ class SourcesController:
         trail is the system of record for that case.
         """
         if not payload.content_base64:
-            raise ValueError(
-                "content_base64 is required; URL-fetched re-ingestion is on the roadmap"
-            )
+            raise ValueError("content_base64 is required; URL-fetched re-ingestion is on the roadmap")
         try:
             content = base64.b64decode(payload.content_base64)
         except Exception as exc:

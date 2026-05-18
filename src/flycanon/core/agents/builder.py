@@ -66,9 +66,7 @@ def build_agent(
     try:
         from fireflyframework_agentic.agents import FireflyAgent
     except ImportError as exc:  # pragma: no cover -- runtime dep guard
-        raise RuntimeError(
-            "fireflyframework_agentic is required to build FireflyAgent instances"
-        ) from exc
+        raise RuntimeError("fireflyframework_agentic is required to build FireflyAgent instances") from exc
 
     resolved_max = resolve_max_output_tokens(settings, override=max_output_tokens)
     model_settings: dict[str, Any] = {"max_tokens": resolved_max}

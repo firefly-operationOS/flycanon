@@ -27,9 +27,7 @@ class ConversationRepository:
         return self._engine
 
     @classmethod
-    def from_url(
-        cls, database_url: str, *, echo: bool = False
-    ) -> ConversationRepository:
+    def from_url(cls, database_url: str, *, echo: bool = False) -> ConversationRepository:
         factory, engine = build_session_factory(database_url, echo=echo)
         return cls(factory, engine=engine)
 

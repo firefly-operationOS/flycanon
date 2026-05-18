@@ -134,9 +134,7 @@ class TestTextHeuristics:
 
     def test_svg_is_recognised_via_root_or_xml_prologue(self):
         assert sniff_media_type(b'<svg xmlns="..."/>') == "image/svg+xml"
-        assert (
-            sniff_media_type(b'<?xml version="1.0"?>\n<svg xmlns="..."/>') == "image/svg+xml"
-        )
+        assert sniff_media_type(b'<?xml version="1.0"?>\n<svg xmlns="..."/>') == "image/svg+xml"
 
     def test_xml_without_svg_root_is_application_xml(self):
         assert sniff_media_type(b'<?xml version="1.0"?>\n<root><a/></root>') == "application/xml"

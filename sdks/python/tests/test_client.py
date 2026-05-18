@@ -34,9 +34,7 @@ from flycanon_sdk import (
 
 @pytest.mark.asyncio
 async def test_version_returns_version_info() -> None:
-    async with respx.mock(base_url="http://canon") as mock, CanonClient(
-        base_url="http://canon"
-    ) as client:
+    async with respx.mock(base_url="http://canon") as mock, CanonClient(base_url="http://canon") as client:
         mock.get("/api/v1/version").respond(
             json={
                 "service": "flycanon",
@@ -55,9 +53,7 @@ async def test_version_returns_version_info() -> None:
 
 @pytest.mark.asyncio
 async def test_submit_source_round_trips_payload() -> None:
-    async with respx.mock(base_url="http://canon") as mock, CanonClient(
-        base_url="http://canon"
-    ) as client:
+    async with respx.mock(base_url="http://canon") as mock, CanonClient(base_url="http://canon") as client:
         route = mock.post("/api/v1/sources").respond(
             201,
             json={
@@ -87,9 +83,7 @@ async def test_submit_source_round_trips_payload() -> None:
 
 @pytest.mark.asyncio
 async def test_api_error_maps_problem_details() -> None:
-    async with respx.mock(base_url="http://canon") as mock, CanonClient(
-        base_url="http://canon"
-    ) as client:
+    async with respx.mock(base_url="http://canon") as mock, CanonClient(base_url="http://canon") as client:
         mock.get("/api/v1/knowledge/missing").respond(
             404,
             json={
@@ -111,9 +105,7 @@ async def test_api_error_maps_problem_details() -> None:
 
 @pytest.mark.asyncio
 async def test_submit_source_async_returns_job() -> None:
-    async with respx.mock(base_url="http://canon") as mock, CanonClient(
-        base_url="http://canon"
-    ) as client:
+    async with respx.mock(base_url="http://canon") as mock, CanonClient(base_url="http://canon") as client:
         mock.post("/api/v1/sources:async").respond(
             202,
             json={
@@ -133,18 +125,14 @@ async def test_submit_source_async_returns_job() -> None:
 
 @pytest.mark.asyncio
 async def test_get_diff_round_trips() -> None:
-    async with respx.mock(base_url="http://canon") as mock, CanonClient(
-        base_url="http://canon"
-    ) as client:
+    async with respx.mock(base_url="http://canon") as mock, CanonClient(base_url="http://canon") as client:
         mock.get("/api/v1/knowledge/ki-1/diff").respond(
             json={
                 "knowledge_item_id": "ki-1",
                 "from_version": 1,
                 "to_version": 2,
                 "unified_diff": "@@ -1 +1 @@\n-old\n+new\n",
-                "field_changes": [
-                    {"field": "title", "from": "Old", "to": "New"}
-                ],
+                "field_changes": [{"field": "title", "from": "Old", "to": "New"}],
                 "added_citations": [],
                 "removed_citations": [],
             }
@@ -156,9 +144,7 @@ async def test_get_diff_round_trips() -> None:
 
 @pytest.mark.asyncio
 async def test_list_relations_returns_outgoing_incoming() -> None:
-    async with respx.mock(base_url="http://canon") as mock, CanonClient(
-        base_url="http://canon"
-    ) as client:
+    async with respx.mock(base_url="http://canon") as mock, CanonClient(base_url="http://canon") as client:
         mock.get("/api/v1/knowledge/ki-1/relations").respond(
             json={
                 "outgoing": [
@@ -180,9 +166,7 @@ async def test_list_relations_returns_outgoing_incoming() -> None:
 
 @pytest.mark.asyncio
 async def test_add_relation_posts_request_body() -> None:
-    async with respx.mock(base_url="http://canon") as mock, CanonClient(
-        base_url="http://canon"
-    ) as client:
+    async with respx.mock(base_url="http://canon") as mock, CanonClient(base_url="http://canon") as client:
         route = mock.post("/api/v1/knowledge/ki-1/relations").respond(
             201,
             json={
@@ -203,9 +187,7 @@ async def test_add_relation_posts_request_body() -> None:
 
 @pytest.mark.asyncio
 async def test_get_graph_returns_typed_graph() -> None:
-    async with respx.mock(base_url="http://canon") as mock, CanonClient(
-        base_url="http://canon"
-    ) as client:
+    async with respx.mock(base_url="http://canon") as mock, CanonClient(base_url="http://canon") as client:
         mock.get("/api/v1/knowledge:graph").respond(
             json={
                 "nodes": [
@@ -223,9 +205,7 @@ async def test_get_graph_returns_typed_graph() -> None:
 
 @pytest.mark.asyncio
 async def test_scan_stale_returns_report() -> None:
-    async with respx.mock(base_url="http://canon") as mock, CanonClient(
-        base_url="http://canon"
-    ) as client:
+    async with respx.mock(base_url="http://canon") as mock, CanonClient(base_url="http://canon") as client:
         mock.get("/api/v1/knowledge:stale").respond(
             json={
                 "items": [
@@ -249,9 +229,7 @@ async def test_scan_stale_returns_report() -> None:
 
 @pytest.mark.asyncio
 async def test_detect_conflicts_returns_relation_ids() -> None:
-    async with respx.mock(base_url="http://canon") as mock, CanonClient(
-        base_url="http://canon"
-    ) as client:
+    async with respx.mock(base_url="http://canon") as mock, CanonClient(base_url="http://canon") as client:
         mock.post("/api/v1/knowledge:detect-conflicts").respond(
             json={
                 "pairs_evaluated": 4,
@@ -267,9 +245,7 @@ async def test_detect_conflicts_returns_relation_ids() -> None:
 
 @pytest.mark.asyncio
 async def test_conversation_add_turn_returns_citations() -> None:
-    async with respx.mock(base_url="http://canon") as mock, CanonClient(
-        base_url="http://canon"
-    ) as client:
+    async with respx.mock(base_url="http://canon") as mock, CanonClient(base_url="http://canon") as client:
         mock.post("/api/v1/conversations/c-1/turns").respond(
             json={
                 "id": "trn-1",
@@ -281,20 +257,14 @@ async def test_conversation_add_turn_returns_citations() -> None:
                 "created_at": "2026-05-18T17:00:00Z",
             }
         )
-        turn = await client.add_turn(
-            "c-1", CreateConversationTurnRequest(query="what?")
-        )
+        turn = await client.add_turn("c-1", CreateConversationTurnRequest(query="what?"))
         assert turn.answer == "yes"
 
 
 @pytest.mark.asyncio
 async def test_suggest_questions_returns_list() -> None:
-    async with respx.mock(base_url="http://canon") as mock, CanonClient(
-        base_url="http://canon"
-    ) as client:
-        mock.post("/api/v1/conversations/c-1/suggest").respond(
-            json={"questions": ["What about X?", "Y?"]}
-        )
+    async with respx.mock(base_url="http://canon") as mock, CanonClient(base_url="http://canon") as client:
+        mock.post("/api/v1/conversations/c-1/suggest").respond(json={"questions": ["What about X?", "Y?"]})
         suggestions = await client.suggest_questions("c-1")
         assert isinstance(suggestions, SuggestionsResponse)
         assert len(suggestions.questions) == 2
@@ -302,9 +272,7 @@ async def test_suggest_questions_returns_list() -> None:
 
 @pytest.mark.asyncio
 async def test_billing_report_returns_rows() -> None:
-    async with respx.mock(base_url="http://canon") as mock, CanonClient(
-        base_url="http://canon"
-    ) as client:
+    async with respx.mock(base_url="http://canon") as mock, CanonClient(base_url="http://canon") as client:
         mock.get("/api/v1/billing").respond(
             json={
                 "rows": [
@@ -328,9 +296,7 @@ async def test_billing_report_returns_rows() -> None:
 
 @pytest.mark.asyncio
 async def test_list_cost_events_returns_page() -> None:
-    async with respx.mock(base_url="http://canon") as mock, CanonClient(
-        base_url="http://canon"
-    ) as client:
+    async with respx.mock(base_url="http://canon") as mock, CanonClient(base_url="http://canon") as client:
         mock.get("/api/v1/billing/events").respond(
             json={
                 "rows": [
@@ -357,9 +323,7 @@ async def test_list_cost_events_returns_page() -> None:
 
 @pytest.mark.asyncio
 async def test_billing_summary_returns_three_windows() -> None:
-    async with respx.mock(base_url="http://canon") as mock, CanonClient(
-        base_url="http://canon"
-    ) as client:
+    async with respx.mock(base_url="http://canon") as mock, CanonClient(base_url="http://canon") as client:
         window = {
             "since": "2026-05-17T17:00:00Z",
             "calls": 1,
@@ -387,9 +351,7 @@ async def test_billing_summary_returns_three_windows() -> None:
 
 @pytest.mark.asyncio
 async def test_billing_top_validates_dimension() -> None:
-    async with respx.mock(base_url="http://canon") as mock, CanonClient(
-        base_url="http://canon"
-    ) as client:
+    async with respx.mock(base_url="http://canon") as mock, CanonClient(base_url="http://canon") as client:
         mock.get("/api/v1/billing/top").respond(
             json={
                 "dimension": "actor",
@@ -413,9 +375,7 @@ async def test_billing_top_validates_dimension() -> None:
 
 @pytest.mark.asyncio
 async def test_billing_by_subject_returns_rows() -> None:
-    async with respx.mock(base_url="http://canon") as mock, CanonClient(
-        base_url="http://canon"
-    ) as client:
+    async with respx.mock(base_url="http://canon") as mock, CanonClient(base_url="http://canon") as client:
         mock.get("/api/v1/billing/by-subject").respond(
             json={
                 "rows": [
@@ -438,9 +398,7 @@ async def test_billing_by_subject_returns_rows() -> None:
 
 @pytest.mark.asyncio
 async def test_billing_latency_returns_percentiles() -> None:
-    async with respx.mock(base_url="http://canon") as mock, CanonClient(
-        base_url="http://canon"
-    ) as client:
+    async with respx.mock(base_url="http://canon") as mock, CanonClient(base_url="http://canon") as client:
         mock.get("/api/v1/billing/latency").respond(
             json={
                 "rows": [
@@ -463,9 +421,7 @@ async def test_billing_latency_returns_percentiles() -> None:
 
 @pytest.mark.asyncio
 async def test_stats_returns_full_snapshot() -> None:
-    async with respx.mock(base_url="http://canon") as mock, CanonClient(
-        base_url="http://canon"
-    ) as client:
+    async with respx.mock(base_url="http://canon") as mock, CanonClient(base_url="http://canon") as client:
         mock.get("/api/v1/stats").respond(
             json={
                 "generated_at": "2026-05-18T17:00:00Z",
@@ -498,9 +454,7 @@ async def test_stats_returns_full_snapshot() -> None:
 
 @pytest.mark.asyncio
 async def test_answer_returns_typed_response() -> None:
-    async with respx.mock(base_url="http://canon") as mock, CanonClient(
-        base_url="http://canon"
-    ) as client:
+    async with respx.mock(base_url="http://canon") as mock, CanonClient(base_url="http://canon") as client:
         mock.post("/api/v1/query").respond(
             json={
                 "answer": "Yes.",

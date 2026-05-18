@@ -216,9 +216,7 @@ class GetKnowledgeHistoryQuery(Query[list[KnowledgeVersion]]):
 
 @query_handler
 @service
-class GetKnowledgeHistoryHandler(
-    QueryHandler[GetKnowledgeHistoryQuery, list[KnowledgeVersion]]
-):
+class GetKnowledgeHistoryHandler(QueryHandler[GetKnowledgeHistoryQuery, list[KnowledgeVersion]]):
     def __init__(self, repository: KnowledgeRepository) -> None:
         super().__init__()
         self._repository = repository
@@ -286,9 +284,7 @@ class AddKnowledgeRelationCommand(Command[KnowledgeRelation]):
 
 @command_handler
 @service
-class AddKnowledgeRelationHandler(
-    CommandHandler[AddKnowledgeRelationCommand, KnowledgeRelation]
-):
+class AddKnowledgeRelationHandler(CommandHandler[AddKnowledgeRelationCommand, KnowledgeRelation]):
     def __init__(self, relations: KnowledgeRelationService) -> None:
         super().__init__()
         self._relations = relations
@@ -311,9 +307,7 @@ class RemoveKnowledgeRelationCommand(Command[None]):
 
 @command_handler
 @service
-class RemoveKnowledgeRelationHandler(
-    CommandHandler[RemoveKnowledgeRelationCommand, None]
-):
+class RemoveKnowledgeRelationHandler(CommandHandler[RemoveKnowledgeRelationCommand, None]):
     def __init__(self, relations: KnowledgeRelationService) -> None:
         super().__init__()
         self._relations = relations
@@ -333,9 +327,7 @@ class ListKnowledgeRelationsQuery(Query[KnowledgeRelations]):
 
 @query_handler
 @service
-class ListKnowledgeRelationsHandler(
-    QueryHandler[ListKnowledgeRelationsQuery, KnowledgeRelations]
-):
+class ListKnowledgeRelationsHandler(QueryHandler[ListKnowledgeRelationsQuery, KnowledgeRelations]):
     def __init__(self, relations: KnowledgeRelationService) -> None:
         super().__init__()
         self._relations = relations
@@ -365,9 +357,7 @@ class GetKnowledgeGraphQuery(Query[KnowledgeGraph]):
 
 @query_handler
 @service
-class GetKnowledgeGraphHandler(
-    QueryHandler[GetKnowledgeGraphQuery, KnowledgeGraph]
-):
+class GetKnowledgeGraphHandler(QueryHandler[GetKnowledgeGraphQuery, KnowledgeGraph]):
     def __init__(self, graph_service: KnowledgeGraphService) -> None:
         super().__init__()
         self._graph = graph_service
@@ -393,16 +383,12 @@ class GetKnowledgeGraphMermaidQuery(Query[MermaidGraph]):
 
 @query_handler
 @service
-class GetKnowledgeGraphMermaidHandler(
-    QueryHandler[GetKnowledgeGraphMermaidQuery, MermaidGraph]
-):
+class GetKnowledgeGraphMermaidHandler(QueryHandler[GetKnowledgeGraphMermaidQuery, MermaidGraph]):
     def __init__(self, graph_service: KnowledgeGraphService) -> None:
         super().__init__()
         self._graph = graph_service
 
-    async def do_handle(
-        self, query: GetKnowledgeGraphMermaidQuery
-    ) -> MermaidGraph:
+    async def do_handle(self, query: GetKnowledgeGraphMermaidQuery) -> MermaidGraph:
         return await self._graph.build_mermaid(
             domains=query.domains or None,
             jurisdictions=query.jurisdictions or None,

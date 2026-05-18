@@ -151,9 +151,7 @@ class ConversationService:
             turn_index=await self._repository.next_turn_index(conversation_id),
             question=request.question,
             answer=answer_response.answer,
-            citations_json=[
-                cit.model_dump(mode="json") for cit in answer_response.citations
-            ],
+            citations_json=[cit.model_dump(mode="json") for cit in answer_response.citations],
             model=answer_response.model,
             elapsed_ms=answer_response.elapsed_ms,
             no_answer=answer_response.no_answer,
@@ -257,8 +255,7 @@ class ConversationService:
     ) -> str:
         prior = (conversation.summary or "").splitlines()
         prior.append(
-            f"- T{new_turn.turn_index}: {new_turn.question[:120]}"
-            f" -> {(new_turn.answer or '')[:200]}"
+            f"- T{new_turn.turn_index}: {new_turn.question[:120]} -> {(new_turn.answer or '')[:200]}"
         )
         return "\n".join(prior[-max_lines:])
 

@@ -190,8 +190,7 @@ class KnowledgeVersionDiff(BaseModel):
     to_version: int = Field(ge=1)
     body_diff: str = Field(
         description=(
-            "Unified diff of the version body. Empty string when the "
-            "two versions share an identical body."
+            "Unified diff of the version body. Empty string when the two versions share an identical body."
         )
     )
     field_changes: list[FieldChange] = Field(

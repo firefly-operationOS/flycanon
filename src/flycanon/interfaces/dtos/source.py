@@ -231,9 +231,7 @@ class SourceRecord(BaseModel):
         default=None,
         description="When ``status`` flipped to ``ingested`` (None on failure).",
     )
-    updated_at: datetime = Field(
-        description="Last mutation timestamp; auto-bumped on status changes."
-    )
+    updated_at: datetime = Field(description="Last mutation timestamp; auto-bumped on status changes.")
 
 
 class SourcesPage(BaseModel):

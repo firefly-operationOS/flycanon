@@ -133,9 +133,7 @@ class CandidateService:
                     "score": row.score,
                 },
             )
-        logger.info(
-            "candidates proposed source=%s count=%d", request.source_id, len(stored)
-        )
+        logger.info("candidates proposed source=%s count=%d", request.source_id, len(stored))
         return stored
 
     # ------------------------------------------------------------------
@@ -283,9 +281,7 @@ class CandidateService:
                 exc,
             )
 
-    async def _citations_from_candidate(
-        self, candidate: CandidateRow
-    ) -> list[Citation]:
+    async def _citations_from_candidate(self, candidate: CandidateRow) -> list[Citation]:
         """Hydrate the candidate's citations into ``Citation`` DTOs.
 
         The candidate's ``citations_json`` only stores
@@ -347,5 +343,3 @@ def _proposal_to_row(
         rationale=proposal.rationale,
         actor=actor,
     )
-
-

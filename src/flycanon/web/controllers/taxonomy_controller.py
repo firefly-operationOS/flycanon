@@ -38,7 +38,5 @@ class TaxonomyController:
     ) -> TaxonomyNode:
         """Attach a new node to the tree."""
         return await self._commands.send(
-            CreateTaxonomyNodeCommand(
-                request=request, correlation_id=get_correlation_id()
-            )
+            CreateTaxonomyNodeCommand(request=request, correlation_id=get_correlation_id())
         )

@@ -41,9 +41,7 @@ class IngestJobRepository:
         return self._engine
 
     @classmethod
-    def from_url(
-        cls, database_url: str, *, echo: bool = False
-    ) -> IngestJobRepository:
+    def from_url(cls, database_url: str, *, echo: bool = False) -> IngestJobRepository:
         factory, engine = build_session_factory(database_url, echo=echo)
         return cls(factory, engine=engine)
 

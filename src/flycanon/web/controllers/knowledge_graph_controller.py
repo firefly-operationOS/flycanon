@@ -67,9 +67,7 @@ class KnowledgeGraphController:
           block ready to drop in a Markdown viewer.
         """
         domains = [Domain(d) for d in _split_csv(domain)] if domain else []
-        jurisdictions = (
-            [Jurisdiction(j) for j in _split_csv(jurisdiction)] if jurisdiction else []
-        )
+        jurisdictions = [Jurisdiction(j) for j in _split_csv(jurisdiction)] if jurisdiction else []
         statuses = [KnowledgeStatus(s) for s in _split_csv(status)] if status else []
 
         if format.lower() == "mermaid":

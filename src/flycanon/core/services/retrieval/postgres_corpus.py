@@ -59,9 +59,7 @@ class PostgresCorpus:
         if self._engine is None:
             async with self._lock:
                 if self._engine is None:
-                    self._engine = create_async_engine(
-                        self._database_url, pool_pre_ping=True
-                    )
+                    self._engine = create_async_engine(self._database_url, pool_pre_ping=True)
         return self._engine
 
     # ------------------------------------------------------------------
@@ -131,9 +129,7 @@ class PostgresCorpus:
             """
         )
         async with engine.connect() as conn:
-            result = await conn.execute(
-                sql, {"cfg": self._search_config, "q": q, "k": int(top_k)}
-            )
+            result = await conn.execute(sql, {"cfg": self._search_config, "q": q, "k": int(top_k)})
             rows = result.mappings().all()
 
         hits: list[ChunkHit] = []

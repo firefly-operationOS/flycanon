@@ -112,9 +112,11 @@ class EmailUnpacker:
         markdown = f"{header}\n\n{body}".strip()
         yield _body_filename(filename), markdown.encode("utf-8")
         for attachment in getattr(msg, "attachments", []) or []:
-            name = getattr(attachment, "longFilename", None) or getattr(
-                attachment, "shortFilename", None
-            ) or "attachment.bin"
+            name = (
+                getattr(attachment, "longFilename", None)
+                or getattr(attachment, "shortFilename", None)
+                or "attachment.bin"
+            )
             payload = getattr(attachment, "data", None)
             if payload:
                 yield name, payload

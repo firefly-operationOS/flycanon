@@ -77,7 +77,7 @@ class QueryExpander:
         prompt = (
             f"Original query: {query}\n\n"
             f"Emit AT MOST {n} variants (original first). "
-            "Return them as JSON ``{queries: [\"...\"]}``."
+            'Return them as JSON ``{queries: ["..."]}``.'
         )
         try:
             result = await agent.run(prompt)

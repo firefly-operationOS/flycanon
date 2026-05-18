@@ -126,9 +126,7 @@ class RetrievalService:
         # lists internally.
         queries = [query]
         if self._query_expander is not None and self._query_expansion_n > 1:
-            queries = await self._query_expander.expand(
-                query, n=self._query_expansion_n
-            )
+            queries = await self._query_expander.expand(query, n=self._query_expansion_n)
             if len(queries) > 1:
                 logger.info(
                     "query expansion query=%s variants=%d",
@@ -188,9 +186,7 @@ class RetrievalService:
         # version (when the chunk is cited by a live version) without
         # an N+1 lookup. Older / superseded versions are filtered out
         # server-side -- the Hit DTO points at the live row.
-        knowledge_links = await self._knowledge_repo.lookup_published_citations_for_chunks(
-            list(rows.keys())
-        )
+        knowledge_links = await self._knowledge_repo.lookup_published_citations_for_chunks(list(rows.keys()))
         hits: list[Hit] = []
         for hit in chunk_hits:
             chunk_id = getattr(hit, "chunk_id", "")
@@ -210,10 +206,7 @@ class RetrievalService:
                 # Title lives on metadata_json -- prefer the caller's
                 # explicit title, otherwise the extractor-derived one.
                 source_meta = source.metadata_json or {}
-                title = (
-                    source_meta.get("title")
-                    or (source_meta.get("extracted") or {}).get("title")
-                )
+                title = source_meta.get("title") or (source_meta.get("extracted") or {}).get("title")
                 if title:
                     metadata.setdefault("source_title", title)
                 # Seed the source's domain / jurisdiction / tags hints
@@ -226,14 +219,10 @@ class RetrievalService:
                 if source_meta.get("domain"):
                     metadata.setdefault("source_domain", str(source_meta["domain"]))
                 if source_meta.get("jurisdiction"):
-                    metadata.setdefault(
-                        "source_jurisdiction", str(source_meta["jurisdiction"])
-                    )
+                    metadata.setdefault("source_jurisdiction", str(source_meta["jurisdiction"]))
                 source_tags = source_meta.get("tags") or []
                 if source_tags:
-                    metadata.setdefault(
-                        "source_tags", ",".join(str(t) for t in source_tags)
-                    )
+                    metadata.setdefault("source_tags", ",".join(str(t) for t in source_tags))
             # Chunk-level breadcrumbs.
             if row.section_path:
                 metadata.setdefault("section_path", row.section_path)
@@ -306,21 +295,15 @@ class RetrievalService:
                 if status not in status_set:
                     continue
             if domain_set:
-                domain = hit.metadata.get("_knowledge_domain") or hit.metadata.get(
-                    "source_domain"
-                )
+                domain = hit.metadata.get("_knowledge_domain") or hit.metadata.get("source_domain")
                 if domain not in domain_set:
                     continue
             if juris_set:
-                juris = hit.metadata.get("_knowledge_jurisdiction") or hit.metadata.get(
-                    "source_jurisdiction"
-                )
+                juris = hit.metadata.get("_knowledge_jurisdiction") or hit.metadata.get("source_jurisdiction")
                 if juris not in juris_set:
                     continue
             if tag_set:
-                hit_tags = hit.metadata.get("_knowledge_tags") or hit.metadata.get(
-                    "source_tags"
-                ) or ""
+                hit_tags = hit.metadata.get("_knowledge_tags") or hit.metadata.get("source_tags") or ""
                 # Tags ride as a comma-separated string for the
                 # metadata bag's str-typed contract; ``in`` performs
                 # substring lookup which is fine for the canonical

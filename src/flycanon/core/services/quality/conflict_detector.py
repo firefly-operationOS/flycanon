@@ -49,9 +49,7 @@ logger = logging.getLogger(__name__)
 class ConflictJudgment(BaseModel):
     """Structured output the judge LLM emits per candidate pair."""
 
-    is_conflict: bool = Field(
-        description="True when the two items make contradicting canonical claims."
-    )
+    is_conflict: bool = Field(description="True when the two items make contradicting canonical claims.")
     confidence: float = Field(ge=0.0, le=1.0)
     reasoning: str = Field(default="", max_length=2000)
 
@@ -117,9 +115,7 @@ class ConflictDetector:
             if version is None or not version.body:
                 continue
             try:
-                embeddings_by_id[item.id] = await self._embeddings.embed_one(
-                    version.body[:8000]
-                )
+                embeddings_by_id[item.id] = await self._embeddings.embed_one(version.body[:8000])
             except Exception as exc:  # noqa: BLE001
                 logger.warning("conflict: failed to embed %s: %s", item.id, exc)
 
@@ -138,9 +134,7 @@ class ConflictDetector:
         candidate_ids: list[str] = []
         relation_ids: list[str] = []
         for pair in pairs:
-            judgment = await self._judge(
-                items_by_id[pair.from_id], items_by_id[pair.to_id]
-            )
+            judgment = await self._judge(items_by_id[pair.from_id], items_by_id[pair.to_id])
             if judgment is None or not judgment.is_conflict:
                 continue
             row = await self._record_candidate(
@@ -157,9 +151,7 @@ class ConflictDetector:
             # immediately. We swallow the conflict-exists case --
             # the relation already covers it.
             if self._relations is not None:
-                rel = await self._link_relation(
-                    pair=pair, judgment=judgment, actor=actor
-                )
+                rel = await self._link_relation(pair=pair, judgment=judgment, actor=actor)
                 if rel is not None:
                     relation_ids.append(rel)
 

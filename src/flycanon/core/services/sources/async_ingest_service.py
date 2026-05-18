@@ -129,9 +129,7 @@ class AsyncIngestService:
         )
         return stored
 
-    async def _publish_requested(
-        self, job_id: str, correlation_id: str | None
-    ) -> None:
+    async def _publish_requested(self, job_id: str, correlation_id: str | None) -> None:
         if self._publisher is None:
             return
         try:
@@ -142,9 +140,7 @@ class AsyncIngestService:
                 headers={"correlation-id": correlation_id} if correlation_id else None,
             )
         except Exception as exc:
-            logger.warning(
-                "IngestSourceRequested publish failed job_id=%s: %s", job_id, exc
-            )
+            logger.warning("IngestSourceRequested publish failed job_id=%s: %s", job_id, exc)
 
     # ------------------------------------------------------------------
     # Worker side
@@ -230,9 +226,7 @@ class AsyncIngestService:
                 job_id=job_id,
                 payload={"source_id": source.id, "n_chunks": source.n_chunks},
             )
-            logger.info(
-                "ingest job succeeded id=%s source_id=%s", job_id, source.id
-            )
+            logger.info("ingest job succeeded id=%s source_id=%s", job_id, source.id)
 
             if job.callback_url:
                 # Webhook delivery is best-effort -- the durable
@@ -246,9 +240,7 @@ class AsyncIngestService:
                 message=str(exc),
                 payload={"code": code},
             )
-            await self._repository.mark_failed(
-                job_id, code=str(code), message=str(exc)
-            )
+            await self._repository.mark_failed(job_id, code=str(code), message=str(exc))
             await self._audit.record(
                 event_type="ingest.failed",
                 subject_kind="ingest_job",
@@ -262,17 +254,11 @@ class AsyncIngestService:
                 job_id=job_id,
                 payload={"code": str(code), "message": str(exc)},
             )
-            logger.warning(
-                "ingest job failed id=%s code=%s error=%s", job_id, code, exc
-            )
+            logger.warning("ingest job failed id=%s code=%s error=%s", job_id, code, exc)
             if job.callback_url:
-                await self._fire_webhook(
-                    job, status="failed", error_code=str(code), error_message=str(exc)
-                )
+                await self._fire_webhook(job, status="failed", error_code=str(code), error_message=str(exc))
 
-    async def _publish_finish(
-        self, *, event_type: str, job_id: str, payload: dict[str, Any]
-    ) -> None:
+    async def _publish_finish(self, *, event_type: str, job_id: str, payload: dict[str, Any]) -> None:
         if self._publisher is None:
             return
         try:
@@ -282,9 +268,7 @@ class AsyncIngestService:
                 payload={"job_id": job_id, **payload},
             )
         except Exception as exc:
-            logger.warning(
-                "%s publish failed job_id=%s: %s", event_type, job_id, exc
-            )
+            logger.warning("%s publish failed job_id=%s: %s", event_type, job_id, exc)
 
     async def _fire_webhook(
         self,

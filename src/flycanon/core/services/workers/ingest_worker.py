@@ -124,8 +124,7 @@ class IngestWorker:
             await start()
 
         logger.info(
-            "ingest worker started topics=%s,%s,%s adapter=%s max_concurrency=%d "
-            "handler_timeout_s=%.1f",
+            "ingest worker started topics=%s,%s,%s adapter=%s max_concurrency=%d handler_timeout_s=%.1f",
             self._settings.ingest_topic,
             self._settings.knowledge_topic,
             self._settings.audit_topic,
@@ -185,9 +184,7 @@ class IngestWorker:
         self._inflight.add(task)
         task.add_done_callback(self._inflight.discard)
 
-    async def _guarded_handler(
-        self, handler: HandlerFn, envelope: Any, family: str
-    ) -> None:
+    async def _guarded_handler(self, handler: HandlerFn, envelope: Any, family: str) -> None:
         """Run a handler under the semaphore + timeout, log outcomes."""
         async with self._sem:
             started = time.perf_counter()
@@ -225,9 +222,7 @@ class IngestWorker:
         if not self._inflight:
             return
         grace = self._settings.worker_shutdown_grace_s
-        logger.info(
-            "worker draining inflight=%d grace_s=%.1f", len(self._inflight), grace
-        )
+        logger.info("worker draining inflight=%d grace_s=%.1f", len(self._inflight), grace)
         try:
             await asyncio.wait_for(
                 asyncio.gather(*list(self._inflight), return_exceptions=True),
@@ -287,14 +282,10 @@ class IngestWorker:
         payload = self._payload_of(envelope)
         job_id = payload.get("job_id")
         if not job_id:
-            logger.warning(
-                "%s without job_id -- dropping", self._event_type_of(envelope)
-            )
+            logger.warning("%s without job_id -- dropping", self._event_type_of(envelope))
             return
         if self._async_ingest is None:
-            logger.warning(
-                "async ingest service not wired -- cannot process job_id=%s", job_id
-            )
+            logger.warning("async ingest service not wired -- cannot process job_id=%s", job_id)
             return
         logger.info("ingest worker processing job_id=%s", job_id)
         await self._async_ingest.process(str(job_id))

@@ -76,12 +76,8 @@ class TestStreamingFetch:
     async def test_stream_exceeding_cap_aborts(self, respx_mock):
         # HEAD doesn't report length (some CDNs); the streaming GET
         # must enforce the cap by aborting once total > cap.
-        respx_mock.head("https://example.com/big").mock(
-            return_value=httpx.Response(200, headers={})
-        )
-        respx_mock.get("https://example.com/big").mock(
-            return_value=httpx.Response(200, content=b"x" * 5000)
-        )
+        respx_mock.head("https://example.com/big").mock(return_value=httpx.Response(200, headers={}))
+        respx_mock.get("https://example.com/big").mock(return_value=httpx.Response(200, content=b"x" * 5000))
         with pytest.raises(UrlFetchError) as exc_info:
             await UrlFetcher(_settings(max_bytes=1024)).fetch("https://example.com/big")
         assert exc_info.value.code == "url_fetch_too_large"
@@ -92,9 +88,7 @@ class TestStreamingFetch:
         respx_mock.head("https://example.com/x").mock(
             return_value=httpx.Response(200, headers={"Content-Length": "10"})
         )
-        respx_mock.get("https://example.com/x").mock(
-            return_value=httpx.Response(404)
-        )
+        respx_mock.get("https://example.com/x").mock(return_value=httpx.Response(404))
         with pytest.raises(UrlFetchError) as exc_info:
             await UrlFetcher(_settings()).fetch("https://example.com/x")
         assert exc_info.value.code == "url_fetch_http_error"
@@ -105,9 +99,7 @@ class TestStreamingFetch:
         # Some origins reject HEAD with 405 -- the fetcher should
         # fall through to the streaming GET (the size cap is still
         # enforced there).
-        respx_mock.head("https://example.com/y").mock(
-            return_value=httpx.Response(405)
-        )
+        respx_mock.head("https://example.com/y").mock(return_value=httpx.Response(405))
         respx_mock.get("https://example.com/y").mock(
             return_value=httpx.Response(
                 200,

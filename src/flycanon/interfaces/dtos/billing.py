@@ -97,9 +97,7 @@ class BillingSummary(BaseModel):
 class TopConsumerRow(BaseModel):
     """One entry in the top-N list keyed by the requested dimension."""
 
-    dimension: str = Field(
-        description="Column we grouped by (model / agent_name / actor)."
-    )
+    dimension: str = Field(description="Column we grouped by (model / agent_name / actor).")
     value: str | None = None
     input_tokens: int = Field(ge=0)
     output_tokens: int = Field(ge=0)

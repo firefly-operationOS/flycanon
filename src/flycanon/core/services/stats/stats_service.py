@@ -104,9 +104,7 @@ class StatsService:
                 )
             ).all()
             bytes_total = (
-                await session.execute(
-                    select(func.coalesce(func.sum(SourceRow.content_bytes), 0))
-                )
+                await session.execute(select(func.coalesce(func.sum(SourceRow.content_bytes), 0)))
             ).scalar_one()
         return {
             "total": int(total_q.scalar_one() or 0),
@@ -121,9 +119,7 @@ class StatsService:
 
     async def _knowledge_item_stats(self) -> dict[str, Any]:
         async with self._knowledge._session_factory() as session:  # type: ignore[attr-defined]
-            total = (
-                await session.execute(select(func.count()).select_from(KnowledgeItemRow))
-            ).scalar_one()
+            total = (await session.execute(select(func.count()).select_from(KnowledgeItemRow))).scalar_one()
             by_status = (
                 await session.execute(
                     select(KnowledgeItemRow.status, func.count(KnowledgeItemRow.id))
@@ -146,9 +142,7 @@ class StatsService:
 
     async def _version_count(self) -> int:
         async with self._knowledge._session_factory() as session:  # type: ignore[attr-defined]
-            row = await session.execute(
-                select(func.count()).select_from(KnowledgeVersionRow)
-            )
+            row = await session.execute(select(func.count()).select_from(KnowledgeVersionRow))
             return int(row.scalar_one() or 0)
 
     # ------------------------------------------------------------------
@@ -157,9 +151,7 @@ class StatsService:
 
     async def _candidate_stats(self) -> dict[str, Any]:
         async with self._candidates._session_factory() as session:  # type: ignore[attr-defined]
-            total = (
-                await session.execute(select(func.count()).select_from(CandidateRow))
-            ).scalar_one()
+            total = (await session.execute(select(func.count()).select_from(CandidateRow))).scalar_one()
             by_status = (
                 await session.execute(
                     select(CandidateRow.status, func.count(CandidateRow.id))
@@ -178,9 +170,7 @@ class StatsService:
 
     async def _chunk_stats(self) -> dict[str, Any]:
         async with self._chunks._session_factory() as session:  # type: ignore[attr-defined]
-            total = (
-                await session.execute(select(func.count()).select_from(KnowledgeChunkRow))
-            ).scalar_one()
+            total = (await session.execute(select(func.count()).select_from(KnowledgeChunkRow))).scalar_one()
             embedded = (
                 await session.execute(
                     select(func.count())
@@ -188,9 +178,7 @@ class StatsService:
                     .where(KnowledgeChunkRow.embedding.isnot(None))
                 )
             ).scalar_one()
-        embedded_pct = (
-            round((int(embedded or 0) / int(total)) * 100.0, 1) if total else 0.0
-        )
+        embedded_pct = round((int(embedded or 0) / int(total)) * 100.0, 1) if total else 0.0
         return {
             "total": int(total or 0),
             "embedded": int(embedded or 0),
@@ -203,9 +191,7 @@ class StatsService:
 
     async def _job_stats(self) -> dict[str, Any]:
         async with self._jobs._session_factory() as session:  # type: ignore[attr-defined]
-            total = (
-                await session.execute(select(func.count()).select_from(IngestJobRow))
-            ).scalar_one()
+            total = (await session.execute(select(func.count()).select_from(IngestJobRow))).scalar_one()
             by_status = (
                 await session.execute(
                     select(IngestJobRow.status, func.count(IngestJobRow.id))
@@ -214,9 +200,7 @@ class StatsService:
                 )
             ).all()
             avg_attempts = (
-                await session.execute(
-                    select(func.coalesce(func.avg(IngestJobRow.attempts), 0.0))
-                )
+                await session.execute(select(func.coalesce(func.avg(IngestJobRow.attempts), 0.0)))
             ).scalar_one()
         return {
             "total": int(total or 0),

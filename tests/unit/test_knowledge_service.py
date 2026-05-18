@@ -103,12 +103,8 @@ async def test_retire_blocks_further_updates(knowledge):
 
 @pytest.mark.asyncio
 async def test_supersede_points_to_target(knowledge):
-    a = await knowledge.create(
-        CreateKnowledgeRequest(title="A", body="a body", domain=Domain.process)
-    )
-    b = await knowledge.create(
-        CreateKnowledgeRequest(title="B", body="b body", domain=Domain.process)
-    )
+    a = await knowledge.create(CreateKnowledgeRequest(title="A", body="a body", domain=Domain.process))
+    b = await knowledge.create(CreateKnowledgeRequest(title="B", body="b body", domain=Domain.process))
     superseded = await knowledge.supersede(
         a.knowledge_item_id,
         SupersedeKnowledgeRequest(superseded_by_item_id=b.knowledge_item_id),

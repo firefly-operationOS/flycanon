@@ -29,16 +29,12 @@ class ProposeCandidatesCommand(Command[list[CandidateRecord]]):
 
 @command_handler
 @service
-class ProposeCandidatesHandler(
-    CommandHandler[ProposeCandidatesCommand, list[CandidateRecord]]
-):
+class ProposeCandidatesHandler(CommandHandler[ProposeCandidatesCommand, list[CandidateRecord]]):
     def __init__(self, candidates: CandidateService) -> None:
         super().__init__()
         self._candidates = candidates
 
-    async def do_handle(
-        self, command: ProposeCandidatesCommand
-    ) -> list[CandidateRecord]:
+    async def do_handle(self, command: ProposeCandidatesCommand) -> list[CandidateRecord]:
         rows = await self._candidates.propose_from_source(
             command.request, correlation_id=command.correlation_id
         )

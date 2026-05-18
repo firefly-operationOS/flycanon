@@ -20,9 +20,7 @@ class CreateRelationRequest(BaseModel):
     """Attach a new relation rooted at the path's ``{item_id}``."""
 
     to_item_id: str = Field(description="Target knowledge item id.")
-    kind: RelationKind = Field(
-        description="Semantic of the edge. See :class:`RelationKind`."
-    )
+    kind: RelationKind = Field(description="Semantic of the edge. See :class:`RelationKind`.")
     since_version: int | None = Field(
         default=None,
         ge=1,

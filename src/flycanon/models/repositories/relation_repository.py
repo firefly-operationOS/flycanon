@@ -55,9 +55,7 @@ class RelationRepository:
         """Drop one relation by id. Returns ``True`` when a row was deleted."""
         async with self.session() as session:
             result = await session.execute(
-                delete(KnowledgeRelationRow).where(
-                    KnowledgeRelationRow.id == relation_id
-                )
+                delete(KnowledgeRelationRow).where(KnowledgeRelationRow.id == relation_id)
             )
             return (result.rowcount or 0) > 0
 
@@ -85,9 +83,7 @@ class RelationRepository:
                     KnowledgeRelationRow.to_item_id == item_id,
                 )
             result = await session.execute(
-                select(KnowledgeRelationRow)
-                .where(cond)
-                .order_by(KnowledgeRelationRow.created_at.asc())
+                select(KnowledgeRelationRow).where(cond).order_by(KnowledgeRelationRow.created_at.asc())
             )
             return list(result.scalars().all())
 
@@ -102,16 +98,10 @@ class RelationRepository:
         async with self._session_factory() as session:
             stmt = select(KnowledgeRelationRow)
             if from_item_ids:
-                stmt = stmt.where(
-                    KnowledgeRelationRow.from_item_id.in_(list(from_item_ids))
-                )
+                stmt = stmt.where(KnowledgeRelationRow.from_item_id.in_(list(from_item_ids)))
             if to_item_ids:
-                stmt = stmt.where(
-                    KnowledgeRelationRow.to_item_id.in_(list(to_item_ids))
-                )
+                stmt = stmt.where(KnowledgeRelationRow.to_item_id.in_(list(to_item_ids)))
             if kinds:
                 stmt = stmt.where(KnowledgeRelationRow.kind.in_(list(kinds)))
-            result = await session.execute(
-                stmt.order_by(KnowledgeRelationRow.created_at.asc())
-            )
+            result = await session.execute(stmt.order_by(KnowledgeRelationRow.created_at.asc()))
             return list(result.scalars().all())

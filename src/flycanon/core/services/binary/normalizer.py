@@ -136,9 +136,7 @@ class BinaryNormalizer:
                 filename=filename,
             )
         if not self._settings.binary_normalize_enabled:
-            media_type = sniff_media_type(
-                data, default=declared_media_type, filename=filename
-            )
+            media_type = sniff_media_type(data, default=declared_media_type, filename=filename)
             return [
                 NormalizedArtifact(
                     bytes=data,
@@ -263,9 +261,7 @@ class BinaryNormalizer:
 
         # Office formats handled by the optional converter when enabled.
         if self._office.supports(media_type):
-            converted = await self._office.convert(
-                data, media_type=media_type, filename=filename
-            )
+            converted = await self._office.convert(data, media_type=media_type, filename=filename)
             sink.append(
                 NormalizedArtifact(
                     bytes=converted.bytes,

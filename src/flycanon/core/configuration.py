@@ -130,9 +130,7 @@ class CanonCoreConfiguration:
         return IngestJobRepository.from_url(settings.database_url)
 
     @bean
-    def conversation_repository(
-        self, settings: CanonSettings
-    ) -> ConversationRepository:
+    def conversation_repository(self, settings: CanonSettings) -> ConversationRepository:
         return ConversationRepository.from_url(settings.database_url)
 
     @bean

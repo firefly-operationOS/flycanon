@@ -104,11 +104,7 @@ class StaleDetector:
             return _empty_score()
 
         # Filter by domain when the source carries a matching hint.
-        scoped = [
-            s
-            for s in recent_sources
-            if (s.metadata_json or {}).get("domain") in (None, item.domain)
-        ]
+        scoped = [s for s in recent_sources if (s.metadata_json or {}).get("domain") in (None, item.domain)]
         if not scoped:
             return _empty_score()
 

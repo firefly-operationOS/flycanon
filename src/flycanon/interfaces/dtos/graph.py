@@ -53,10 +53,7 @@ class GraphEdge(BaseModel):
     source: str = Field(description="Originating node id.")
     target: str = Field(description="Destination node id.")
     kind: str = Field(
-        description=(
-            "Either a :class:`RelationKind` value (item -> item) or "
-            "``cites`` (item -> source)."
-        ),
+        description=("Either a :class:`RelationKind` value (item -> item) or ``cites`` (item -> source)."),
         examples=["depends_on", "cites"],
     )
     label: str | None = Field(default=None)
@@ -81,9 +78,7 @@ class MermaidGraph(BaseModel):
     a Markdown document or paste into mermaid.live.
     """
 
-    mermaid: str = Field(
-        description="``graph LR`` Mermaid block. See mermaid.js docs for syntax."
-    )
+    mermaid: str = Field(description="``graph LR`` Mermaid block. See mermaid.js docs for syntax.")
     total_nodes: int = Field(ge=0)
     total_edges: int = Field(ge=0)
 

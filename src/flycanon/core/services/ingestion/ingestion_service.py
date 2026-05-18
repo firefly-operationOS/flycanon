@@ -159,8 +159,18 @@ class IngestionService:
         if "text/plain" in ct or name.endswith((".txt", ".text")):
             return SourceKind.text
         _image_exts = (
-            ".png", ".jpg", ".jpeg", ".gif", ".webp", ".heic", ".heif",
-            ".avif", ".tif", ".tiff", ".bmp", ".svg",
+            ".png",
+            ".jpg",
+            ".jpeg",
+            ".gif",
+            ".webp",
+            ".heic",
+            ".heif",
+            ".avif",
+            ".tif",
+            ".tiff",
+            ".bmp",
+            ".svg",
         )
         if ct.startswith("image/") or name.endswith(_image_exts):
             return SourceKind.image

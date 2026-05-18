@@ -31,9 +31,7 @@ class TestLifecycle:
         assert fetched.status == "queued"
 
     @pytest.mark.asyncio
-    async def test_mark_running_increments_attempts_and_sets_started_at(
-        self, jobs_repo
-    ):
+    async def test_mark_running_increments_attempts_and_sets_started_at(self, jobs_repo):
         await jobs_repo.add(IngestJobRow(id="job-1", status="queued"))
         row = await jobs_repo.mark_running("job-1")
         assert row is not None
@@ -45,9 +43,7 @@ class TestLifecycle:
     async def test_mark_succeeded_records_terminal_state(self, jobs_repo):
         await jobs_repo.add(IngestJobRow(id="job-1", status="queued"))
         await jobs_repo.mark_running("job-1")
-        row = await jobs_repo.mark_succeeded(
-            "job-1", source_id="src-1", content_sha256="abc"
-        )
+        row = await jobs_repo.mark_succeeded("job-1", source_id="src-1", content_sha256="abc")
         assert row is not None
         assert row.status == "succeeded"
         assert row.source_id == "src-1"
@@ -58,9 +54,7 @@ class TestLifecycle:
     async def test_mark_failed_records_typed_error(self, jobs_repo):
         await jobs_repo.add(IngestJobRow(id="job-1", status="queued"))
         await jobs_repo.mark_running("job-1")
-        row = await jobs_repo.mark_failed(
-            "job-1", code="boom", message="something went wrong"
-        )
+        row = await jobs_repo.mark_failed("job-1", code="boom", message="something went wrong")
         assert row is not None
         assert row.status == "failed"
         assert row.error_code == "boom"
@@ -73,9 +67,7 @@ class TestEvents:
         await jobs_repo.add(IngestJobRow(id="job-1", status="queued"))
         await jobs_repo.append_event("job-1", stage="queued", message="m1")
         await jobs_repo.append_event("job-1", stage="loading", message="m2")
-        await jobs_repo.append_event(
-            "job-1", stage="finished", payload={"source_id": "s"}
-        )
+        await jobs_repo.append_event("job-1", stage="finished", payload={"source_id": "s"})
         events = await jobs_repo.list_events("job-1")
         assert [e.stage for e in events] == ["queued", "loading", "finished"]
         # Ids monotonic.

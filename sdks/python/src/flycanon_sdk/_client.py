@@ -227,14 +227,10 @@ class CanonClient:
     # ------------------------------------------------------------------
 
     async def create_knowledge(self, request: CreateKnowledgeRequest) -> KnowledgeVersion:
-        body = await self._request(
-            "POST", "/api/v1/knowledge", json=request.model_dump(exclude_none=True)
-        )
+        body = await self._request("POST", "/api/v1/knowledge", json=request.model_dump(exclude_none=True))
         return KnowledgeVersion.model_validate(body)
 
-    async def update_knowledge(
-        self, item_id: str, request: UpdateKnowledgeRequest
-    ) -> KnowledgeVersion:
+    async def update_knowledge(self, item_id: str, request: UpdateKnowledgeRequest) -> KnowledgeVersion:
         body = await self._request(
             "PUT",
             f"/api/v1/knowledge/{item_id}",
@@ -242,9 +238,7 @@ class CanonClient:
         )
         return KnowledgeVersion.model_validate(body)
 
-    async def supersede_knowledge(
-        self, item_id: str, request: SupersedeKnowledgeRequest
-    ) -> KnowledgeItem:
+    async def supersede_knowledge(self, item_id: str, request: SupersedeKnowledgeRequest) -> KnowledgeItem:
         body = await self._request(
             "POST",
             f"/api/v1/knowledge/{item_id}:supersede",
@@ -252,9 +246,7 @@ class CanonClient:
         )
         return KnowledgeItem.model_validate(body)
 
-    async def retire_knowledge(
-        self, item_id: str, request: RetireKnowledgeRequest
-    ) -> KnowledgeItem:
+    async def retire_knowledge(self, item_id: str, request: RetireKnowledgeRequest) -> KnowledgeItem:
         body = await self._request(
             "POST",
             f"/api/v1/knowledge/{item_id}:retire",
@@ -326,9 +318,7 @@ class CanonClient:
     # ------------------------------------------------------------------
 
     async def list_relations(self, item_id: str) -> RelationsList:
-        body = await self._request(
-            "GET", f"/api/v1/knowledge/{item_id}/relations"
-        )
+        body = await self._request("GET", f"/api/v1/knowledge/{item_id}/relations")
         return RelationsList.model_validate(body)
 
     async def add_relation(
@@ -344,9 +334,7 @@ class CanonClient:
         return KnowledgeRelation.model_validate(body)
 
     async def remove_relation(self, relation_id: str) -> None:
-        await self._request(
-            "DELETE", f"/api/v1/knowledge/relations/{relation_id}"
-        )
+        await self._request("DELETE", f"/api/v1/knowledge/relations/{relation_id}")
 
     async def get_graph(
         self,
@@ -410,18 +398,14 @@ class CanonClient:
         request: ConflictScanRequest | None = None,
     ) -> ConflictScanResponse:
         payload = (request or ConflictScanRequest()).model_dump(exclude_none=True)
-        body = await self._request(
-            "POST", "/api/v1/knowledge:detect-conflicts", json=payload
-        )
+        body = await self._request("POST", "/api/v1/knowledge:detect-conflicts", json=payload)
         return ConflictScanResponse.model_validate(body)
 
     # ------------------------------------------------------------------
     # Candidates
     # ------------------------------------------------------------------
 
-    async def propose_candidates(
-        self, request: ProposeCandidateRequest
-    ) -> list[CandidateRecord]:
+    async def propose_candidates(self, request: ProposeCandidateRequest) -> list[CandidateRecord]:
         body = await self._request(
             "POST",
             "/api/v1/candidates:propose",
@@ -455,9 +439,7 @@ class CanonClient:
         body = await self._request("GET", f"/api/v1/candidates/{candidate_id}")
         return CandidateRecord.model_validate(body)
 
-    async def accept_candidate(
-        self, candidate_id: str, request: AcceptCandidateRequest
-    ) -> CandidateRecord:
+    async def accept_candidate(self, candidate_id: str, request: AcceptCandidateRequest) -> CandidateRecord:
         body = await self._request(
             "POST",
             f"/api/v1/candidates/{candidate_id}:accept",
@@ -465,9 +447,7 @@ class CanonClient:
         )
         return CandidateRecord.model_validate(body)
 
-    async def reject_candidate(
-        self, candidate_id: str, request: RejectCandidateRequest
-    ) -> CandidateRecord:
+    async def reject_candidate(self, candidate_id: str, request: RejectCandidateRequest) -> CandidateRecord:
         body = await self._request(
             "POST",
             f"/api/v1/candidates/{candidate_id}:reject",
@@ -493,9 +473,7 @@ class CanonClient:
             per_query_k=per_query_k,
             source_ids=source_ids,
         )
-        body = await self._request(
-            "POST", "/api/v1/search", json=request.model_dump(exclude_none=True)
-        )
+        body = await self._request("POST", "/api/v1/search", json=request.model_dump(exclude_none=True))
         return SearchResponse.model_validate(body)
 
     async def answer(
@@ -512,9 +490,7 @@ class CanonClient:
             instructions=instructions,
             model=model,
         )
-        body = await self._request(
-            "POST", "/api/v1/query", json=request.model_dump(exclude_none=True)
-        )
+        body = await self._request("POST", "/api/v1/query", json=request.model_dump(exclude_none=True))
         return AnswerResponse.model_validate(body)
 
     def stream_answer(
@@ -554,16 +530,12 @@ class CanonClient:
         self,
         request: CreateConversationRequest | None = None,
     ) -> Conversation:
-        payload = (request or CreateConversationRequest()).model_dump(
-            exclude_none=True
-        )
+        payload = (request or CreateConversationRequest()).model_dump(exclude_none=True)
         body = await self._request("POST", "/api/v1/conversations", json=payload)
         return Conversation.model_validate(body)
 
     async def get_conversation(self, conversation_id: str) -> Conversation:
-        body = await self._request(
-            "GET", f"/api/v1/conversations/{conversation_id}"
-        )
+        body = await self._request("GET", f"/api/v1/conversations/{conversation_id}")
         return Conversation.model_validate(body)
 
     async def add_turn(
@@ -597,9 +569,7 @@ class CanonClient:
         self,
         conversation_id: str,
     ) -> SuggestionsResponse:
-        body = await self._request(
-            "POST", f"/api/v1/conversations/{conversation_id}/suggest"
-        )
+        body = await self._request("POST", f"/api/v1/conversations/{conversation_id}/suggest")
         return SuggestionsResponse.model_validate(body)
 
     # ------------------------------------------------------------------
@@ -797,9 +767,7 @@ class CanonClient:
         is populated from ``data.cursor`` when present (job streams) or
         a monotonic counter otherwise (query streams).
         """
-        cleaned_params: dict[str, str] = {
-            k: str(v) for k, v in (params or {}).items() if v not in (None, "")
-        }
+        cleaned_params: dict[str, str] = {k: str(v) for k, v in (params or {}).items() if v not in (None, "")}
         cursor_counter = 0
         try:
             async with self._client.stream(
@@ -841,9 +809,9 @@ class CanonClient:
                         # Comment / heartbeat -- ignore.
                         continue
                     if line.startswith("event:"):
-                        event_type = line[len("event:"):].strip() or "message"
+                        event_type = line[len("event:") :].strip() or "message"
                     elif line.startswith("data:"):
-                        data_lines.append(line[len("data:"):].lstrip())
+                        data_lines.append(line[len("data:") :].lstrip())
         except (httpx.NetworkError, httpx.TimeoutException) as exc:
             raise CanonConnectionError(str(exc)) from exc
 
@@ -855,13 +823,9 @@ class CanonClient:
         json: Any | None = None,
         params: dict[str, str | None] | None = None,
     ) -> Any:
-        cleaned_params: dict[str, str] = {
-            k: v for k, v in (params or {}).items() if v not in (None, "")
-        }
+        cleaned_params: dict[str, str] = {k: v for k, v in (params or {}).items() if v not in (None, "")}
         try:
-            response = await self._client.request(
-                method, path, json=json, params=cleaned_params
-            )
+            response = await self._client.request(method, path, json=json, params=cleaned_params)
         except (httpx.NetworkError, httpx.TimeoutException) as exc:
             raise CanonConnectionError(str(exc)) from exc
         if 200 <= response.status_code < 300:

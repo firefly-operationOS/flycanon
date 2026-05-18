@@ -78,9 +78,7 @@ class EmbeddingService:
                 batch_vectors = await self._embed_one_by_one(batch)
             vectors.extend(batch_vectors)
         if len(vectors) != len(items):
-            raise EmbeddingError(
-                f"embedder returned {len(vectors)} vectors for {len(items)} inputs"
-            )
+            raise EmbeddingError(f"embedder returned {len(vectors)} vectors for {len(items)} inputs")
         return vectors
 
     async def _embed_batch(self, batch: list[str]) -> list[list[float]]:
@@ -186,8 +184,7 @@ def build_embedding_service(
     """Parse the ``<provider>:<model>`` identifier and instantiate the service."""
     if ":" not in embedding_model:
         raise EmbeddingError(
-            "FLYCANON_EMBEDDING_MODEL must be ``<provider>:<model>`` "
-            f"(got {embedding_model!r})"
+            f"FLYCANON_EMBEDDING_MODEL must be ``<provider>:<model>`` (got {embedding_model!r})"
         )
     provider, _, model = embedding_model.partition(":")
     embedder = _build_embedder(

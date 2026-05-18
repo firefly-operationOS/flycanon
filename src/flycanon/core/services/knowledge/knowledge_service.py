@@ -122,11 +122,7 @@ class KnowledgeService:
             correlation_id=correlation_id,
             payload={"version": 1, "domain": request.domain.value, "title": request.title},
         )
-        event_type = (
-            self._settings.knowledge_published_event
-            if request.publish
-            else "KnowledgeItemDrafted"
-        )
+        event_type = self._settings.knowledge_published_event if request.publish else "KnowledgeItemDrafted"
         await self._publish_lifecycle(
             event_type=event_type,
             item_id=item_id,
@@ -163,9 +159,7 @@ class KnowledgeService:
             raise KnowledgeItemNotFound(item_id)
 
         new_version = item.current_version + 1
-        new_status = (
-            KnowledgeStatus.published if request.publish else KnowledgeStatus.draft
-        )
+        new_status = KnowledgeStatus.published if request.publish else KnowledgeStatus.draft
         new = KnowledgeVersionRow(
             knowledge_item_id=item_id,
             version=new_version,
@@ -174,9 +168,7 @@ class KnowledgeService:
             summary=request.summary if request.summary is not None else current.summary,
             body=request.body or current.body,
             domain=(request.domain.value if request.domain else current.domain),
-            jurisdiction=(
-                request.jurisdiction.value if request.jurisdiction else current.jurisdiction
-            ),
+            jurisdiction=(request.jurisdiction.value if request.jurisdiction else current.jurisdiction),
             tags_json=list(request.tags) if request.tags is not None else list(current.tags_json or []),
             supersedes_version=current.version,
             originating_candidate_id=originating_candidate_id,
@@ -219,9 +211,7 @@ class KnowledgeService:
         )
         await self._publish_lifecycle(
             event_type=(
-                self._settings.knowledge_published_event
-                if request.publish
-                else "KnowledgeItemDrafted"
+                self._settings.knowledge_published_event if request.publish else "KnowledgeItemDrafted"
             ),
             item_id=item_id,
             version=new_version,
@@ -280,9 +270,7 @@ class KnowledgeService:
             version=stored.current_version,
             payload={"superseded_by_item_id": request.superseded_by_item_id},
         )
-        logger.info(
-            "knowledge superseded id=%s -> %s", item_id, request.superseded_by_item_id
-        )
+        logger.info("knowledge superseded id=%s -> %s", item_id, request.superseded_by_item_id)
         return stored
 
     # ------------------------------------------------------------------

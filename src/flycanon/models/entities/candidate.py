@@ -69,6 +69,4 @@ class CandidateRow(Base):
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
 
-    __table_args__ = (
-        Index("ix_canon_candidates_source_status", "source_id", "status"),
-    )
+    __table_args__ = (Index("ix_canon_candidates_source_status", "source_id", "status"),)

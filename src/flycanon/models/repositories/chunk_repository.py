@@ -69,9 +69,7 @@ class ChunkRepository:
         """
         prepared = list(rows)
         async with self._session_factory() as session:
-            await session.execute(
-                delete(KnowledgeChunkRow).where(KnowledgeChunkRow.source_id == source_id)
-            )
+            await session.execute(delete(KnowledgeChunkRow).where(KnowledgeChunkRow.source_id == source_id))
             if prepared:
                 session.add_all(prepared)
                 await session.flush()

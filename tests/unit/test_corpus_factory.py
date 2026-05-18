@@ -47,9 +47,7 @@ class TestBackendSelection:
         settings = _settings(corpus_path=str(tmp_path / "corpus.sqlite"))
         with (
             patch("fireflyframework_agentic.rag.corpus.SqliteCorpus") as corpus_mock,
-            patch(
-                "fireflyframework_agentic.vectorstores.sqlite_vec_store.SqliteVecVectorStore"
-            ) as vec_mock,
+            patch("fireflyframework_agentic.vectorstores.sqlite_vec_store.SqliteVecVectorStore") as vec_mock,
         ):
             ctx = corpus_factory.build_corpus_context(settings=settings)
         assert ctx.backend == "sqlite-vec"
@@ -58,29 +56,19 @@ class TestBackendSelection:
 
     @pytest.mark.parametrize("alias", ["sqlite-vec", "sqlite_vec", "sqlite", "SQLITE-VEC"])
     def test_sqlite_vec_aliases_all_route_to_sqlite_vec(self, tmp_path: Path, alias: str):
-        settings = _settings(
-            vector_store=alias, corpus_path=str(tmp_path / "corpus.sqlite")
-        )
+        settings = _settings(vector_store=alias, corpus_path=str(tmp_path / "corpus.sqlite"))
         with (
             patch("fireflyframework_agentic.rag.corpus.SqliteCorpus"),
-            patch(
-                "fireflyframework_agentic.vectorstores.sqlite_vec_store.SqliteVecVectorStore"
-            ) as vec_mock,
+            patch("fireflyframework_agentic.vectorstores.sqlite_vec_store.SqliteVecVectorStore") as vec_mock,
         ):
             corpus_factory.build_corpus_context(settings=settings)
         vec_mock.assert_called_once()
 
     def test_pgvector_routes_to_pgvector_store(self, tmp_path: Path):
-        settings = _settings(
-            vector_store="pgvector", corpus_path=str(tmp_path / "corpus.sqlite")
-        )
+        settings = _settings(vector_store="pgvector", corpus_path=str(tmp_path / "corpus.sqlite"))
         with (
-            patch(
-                "flycanon.core.services.retrieval.postgres_corpus.PostgresCorpus"
-            ) as pg_corpus_mock,
-            patch(
-                "flycanon.core.services.retrieval.pgvector_store.PgVectorVectorStore"
-            ) as pgvec_mock,
+            patch("flycanon.core.services.retrieval.postgres_corpus.PostgresCorpus") as pg_corpus_mock,
+            patch("flycanon.core.services.retrieval.pgvector_store.PgVectorVectorStore") as pgvec_mock,
         ):
             ctx = corpus_factory.build_corpus_context(settings=settings)
         assert ctx.backend == "pgvector"
@@ -100,22 +88,16 @@ class TestBackendSelection:
         )
 
     def test_memory_backend_routes_to_in_memory_store(self, tmp_path: Path):
-        settings = _settings(
-            vector_store="memory", corpus_path=str(tmp_path / "corpus.sqlite")
-        )
+        settings = _settings(vector_store="memory", corpus_path=str(tmp_path / "corpus.sqlite"))
         with (
             patch("fireflyframework_agentic.rag.corpus.SqliteCorpus"),
-            patch(
-                "fireflyframework_agentic.vectorstores.memory_store.InMemoryVectorStore"
-            ) as mem_mock,
+            patch("fireflyframework_agentic.vectorstores.memory_store.InMemoryVectorStore") as mem_mock,
         ):
             corpus_factory.build_corpus_context(settings=settings)
         mem_mock.assert_called_once_with()
 
     def test_unknown_backend_raises_value_error(self, tmp_path: Path):
-        settings = _settings(
-            vector_store="weaviate", corpus_path=str(tmp_path / "corpus.sqlite")
-        )
+        settings = _settings(vector_store="weaviate", corpus_path=str(tmp_path / "corpus.sqlite"))
         with (
             patch("fireflyframework_agentic.rag.corpus.SqliteCorpus"),
             pytest.raises(ValueError, match="unknown FLYCANON_VECTOR_STORE"),

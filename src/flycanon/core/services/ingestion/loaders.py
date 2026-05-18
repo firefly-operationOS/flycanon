@@ -194,9 +194,7 @@ class PdfLoader:
         try:
             import pymupdf
         except ImportError as exc:  # pragma: no cover -- runtime dep guard
-            raise RuntimeError(
-                "pymupdf is required for PDF ingestion (replaces pypdf/MarkItDown)"
-            ) from exc
+            raise RuntimeError("pymupdf is required for PDF ingestion (replaces pypdf/MarkItDown)") from exc
 
         try:
             doc = pymupdf.open(stream=content, filetype="pdf")
@@ -224,9 +222,7 @@ class PdfLoader:
             doc.close()
 
         # Phase 2: identify image-only pages and OCR them.
-        needs_ocr = [
-            idx for idx, t in enumerate(text_per_page) if len(t) < self._MIN_CHARS_PER_PAGE
-        ]
+        needs_ocr = [idx for idx, t in enumerate(text_per_page) if len(t) < self._MIN_CHARS_PER_PAGE]
         if needs_ocr:
             ocr_results = self._ocr_pages(content, needs_ocr)
             for page_idx, ocr_text in ocr_results.items():
@@ -266,9 +262,7 @@ class PdfLoader:
             logger.warning("docling OCR returned no pages; falling back to tesseract")
         return self._ocr_pages_tesseract(pdf_bytes, page_indices)
 
-    def _ocr_pages_tesseract(
-        self, pdf_bytes: bytes, page_indices: list[int]
-    ) -> dict[int, str]:
+    def _ocr_pages_tesseract(self, pdf_bytes: bytes, page_indices: list[int]) -> dict[int, str]:
         try:
             import os as _os
 
@@ -298,18 +292,14 @@ class PdfLoader:
                     )
                     results[page_idx] = ocr_text
                 except Exception as exc:
-                    logger.warning(
-                        "PDF OCR failed for page %d: %s", page_idx + 1, exc
-                    )
+                    logger.warning("PDF OCR failed for page %d: %s", page_idx + 1, exc)
                     results[page_idx] = ""
         finally:
             with contextlib.suppress(Exception):
                 doc.close()
         return results
 
-    def _ocr_pages_docling(
-        self, pdf_bytes: bytes, page_indices: list[int]
-    ) -> dict[int, str]:
+    def _ocr_pages_docling(self, pdf_bytes: bytes, page_indices: list[int]) -> dict[int, str]:
         """Layout-aware OCR via IBM Docling. Requires the ``docling``
         extra: ``uv pip install flycanon[docling]``.
         """
@@ -342,9 +332,7 @@ class PdfLoader:
                     text_per_page.setdefault(page_idx, [])
                     text_per_page[page_idx].append(text)
             return {
-                idx: "\n".join(parts).strip()
-                for idx, parts in text_per_page.items()
-                if idx in page_indices
+                idx: "\n".join(parts).strip() for idx, parts in text_per_page.items() if idx in page_indices
             }
         except Exception as exc:  # noqa: BLE001 -- fall back to tesseract
             logger.warning("docling OCR failed: %s", exc)
@@ -560,9 +548,7 @@ class TranscriptLoader:
                 (ln for ln in lines if self._CUE_TIMESTAMP_RE.search(ln)),
                 None,
             )
-            body = "\n".join(
-                ln for ln in lines if ln and ln != timestamp_line and not ln.strip().isdigit()
-            )
+            body = "\n".join(ln for ln in lines if ln and ln != timestamp_line and not ln.strip().isdigit())
             if not body.strip():
                 continue
             if timestamp_line:

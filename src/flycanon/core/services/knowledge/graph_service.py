@@ -86,9 +86,7 @@ class KnowledgeGraphService:
                 kind="knowledge_item",
                 label=item.title or item.id,
                 domain=Domain(item.domain) if item.domain else None,
-                jurisdiction=Jurisdiction(item.jurisdiction)
-                if item.jurisdiction
-                else None,
+                jurisdiction=Jurisdiction(item.jurisdiction) if item.jurisdiction else None,
                 status=KnowledgeStatus(item.status) if item.status else None,
                 current_version=item.current_version,
             )
@@ -122,9 +120,7 @@ class KnowledgeGraphService:
         if include_sources and item_ids:
             citation_pairs = await self._citation_pairs_for_items(items)
             source_ids = {source_id for (_, source_id) in citation_pairs}
-            source_rows = (
-                await self._sources.get_many(list(source_ids)) if source_ids else []
-            )
+            source_rows = await self._sources.get_many(list(source_ids)) if source_ids else []
             sources_by_id = {row.id: row for row in source_rows}
             for source_id in source_ids:
                 source = sources_by_id.get(source_id)
@@ -195,18 +191,18 @@ class KnowledgeGraphService:
         lines: list[str] = ["graph LR"]
         for node in graph.nodes:
             label = _escape_mermaid(node.label)
-            shape_open, shape_close = ("[", "]") if node.kind == "knowledge_item" else (
-                "([",
-                "])",
+            shape_open, shape_close = (
+                ("[", "]")
+                if node.kind == "knowledge_item"
+                else (
+                    "([",
+                    "])",
+                )
             )
-            lines.append(
-                f"    {_safe_id(node.id)}{shape_open}\"{label}\"{shape_close}"
-            )
+            lines.append(f'    {_safe_id(node.id)}{shape_open}"{label}"{shape_close}')
         for edge in graph.edges:
             arrow = "-->|" + (edge.label or edge.kind) + "|"
-            lines.append(
-                f"    {_safe_id(edge.source)} {arrow} {_safe_id(edge.target)}"
-            )
+            lines.append(f"    {_safe_id(edge.source)} {arrow} {_safe_id(edge.target)}")
         return MermaidGraph(
             mermaid="\n".join(lines),
             total_nodes=graph.total_nodes,
@@ -255,9 +251,4 @@ def _safe_id(node_id: str) -> str:
 
 def _escape_mermaid(text: str) -> str:
     """Escape characters that confuse Mermaid label parsing."""
-    return (
-        text.replace("\\", "\\\\")
-        .replace("\"", "\\\"")
-        .replace("\n", " ")
-        .replace("\r", " ")
-    )
+    return text.replace("\\", "\\\\").replace('"', '\\"').replace("\n", " ").replace("\r", " ")

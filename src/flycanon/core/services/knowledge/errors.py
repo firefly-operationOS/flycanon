@@ -46,8 +46,6 @@ class InvalidSupersedeTarget(KnowledgeServiceError):
     http_status = 409
 
     def __init__(self, item_id: str, target_id: str, detail: str) -> None:
-        super().__init__(
-            f"cannot supersede {item_id!r} with {target_id!r}: {detail}"
-        )
+        super().__init__(f"cannot supersede {item_id!r} with {target_id!r}: {detail}")
         self.item_id = item_id
         self.target_id = target_id

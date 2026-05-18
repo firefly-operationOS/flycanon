@@ -73,9 +73,7 @@ class TestStatusFilter:
             knowledge_item_id="k-2",
             metadata={"_knowledge_status": "draft"},
         )
-        out = _apply(
-            [published, draft], RetrievalFilters(statuses=["published"])
-        )
+        out = _apply([published, draft], RetrievalFilters(statuses=["published"]))
         assert [h.chunk_id for h in out] == ["ch-1"]
 
 

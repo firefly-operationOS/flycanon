@@ -42,6 +42,4 @@ class AuditEventRow(Base):
         DateTime(timezone=True), nullable=False, server_default=func.now(), index=True
     )
 
-    __table_args__ = (
-        Index("ix_canon_audit_subject", "subject_kind", "subject_id"),
-    )
+    __table_args__ = (Index("ix_canon_audit_subject", "subject_kind", "subject_id"),)

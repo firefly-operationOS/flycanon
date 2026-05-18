@@ -61,9 +61,7 @@ class ConversationTurnRow(Base):
     turn_index: Mapped[int] = mapped_column(Integer, nullable=False)
     question: Mapped[str] = mapped_column(Text, nullable=False)
     answer: Mapped[str | None] = mapped_column(Text, nullable=True)
-    citations_json: Mapped[list[dict[str, Any]] | None] = mapped_column(
-        JSON, nullable=True
-    )
+    citations_json: Mapped[list[dict[str, Any]] | None] = mapped_column(JSON, nullable=True)
     model: Mapped[str | None] = mapped_column(String(128), nullable=True)
     elapsed_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
     no_answer: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)

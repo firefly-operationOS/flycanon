@@ -294,9 +294,7 @@ class AnswerResponse(BaseModel):
             "render the citation badge without a follow-up call."
         )
     )
-    model: str = Field(
-        description="Provider:model identifier actually used (after fallback)."
-    )
+    model: str = Field(description="Provider:model identifier actually used (after fallback).")
     elapsed_ms: int = Field(ge=0)
     no_answer: bool = Field(
         default=False,

@@ -82,9 +82,7 @@ class PiiScanner(Protocol):
 _PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     (
         "email",
-        re.compile(
-            r"\b[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}\b"
-        ),
+        re.compile(r"\b[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}\b"),
     ),
     (
         "us_ssn",
@@ -93,9 +91,7 @@ _PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     (
         "phone",
         # International + US formats; conservative on length.
-        re.compile(
-            r"(?<!\d)(?:\+?\d{1,3}[\s.-]?)?(?:\(\d{2,4}\)|\d{2,4})[\s.-]?\d{3,4}[\s.-]?\d{3,4}(?!\d)"
-        ),
+        re.compile(r"(?<!\d)(?:\+?\d{1,3}[\s.-]?)?(?:\(\d{2,4}\)|\d{2,4})[\s.-]?\d{3,4}[\s.-]?\d{3,4}(?!\d)"),
     ),
     (
         "credit_card",
@@ -177,9 +173,7 @@ def build_pii_scanner(name: str) -> PiiScanner | None:
     if key == "presidio":
         # Adapter intentionally unimplemented in v1 -- ships in a
         # follow-up once the dependency footprint is reviewed.
-        logger.warning(
-            "presidio scanner not available in this build -- falling back to regex"
-        )
+        logger.warning("presidio scanner not available in this build -- falling back to regex")
         return RegexPiiScanner()
     logger.warning("unknown pii scanner %r -- falling back to regex", name)
     return RegexPiiScanner()

@@ -102,17 +102,11 @@ class MetadataExtractor:
         try:
             if media_type == "application/pdf":
                 return self._extract_pdf(data, text_sample=text_sample)
-            if media_type == (
-                "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-            ):
+            if media_type == ("application/vnd.openxmlformats-officedocument.wordprocessingml.document"):
                 return self._extract_docx(data, text_sample=text_sample)
-            if media_type == (
-                "application/vnd.openxmlformats-officedocument.presentationml.presentation"
-            ):
+            if media_type == ("application/vnd.openxmlformats-officedocument.presentationml.presentation"):
                 return self._extract_pptx(data, text_sample=text_sample)
-            if media_type == (
-                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-            ):
+            if media_type == ("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"):
                 return self._extract_xlsx(data, text_sample=text_sample)
             if media_type in {"text/html", "application/xhtml+xml"}:
                 return self._extract_html(data, text_sample=text_sample)
@@ -257,9 +251,12 @@ class MetadataExtractor:
             created_at=_iso(msg.get("Date")),
             language=_detect_language(text_sample),
             extra=_kv(
-                "to", msg.get("To"),
-                "cc", msg.get("Cc"),
-                "message_id", msg.get("Message-ID"),
+                "to",
+                msg.get("To"),
+                "cc",
+                msg.get("Cc"),
+                "message_id",
+                msg.get("Message-ID"),
             ),
         )
 
@@ -281,7 +278,8 @@ class MetadataExtractor:
             created_at=_clean(date),
             language=_detect_language(text_sample),
             extra={
-                k: v for k, v in {
+                k: v
+                for k, v in {
                     "make": tags.get("Make"),
                     "model": tags.get("Model"),
                     "orientation": tags.get("Orientation"),

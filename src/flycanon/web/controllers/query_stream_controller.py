@@ -48,9 +48,7 @@ class QueryStreamController:
         self._suggester = suggester
 
     @post_mapping("/stream")
-    async def stream_answer(
-        self, request: Valid[Body[AnswerRequest]]
-    ) -> StreamingResponse:
+    async def stream_answer(self, request: Valid[Body[AnswerRequest]]) -> StreamingResponse:
         """SSE answer stream.
 
         Frames:
@@ -114,9 +112,7 @@ class QueryStreamController:
         )
 
     @post_mapping("/suggest")
-    async def suggest(
-        self, request: Valid[Body[SuggestRequest]]
-    ) -> SuggestResponse:
+    async def suggest(self, request: Valid[Body[SuggestRequest]]) -> SuggestResponse:
         """Suggested follow-up questions for chat UI chips."""
         suggestions = await self._suggester.suggest(
             question=request.question,

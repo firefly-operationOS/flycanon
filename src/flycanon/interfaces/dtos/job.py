@@ -33,8 +33,7 @@ class IngestJob(BaseModel):
     source_id: str | None = Field(
         default=None,
         description=(
-            "Resolved source id once intake completes. ``null`` while "
-            "the job is queued or running."
+            "Resolved source id once intake completes. ``null`` while the job is queued or running."
         ),
     )
     attempts: int = Field(ge=0)

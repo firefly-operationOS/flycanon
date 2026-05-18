@@ -45,9 +45,7 @@ logger = logging.getLogger(__name__)
 
 
 _TOP_DIMENSIONS: frozenset[str] = frozenset({"model", "agent_name", "actor"})
-_GROUP_COLUMNS: frozenset[str] = frozenset(
-    {"date", "model", "agent_name", "actor"}
-)
+_GROUP_COLUMNS: frozenset[str] = frozenset({"date", "model", "agent_name", "actor"})
 
 
 @rest_controller
@@ -195,8 +193,7 @@ class BillingController:
         """
         if dimension not in _TOP_DIMENSIONS:
             raise BadRequestException(
-                f"unknown billing top dimension {dimension!r}; "
-                f"expected one of: {sorted(_TOP_DIMENSIONS)}"
+                f"unknown billing top dimension {dimension!r}; expected one of: {sorted(_TOP_DIMENSIONS)}"
             )
         rows = await self._cost.top(
             dimension=dimension,

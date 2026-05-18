@@ -135,9 +135,7 @@ class CostService:
         result: dict[str, Any] = {"generated_at": now.isoformat()}
         for label, delta in _SUMMARY_WINDOWS:
             since = now - delta
-            rows = await self._repository.aggregate(
-                group_by=["model"], actor=actor, since=since, until=now
-            )
+            rows = await self._repository.aggregate(group_by=["model"], actor=actor, since=since, until=now)
             total_cost = Decimal("0")
             total_calls = 0
             total_input = 0
@@ -159,9 +157,7 @@ class CostService:
             top_actor: str | None = None
             top_actor_cost = Decimal("0")
             if not actor:
-                actor_rows = await self._repository.aggregate(
-                    group_by=["actor"], since=since, until=now
-                )
+                actor_rows = await self._repository.aggregate(group_by=["actor"], since=since, until=now)
                 for r in actor_rows:
                     if r.get("actor") is None:
                         continue
@@ -200,12 +196,9 @@ class CostService:
         """
         if dimension not in {"model", "agent_name", "actor"}:
             raise ValueError(
-                f"unknown billing top dimension {dimension!r}; "
-                "expected one of: model, agent_name, actor"
+                f"unknown billing top dimension {dimension!r}; expected one of: model, agent_name, actor"
             )
-        rows = await self._repository.aggregate(
-            group_by=[dimension], since=since, until=until
-        )
+        rows = await self._repository.aggregate(group_by=[dimension], since=since, until=until)
         rows.sort(key=lambda r: Decimal(str(r.get("cost_usd") or 0)), reverse=True)
         return rows[: max(1, int(limit))]
 
@@ -245,12 +238,8 @@ class CostService:
         captured alongside cost on every FireflyAgent invocation. The
         result is a sorted list with one entry per group bucket.
         """
-        groups = [g for g in group_by if g in {"model", "agent_name", "actor"}] or [
-            "model"
-        ]
-        samples = await self._repository.latency_samples(
-            group_by=groups, since=since, until=until
-        )
+        groups = [g for g in group_by if g in {"model", "agent_name", "actor"}] or ["model"]
+        samples = await self._repository.latency_samples(group_by=groups, since=since, until=until)
         out: list[dict[str, Any]] = []
         for key, latencies in samples.items():
             if not latencies:
