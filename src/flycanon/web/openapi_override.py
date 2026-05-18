@@ -11,10 +11,11 @@ This module bridges the gap. After the FastAPI app is built we install
 a custom ``app.openapi`` callable that:
 
 1. Collects per-route metadata from the original controller signatures
-   via pyfly's :class:`ControllerRegistrar.collect_route_metadata`,
-2. Renders the spec through pyfly's :class:`OpenAPIGenerator`,
-3. Enriches the result with global tags (with descriptions) and the
-   OpenAPI ``info`` block we want Swagger / ReDoc to display.
+   via pyfly's :class:`ControllerRegistrar.collect_route_metadata`.
+2. Renders the spec through pyfly's :class:`OpenAPIGenerator`.
+3. Enriches the result with rich global tags (with business +
+   technical descriptions) and the OpenAPI ``info`` block we want
+   Swagger / ReDoc to display.
 """
 
 from __future__ import annotations
@@ -30,46 +31,75 @@ from pyfly.web.openapi import OpenAPIGenerator
 logger = logging.getLogger(__name__)
 
 
-#: Per-tag descriptions shown on the Swagger landing page. Controllers
-#: register their tag via the ``@rest_controller(tags=[...])`` argument;
-#: the descriptions below render alongside on the docs landing page.
+#: Per-tag descriptions rendered on the Swagger / ReDoc landing page.
+#: Each entry mixes the business intent with the technical contract so
+#: the docs read like a runbook, not just a wire reference.
 TAG_DESCRIPTIONS: dict[str, str] = {
     "Sources": (
-        "Source intake -- DOCX, PDF, HTML, Markdown, or plain-text "
-        "files become canonical sources. The pipeline hashes the bytes "
-        "(idempotency), parses + chunks the content, embeds every "
-        "chunk, and indexes both the BM25 (FTS5) and vector projections."
+        "Source intake. The front door for binary content -- DOCX, "
+        "XLSX, PPTX, PDF, RTF, ODT/ODS/ODP, HTML, Markdown, plain "
+        "text, CSV, TSV, JSON, XML, EPUB, raster images (PNG, JPEG, "
+        "GIF, WebP, HEIC, AVIF, TIFF, SVG, BMP) routed through "
+        "Tesseract OCR, ZIP / 7Z / TAR / GZ archives expanded inline, "
+        "EML / MSG emails decomposed into body + attachments, and "
+        "WebVTT / SRT transcripts. The intake pipeline sniffs the "
+        "actual media type from magic bytes, runs the binary "
+        "normaliser, loads through the per-format SourceLoader, "
+        "chunks, embeds, and indexes BM25 + dense vectors keyed by "
+        "chunk_id. SHA-256 hashing makes ingestion idempotent on "
+        "content."
     ),
     "Knowledge": (
-        "Canonical knowledge items -- the validated, versioned units "
+        "Canonical knowledge items. The validated, versioned units "
         "downstream consumers should treat as ground truth. Every "
-        "publish, supersession, and retirement is captured in the "
-        "knowledge-version history and broadcast on ``flycanon.knowledge``."
+        "create / update appends a new version row; supersession and "
+        "retirement are final transitions. Every lifecycle event is "
+        "audited and broadcast on the ``flycanon.knowledge`` topic, "
+        "so projections (dashboards, copilots, compliance feeds) "
+        "stay in lock-step without polling."
     ),
     "Candidates": (
-        "Pre-canonical knowledge proposals derived from sources by the "
-        "consolidation stage. Accept a candidate to materialise it as "
-        "a new knowledge version; reject one to mark it discarded."
+        "Pre-canonical knowledge proposals. The consolidation stage "
+        "feeds source chunks to an LLM (FireflyAgent over "
+        "pydantic-ai) that emits structured "
+        "CandidateProposals with chunk-anchored citations and a "
+        "self-rated confidence score. Operators (or an automated "
+        "policy) accept proposals to materialise a new knowledge "
+        "version, reject them with a reason, or merge them into "
+        "existing items. Every decision flows through the audit log."
     ),
     "Query": (
-        "Hybrid search and retrieval-augmented answering. ``/search`` "
-        "returns the raw fused hit list (BM25 + vector + RRF). "
-        "``/query`` runs the answerer over the top hits and returns "
-        "a grounded answer with citations."
+        "Hybrid search + grounded retrieval-augmented answering. "
+        "``/search`` returns the raw RRF-fused hit list (BM25 + "
+        "dense vectors). ``/query`` runs the same retrieval, then "
+        "asks the configured answer model to write an answer using "
+        "ONLY the retrieved chunks -- citations include only the "
+        "chunks the model actually relied on. Both surfaces share "
+        "the same filter model (source_id, knowledge_item_id, "
+        "domain, jurisdiction, tags, statuses)."
     ),
     "Taxonomy": (
-        "Domain + jurisdiction taxonomy that scopes every knowledge "
-        "item and every retrieval. The default tree mirrors the "
-        "workshop personas (Legal, Compliance, Process, Network, AI "
-        "Platform, Executive, HR, CTO, Engineering, Security)."
+        "Domain + jurisdiction taxonomy. Seed inserts one root per "
+        ":class:`Domain` value at first boot; callers attach "
+        "finer-grained children at runtime (sub-processes, "
+        "jurisdiction sub-trees). The tree is read flat in "
+        "breadth-first order via the ``depth`` column so the API "
+        "round-trip is index-only."
     ),
     "Audit": (
-        "Append-only audit log -- every mutation is captured with "
-        "actor, payload, and trace-context for compliance projections."
+        "Append-only audit log. Every mutation in flycanon "
+        "(``source.ingested``, ``knowledge.published``, "
+        "``candidate.accepted``, ...) writes a row here with the "
+        "actor, the correlation id from the originating request, "
+        "and a free-form payload. The same payload is broadcast on "
+        "the ``flycanon.audit`` topic for compliance projections."
     ),
     "Version": (
-        "Service identity, primary / fallback model, and EDA adapter "
-        "-- useful for smoke tests and operations dashboards."
+        "Service identity, model selection, and backend choices. "
+        "Surfaces the deployed CalVer, the embedding + answer model "
+        "ids actually in use, the vector backend (pgvector by "
+        "default), and the EDA adapter. Used by smoke tests and "
+        "operations dashboards."
     ),
 }
 
@@ -104,11 +134,32 @@ def install_openapi(
                 if name and name in TAG_DESCRIPTIONS:
                     tag["description"] = TAG_DESCRIPTIONS[name]
 
-        # Surface the deployment's primary endpoints in the info block.
+        # Add the deployment's contact info + servers + license to
+        # the info block so the docs landing page is usable on its
+        # own (without a separate page).
         info = spec.setdefault("info", {})
         info.setdefault(
             "contact",
-            {"name": "Firefly OperationOS", "url": "https://github.com/firefly-operationOS"},
+            {
+                "name": "Firefly OperationOS",
+                "url": "https://github.com/firefly-operationOS/flycanon",
+            },
+        )
+        info.setdefault(
+            "license",
+            {
+                "name": "Proprietary -- service",
+                "url": "https://github.com/firefly-operationOS/flycanon/blob/main/LICENSE",
+            },
+        )
+
+        # Servers block: lets Swagger UI's "Try it out" send to the
+        # right host without manual editing.
+        spec.setdefault(
+            "servers",
+            [
+                {"url": "/", "description": "This service"},
+            ],
         )
 
         app.openapi_schema = spec
