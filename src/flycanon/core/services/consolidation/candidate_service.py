@@ -20,6 +20,9 @@ from collections.abc import Sequence
 from datetime import UTC, datetime
 from typing import Any
 
+from pyfly.container import service
+from pyfly.eda import EventPublisher
+
 from flycanon.config import CanonSettings
 from flycanon.core.services.audit import AuditService
 from flycanon.core.services.consolidation.consolidator import (
@@ -52,17 +55,17 @@ from flycanon.models.repositories.source_repository import SourceRepository
 logger = logging.getLogger(__name__)
 
 
+@service
 class CandidateService:
     def __init__(
         self,
-        *,
         consolidator: Consolidator,
         candidate_repository: CandidateRepository,
         source_repository: SourceRepository,
         chunk_repository: ChunkRepository,
         knowledge: KnowledgeService,
         audit: AuditService,
-        event_publisher: object | None,
+        event_publisher: EventPublisher,
         settings: CanonSettings,
     ) -> None:
         self._consolidator = consolidator

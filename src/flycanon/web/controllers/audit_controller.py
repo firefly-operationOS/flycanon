@@ -17,7 +17,7 @@ class AuditController:
     def __init__(self, queries: DefaultQueryBus) -> None:
         self._queries = queries
 
-    @get_mapping("", tags=["Audit"])
+    @get_mapping("")
     async def list_audit(
         self,
         subject_id: QueryParam[str] = "",

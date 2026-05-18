@@ -34,8 +34,18 @@ dependencies = [
     # listed here back the specific loaders and the binary
     # normaliser:
     #
-    # * ``python-docx`` -- :class:`DocxLoader` (Heading1-9 detection).
-    # * ``pypdf``        -- :class:`PdfLoader` text extraction.
+    # * ``python-docx`` -- :class:`DocxLoader` (Heading1-9 detection)
+    #   + DOCX metadata (core.coreproperties).
+    # * ``pypdf``        -- :class:`PdfGuard` encryption/corruption
+    #   pre-flight; lightweight page count.
+    # * ``pymupdf``      -- primary :class:`PdfLoader` text + per-page
+    #   rendering for image-only PDFs (the flydocs approach: PyMuPDF
+    #   first, Tesseract OCR fallback). MarkItDown is no longer on
+    #   the PDF path.
+    # * ``pypdfium2``    -- fallback PDF renderer for the image OCR
+    #   path when PyMuPDF is unavailable.
+    # * ``python-pptx``  -- PPTX metadata + native text extraction.
+    # * ``openpyxl``     -- XLSX metadata + cell extraction.
     # * ``beautifulsoup4``+ ``lxml`` -- :class:`HtmlLoader`.
     # * ``Pillow`` + ``pillow-heif`` + ``cairosvg`` -- image format
     #   normalisation (HEIC / HEIF / AVIF / TIFF / BMP / SVG -> PNG)
@@ -47,8 +57,13 @@ dependencies = [
     #   are stdlib.
     # * ``extract-msg`` -- Outlook ``.msg`` parsing. ``.eml`` uses
     #   stdlib ``email``.
+    # * ``langdetect`` -- best-effort language detection on extracted
+    #   text for the metadata extractor.
     "python-docx>=1.1",
+    "python-pptx>=1.0",
+    "openpyxl>=3.1",
     "pypdf>=4.3.0",
+    "pymupdf>=1.24",
     "beautifulsoup4>=4.12",
     "lxml>=5.0",
     "Pillow>=11.0",
@@ -57,6 +72,7 @@ dependencies = [
     "pytesseract>=0.3.13",
     "py7zr>=0.22",
     "extract-msg>=0.51",
+    "langdetect>=1.0.9",
 
     # HTTP client for outbound calls (webhooks, future SOTA monitors).
     "httpx>=0.28.0",
@@ -101,6 +117,16 @@ dev = [
     "httpx>=0.28",
     "reportlab>=4.2",
     "python-docx>=1.1",
+]
+
+# Optional layout-aware OCR via IBM Docling. Activates when
+# ``FLYCANON_PDF_OCR_ENGINE=docling`` is set; otherwise the PDF
+# pipeline uses PyMuPDF + Tesseract (same default as flydocs).
+# Docling preserves multi-column / table structure better than
+# Tesseract alone on complex layouts at the cost of a heavier
+# dependency and slower first-page latency.
+docling = [
+    "docling>=2.0",
 ]
 
 # Optional Chroma adapter (managed or self-hosted ChromaDB). Activates

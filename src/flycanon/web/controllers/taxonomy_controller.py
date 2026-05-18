@@ -25,12 +25,12 @@ class TaxonomyController:
         self._commands = commands
         self._queries = queries
 
-    @get_mapping("", tags=["Taxonomy"])
+    @get_mapping("")
     async def get_taxonomy(self) -> TaxonomyTree:
         """Return the full taxonomy as a flat list ordered breadth-first."""
         return await self._queries.query(GetTaxonomyQuery())
 
-    @post_mapping("/nodes", status_code=201, tags=["Taxonomy"])
+    @post_mapping("/nodes", status_code=201)
     async def create_node(
         self,
         request: Valid[Body[CreateTaxonomyNodeRequest]],

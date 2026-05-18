@@ -42,7 +42,7 @@ class CandidatesController:
         self._commands = commands
         self._queries = queries
 
-    @post_mapping(":propose", status_code=201, tags=["Candidates"])
+    @post_mapping(":propose", status_code=201)
     async def propose(
         self,
         request: Valid[Body[ProposeCandidateRequest]],
@@ -51,7 +51,7 @@ class CandidatesController:
         every resulting candidate in ``proposed`` status."""
         return await self._commands.send(ProposeCandidatesCommand(request=request))
 
-    @get_mapping("", tags=["Candidates"])
+    @get_mapping("")
     async def list_candidates(
         self,
         status: QueryParam[str] = "",
@@ -71,7 +71,7 @@ class CandidatesController:
             )
         )
 
-    @get_mapping("/{candidate_id}", tags=["Candidates"])
+    @get_mapping("/{candidate_id}")
     async def get_candidate(self, candidate_id: PathVar[str]) -> CandidateRecord:
         record = await self._queries.query(
             GetCandidateQuery(candidate_id=candidate_id)
@@ -80,7 +80,7 @@ class CandidatesController:
             raise ResourceNotFoundException(f"candidate {candidate_id!r} not found")
         return record
 
-    @post_mapping("/{candidate_id}:accept", tags=["Candidates"])
+    @post_mapping("/{candidate_id}:accept")
     async def accept(
         self,
         candidate_id: PathVar[str],
@@ -91,7 +91,7 @@ class CandidatesController:
             AcceptCandidateCommand(candidate_id=candidate_id, request=request)
         )
 
-    @post_mapping("/{candidate_id}:reject", tags=["Candidates"])
+    @post_mapping("/{candidate_id}:reject")
     async def reject(
         self,
         candidate_id: PathVar[str],

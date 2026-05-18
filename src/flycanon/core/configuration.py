@@ -20,10 +20,14 @@ import logging
 
 from pyfly.container import bean, configuration
 from pyfly.data.relational.health import SqlAlchemyHealthIndicator
-from pyfly.eda import EventPublisher
 
 from flycanon.config import CanonSettings, get_settings
-from flycanon.core.services.audit import AuditService
+# AuditService / KnowledgeService / CandidateService / IntakeService /
+# TaxonomyService / ProvenanceService are no longer constructed via
+# @bean factories here -- they carry their own ``@service`` decorators
+# and are auto-discovered via ``scan_packages``. The imports are
+# retained for the type hints used in the remaining @bean signatures.
+from flycanon.core.services.audit import AuditService  # noqa: F401
 from flycanon.core.services.binary import (
     BinaryNormalizer,
     GotenbergConverter,
@@ -68,7 +72,15 @@ logger = logging.getLogger(__name__)
 
 @configuration
 class CanonCoreConfiguration:
-    """Wiring for everything outside the pyfly stereotype decorators."""
+    """Wiring for everything outside the pyfly stereotype decorators.
+
+    ``EventPublisher``-dependent services (``AuditService``,
+    ``KnowledgeService``, ``CandidateService``, ``IntakeService``,
+    ``TaxonomyService``) are declared as ``@service`` classes on the
+    classes themselves so pyfly resolves them lazily -- by then
+    pyfly's ``EdaAutoConfiguration`` has already registered the
+    ``EventPublisher`` bean.
+    """
 
     # ------------------------------------------------------------------
     # Configuration
@@ -183,129 +195,50 @@ class CanonCoreConfiguration:
 
     # ------------------------------------------------------------------
     # Audit + knowledge lifecycle + taxonomy
+    #
+    # AuditService, KnowledgeService, ProvenanceService, TaxonomyService
+    # are now ``@service``-decorated classes auto-discovered via
+    # ``scan_packages``. Pyfly's container resolves their dependencies
+    # (including ``EventPublisher`` from ``EdaAutoConfiguration``) at
+    # first lookup -- by that point every auto-configuration has run.
     # ------------------------------------------------------------------
-
-    @bean
-    def audit_service(
-        self,
-        audit_repository: AuditRepository,
-        event_publisher: EventPublisher,
-        settings: CanonSettings,
-    ) -> AuditService:
-        """``AuditService`` -- persists rows + broadcasts on flycanon.audit.
-
-        The :class:`EventPublisher` is registered upstream by pyfly's
-        :class:`EdaAutoConfiguration` (Postgres outbox by default;
-        see ``pyfly.yaml``). Taking it as a bean argument lets the
-        DI container inject the real publisher; AuditService still
-        swallows publish failures so the durable audit row in
-        Postgres remains the source of truth.
-        """
-        return AuditService(
-            repository=audit_repository,
-            event_publisher=event_publisher,
-            settings=settings,
-        )
-
-    @bean
-    def knowledge_service(
-        self,
-        knowledge_repository: KnowledgeRepository,
-        audit_service: AuditService,
-        event_publisher: EventPublisher,
-        settings: CanonSettings,
-    ) -> KnowledgeService:
-        return KnowledgeService(
-            repository=knowledge_repository,
-            audit=audit_service,
-            event_publisher=event_publisher,
-            settings=settings,
-        )
-
-    @bean
-    def provenance_service(
-        self,
-        knowledge_repository: KnowledgeRepository,
-        source_repository: SourceRepository,
-    ) -> ProvenanceService:
-        return ProvenanceService(
-            knowledge_repository=knowledge_repository,
-            source_repository=source_repository,
-        )
-
-    @bean
-    def taxonomy_service(
-        self,
-        taxonomy_repository: TaxonomyRepository,
-        audit_service: AuditService,
-        settings: CanonSettings,
-    ) -> TaxonomyService:
-        return TaxonomyService(
-            repository=taxonomy_repository,
-            audit=audit_service,
-            settings=settings,
-        )
 
     # ------------------------------------------------------------------
     # Consolidation + query
     # ------------------------------------------------------------------
 
     @bean
-    def consolidation_prompt(self) -> PromptTemplate:
-        return load_prompt("consolidation")
-
-    @bean
     def consolidator(
         self,
-        consolidation_prompt: PromptTemplate,
         settings: CanonSettings,
     ) -> Consolidator:
+        # Prompt is loaded inline so the ``PromptTemplate`` bean type
+        # doesn't collide with the answer-prompt bean -- pyfly's
+        # container resolves @bean params by TYPE, so two beans
+        # returning the same ``PromptTemplate`` type would overwrite
+        # each other under the same key.
         return Consolidator(
-            prompt=consolidation_prompt,
+            prompt=load_prompt("consolidation"),
             default_model=settings.answer_model,
         )
 
-    @bean
-    def candidate_service(
-        self,
-        consolidator: Consolidator,
-        candidate_repository: CandidateRepository,
-        source_repository: SourceRepository,
-        chunk_repository: ChunkRepository,
-        knowledge_service: KnowledgeService,
-        audit_service: AuditService,
-        event_publisher: EventPublisher,
-        settings: CanonSettings,
-    ) -> CandidateService:
-        return CandidateService(
-            consolidator=consolidator,
-            candidate_repository=candidate_repository,
-            source_repository=source_repository,
-            chunk_repository=chunk_repository,
-            knowledge=knowledge_service,
-            audit=audit_service,
-            event_publisher=event_publisher,
-            settings=settings,
-        )
+    # CandidateService is ``@service``-decorated; auto-discovered.
 
     @bean
     def search_service(self, retrieval_service: RetrievalService) -> SearchService:
         return SearchService(retrieval=retrieval_service)
 
     @bean
-    def answer_prompt(self) -> PromptTemplate:
-        return load_prompt("answer")
-
-    @bean
     def answer_service(
         self,
         retrieval_service: RetrievalService,
-        answer_prompt: PromptTemplate,
         settings: CanonSettings,
     ) -> AnswerService:
+        # Prompt is loaded inline -- see ``consolidator`` above for the
+        # rationale (avoid type-based DI collision on PromptTemplate).
         return AnswerService(
             retrieval=retrieval_service,
-            prompt=answer_prompt,
+            prompt=load_prompt("answer"),
             default_model=settings.answer_model,
             fallback_model=settings.answer_fallback_model,
         )
@@ -338,29 +271,4 @@ class CanonCoreConfiguration:
             "expected 'none', 'gotenberg', or 'libreoffice'"
         )
 
-    @bean
-    def intake_service(
-        self,
-        binary_normalizer: BinaryNormalizer,
-        ingestion_service: IngestionService,
-        loader_registry: LoaderRegistry,
-        embedding_service: EmbeddingService,
-        index_service: IndexService,
-        source_repository: SourceRepository,
-        chunk_repository: ChunkRepository,
-        audit_service: AuditService,
-        event_publisher: EventPublisher,
-        settings: CanonSettings,
-    ) -> IntakeService:
-        return IntakeService(
-            binary_normalizer=binary_normalizer,
-            ingestion=ingestion_service,
-            loaders=loader_registry,
-            embeddings=embedding_service,
-            indexer=index_service,
-            source_repository=source_repository,
-            chunk_repository=chunk_repository,
-            audit=audit_service,
-            event_publisher=event_publisher,
-            settings=settings,
-        )
+    # IntakeService is ``@service``-decorated; auto-discovered.

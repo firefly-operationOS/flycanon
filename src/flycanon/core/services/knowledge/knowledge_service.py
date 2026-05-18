@@ -17,6 +17,9 @@ from collections.abc import Iterable
 from datetime import UTC, datetime
 from typing import Any
 
+from pyfly.container import service
+from pyfly.eda import EventPublisher
+
 from flycanon.config import CanonSettings
 from flycanon.core.services.audit import AuditService
 from flycanon.core.services.knowledge.errors import (
@@ -40,6 +43,7 @@ from flycanon.models.repositories.knowledge_repository import KnowledgeRepositor
 logger = logging.getLogger(__name__)
 
 
+@service
 class KnowledgeService:
     """Owns the canonical-item lifecycle.
 
@@ -47,14 +51,18 @@ class KnowledgeService:
     are avoided by ordering the writes (version first, citations
     next, item pointer last) so a failure mid-flow leaves the most
     recent published version still pointing at valid data.
+
+    Marked ``@service`` so pyfly's container auto-discovers it and
+    resolves its dependencies (including the
+    :class:`EventPublisher` registered by pyfly's
+    ``EdaAutoConfiguration``) at first lookup.
     """
 
     def __init__(
         self,
-        *,
         repository: KnowledgeRepository,
         audit: AuditService,
-        event_publisher: object | None,
+        event_publisher: EventPublisher,
         settings: CanonSettings,
     ) -> None:
         self._repository = repository

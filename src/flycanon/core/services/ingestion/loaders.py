@@ -21,6 +21,8 @@ from __future__ import annotations
 import io
 import logging
 import re
+
+from PIL import Image as _PILImage
 from dataclasses import dataclass, field
 from typing import Protocol
 
@@ -137,39 +139,200 @@ class DocxLoader:
 
 
 class PdfLoader:
-    """pypdf-backed loader for born-digital PDFs.
+    """PDF loader with the **flydocs strategy**: PyMuPDF text-layer
+    extraction + Tesseract OCR fallback for image-only pages.
 
-    Image-only PDFs produce empty text per page; the ingestion
-    pipeline either falls through to OCR (when the input arrives via
-    the binary normaliser's image branch) or raises
-    :class:`EmptySource` upstream.
+    PyMuPDF (``pymupdf``, aka ``fitz``) is the canonical PDF engine
+    used by flydocs's :class:`PyMuPDFWordExtractor` -- it returns the
+    full text stream per page in microseconds without rendering. For
+    born-digital PDFs that's all we need.
+
+    Pages whose extracted text is shorter than
+    :attr:`_MIN_CHARS_PER_PAGE` are treated as image-only. For those
+    we rasterise the page with PyMuPDF (matching flydocs's
+    :class:`TesseractOcrEngine` pattern) and pipe the PNG bytes into
+    Tesseract via ``pytesseract.image_to_string``. The OCR language
+    is the same composed string (``eng+spa`` by default,
+    overridable via ``FLYCANON_OCR_LANG``).
+
+    pypdf is intentionally NOT used here -- it is reserved for
+    :class:`PdfGuard`'s lightweight encryption / corruption pre-flight.
+    MarkItDown is also not on the PDF path.
     """
 
     kind = SourceKind.pdf
 
+    # Pages with fewer than this many extracted characters trigger
+    # the OCR render-and-recognise path.
+    _MIN_CHARS_PER_PAGE = 16
+    # Tesseract DPI for rendering -- 200 is a good speed/accuracy
+    # trade-off for typical scanned business documents.
+    _OCR_DPI = 200
+
     def load(self, content: bytes | str, *, filename: str | None = None) -> LoadedDocument:
         if isinstance(content, str):
             content = content.encode("utf-8")
+
         try:
-            reader = PdfReader(io.BytesIO(content))
+            import pymupdf
+        except ImportError as exc:  # pragma: no cover -- runtime dep guard
+            raise RuntimeError(
+                "pymupdf is required for PDF ingestion (replaces pypdf/MarkItDown)"
+            ) from exc
+
+        try:
+            doc = pymupdf.open(stream=content, filetype="pdf")
         except Exception as exc:
             raise CorruptSource("pdf", str(exc)) from exc
 
-        if reader.is_encrypted:
+        if doc.needs_pass:
+            doc.close()
             raise CorruptSource("pdf", "encrypted PDFs are not supported")
 
+        page_count = doc.page_count
+
+        # Phase 1: PyMuPDF text-layer extraction. ``get_text()`` with no
+        # mode returns the document's encoded text stream in reading
+        # order -- the same path flydocs's PyMuPDFWordExtractor walks
+        # for word-level bboxes.
+        text_per_page: list[str] = []
+        try:
+            for page_index in range(page_count):
+                try:
+                    text = (doc[page_index].get_text() or "").strip()
+                except Exception:
+                    text = ""
+                text_per_page.append(text)
+        finally:
+            doc.close()
+
+        # Phase 2: identify image-only pages and OCR them.
+        needs_ocr = [
+            idx for idx, t in enumerate(text_per_page) if len(t) < self._MIN_CHARS_PER_PAGE
+        ]
+        if needs_ocr:
+            ocr_results = self._ocr_pages(content, needs_ocr)
+            for page_idx, ocr_text in ocr_results.items():
+                if ocr_text.strip():
+                    text_per_page[page_idx] = ocr_text.strip()
+
         sections: list[Section] = []
-        for page_idx, page in enumerate(reader.pages, start=1):
-            try:
-                text = (page.extract_text() or "").strip()
-            except Exception:
-                text = ""
+        for page_idx, text in enumerate(text_per_page):
             if not text:
                 continue
             sections.append(
-                Section(path=[f"Page {page_idx}"], body=text, order=page_idx - 1, page=page_idx)
+                Section(
+                    path=[f"Page {page_idx + 1}"],
+                    body=text,
+                    order=page_idx,
+                    page=page_idx + 1,
+                )
             )
-        return LoadedDocument(sections=sections, page_count=len(reader.pages))
+        return LoadedDocument(sections=sections, page_count=page_count)
+
+    def _ocr_pages(self, pdf_bytes: bytes, page_indices: list[int]) -> dict[int, str]:
+        """Render ``page_indices`` and OCR them.
+
+        Mirrors flydocs's pattern. The OCR engine is selected via
+        ``FLYCANON_PDF_OCR_ENGINE`` (default ``tesseract``; set to
+        ``docling`` after installing the ``docling`` extra to get
+        layout-aware OCR with native multi-column / table handling).
+        Both engines rasterise via PyMuPDF at the configured DPI.
+        """
+        import os as _os
+
+        engine = _os.environ.get("FLYCANON_PDF_OCR_ENGINE", "tesseract").strip().lower()
+        if engine == "docling":
+            results = self._ocr_pages_docling(pdf_bytes, page_indices)
+            if results:
+                return results
+            logger.warning("docling OCR returned no pages; falling back to tesseract")
+        return self._ocr_pages_tesseract(pdf_bytes, page_indices)
+
+    def _ocr_pages_tesseract(
+        self, pdf_bytes: bytes, page_indices: list[int]
+    ) -> dict[int, str]:
+        try:
+            import os as _os
+            import pymupdf
+            import pytesseract
+        except ImportError as exc:
+            logger.warning("PDF OCR fallback unavailable: %s", exc)
+            return {}
+
+        lang = _os.environ.get("FLYCANON_OCR_LANG", "eng+spa")
+        results: dict[int, str] = {}
+        try:
+            doc = pymupdf.open(stream=pdf_bytes, filetype="pdf")
+        except Exception as exc:
+            logger.warning("PyMuPDF could not open PDF for OCR: %s", exc)
+            return {}
+
+        try:
+            for page_idx in page_indices:
+                try:
+                    page = doc[page_idx]
+                    pix = page.get_pixmap(dpi=self._OCR_DPI)
+                    png_bytes = pix.tobytes("png")
+                    ocr_text = pytesseract.image_to_string(
+                        _PILImage.open(io.BytesIO(png_bytes)),
+                        lang=lang,
+                    )
+                    results[page_idx] = ocr_text
+                except Exception as exc:
+                    logger.warning(
+                        "PDF OCR failed for page %d: %s", page_idx + 1, exc
+                    )
+                    results[page_idx] = ""
+        finally:
+            try:
+                doc.close()
+            except Exception:
+                pass
+        return results
+
+    def _ocr_pages_docling(
+        self, pdf_bytes: bytes, page_indices: list[int]
+    ) -> dict[int, str]:
+        """Layout-aware OCR via IBM Docling. Requires the ``docling``
+        extra: ``uv pip install flycanon[docling]``.
+        """
+        try:
+            from docling.datamodel.base_models import DocumentStream
+            from docling.document_converter import DocumentConverter
+        except ImportError as exc:
+            logger.warning(
+                "docling not installed; install the ``docling`` extra "
+                "to enable FLYCANON_PDF_OCR_ENGINE=docling (%s)",
+                exc,
+            )
+            return {}
+
+        try:
+            converter = DocumentConverter()
+            stream = DocumentStream(name="ingested.pdf", stream=io.BytesIO(pdf_bytes))
+            doc_result = converter.convert(stream)
+            text_per_page: dict[int, str] = {}
+            # Docling represents the document as a tree of items each
+            # carrying a page index. We project them down to per-page
+            # plain text in reading order.
+            for item in getattr(doc_result.document, "iterate_items", lambda: [])():
+                page = getattr(item, "prov", None)
+                page_idx = 0
+                if page and isinstance(page, list) and page:
+                    page_idx = max(0, int(getattr(page[0], "page_no", 1)) - 1)
+                text = getattr(item, "text", None) or ""
+                if text.strip():
+                    text_per_page.setdefault(page_idx, [])
+                    text_per_page[page_idx].append(text)
+            return {
+                idx: "\n".join(parts).strip()
+                for idx, parts in text_per_page.items()
+                if idx in page_indices
+            }
+        except Exception as exc:  # noqa: BLE001 -- fall back to tesseract
+            logger.warning("docling OCR failed: %s", exc)
+            return {}
 
 
 class HtmlLoader:
