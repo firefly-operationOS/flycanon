@@ -58,6 +58,12 @@ Pick the entry point that matches what you're trying to do:
 2. [**architecture.md** § Pluggable retrieval backends](architecture.md#pluggable-retrieval-backends) — adding a new `VectorStoreProtocol` adapter.
 3. [**pipeline.md**](pipeline.md) — the orchestrator and the stages it composes.
 
+### "I'm running this in production"
+
+1. [**deployment.md**](deployment.md) — reference topologies, env vars, OCR engines, Office conversion, embedding providers, auth, observability, sizing.
+2. [**cicd.md**](cicd.md) — the three GitHub Actions workflows (PR gate, Docker publish, SDK publish), release cookbook, required secrets.
+3. [**troubleshooting.md**](troubleshooting.md) — symptom → root cause → fix for the common failure modes (embeddings, OCR, pgvector dim mismatch, EDA, SDK install, performance).
+
 ---
 
 ## Document catalogue
@@ -70,6 +76,9 @@ Pick the entry point that matches what you're trying to do:
 | [api-reference.md](api-reference.md)              | You're integrating with the HTTP API and need every endpoint, shape, and status code.                                          |
 | [payload-reference.md](payload-reference.md)      | You're composing the request payload — every field, option, and example.                                                       |
 | [eda-events.md](eda-events.md)                    | You're subscribing to the `flycanon.ingest` / `flycanon.knowledge` / `flycanon.audit` topics.                                  |
+| [deployment.md](deployment.md)                    | You're running this in production -- env vars, topologies, OCR engines, embedding providers, auth, observability, sizing.       |
+| [cicd.md](cicd.md)                                | You're cutting a release or wiring CI/CD -- PR gate, Docker publish, SDK publish, secrets.                                      |
+| [troubleshooting.md](troubleshooting.md)          | The service / ingest / search / answer surface is misbehaving -- symptom → root cause → fix.                                    |
 | [glossary.md](glossary.md)                        | You need a precise definition for a term the API or docs use.                                                                  |
 | [../sdks/python/README.md](../sdks/python/README.md) | You're integrating from Python (async-first SDK, Pydantic typing).                                                          |
 | [../sdks/java/README.md](../sdks/java/README.md)  | You're integrating from Java / Spring Boot (`com.firefly`, Java 25, `@AutoConfiguration`).                                     |

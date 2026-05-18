@@ -26,7 +26,8 @@
                           |       |  batch embed          |
                           |       +-----------------------+
                           |       +- IndexService        -+
-                          |       |  SQLite FTS5 (BM25) + |
+                          |       |  BM25 (Postgres tsv + |
+                          |       |  GIN, default) +      |
                           |       |  vector store         |
                           |       |  (pgvector default)   |
                           |       +-----------------------+
@@ -46,6 +47,29 @@ through the matrix documented in
 (Office to Markdown, archives expanded, images OCR'd, emails
 decomposed). Multi-artefact intakes are merged with `## Artifact:`
 section markers so each chunk remains attributable.
+
+### PDF ingestion -- two kinds, one pipeline
+
+PDF is treated as a first-class format and supports **both** flavours
+without any caller flag:
+
+| PDF kind | What it is | How flycanon reads it |
+|----------|------------|------------------------|
+| **Full Digital Text PDF** | Born-digital -- Word / LibreOffice / LaTeX exports, browser "Save as PDF", reporting-pipeline output. Text is encoded as glyphs in the page stream. | Phase 1: PyMuPDF (`pymupdf`/`fitz`) `get_text()` returns the encoded text stream per page in microseconds without rendering. |
+| **PDF-Image (scanned)** | Pages are raster images of the original -- scanned contracts, fax output, photos of receipts, mobile-camera captures. No encoded text on the page. | Phase 2: pages whose extracted text is shorter than `_MIN_CHARS_PER_PAGE` (16 chars) are rasterised by PyMuPDF at `_OCR_DPI` (200 DPI) and OCR'd via Tesseract (`pytesseract.image_to_string`). |
+| **Hybrid PDF** | Some pages digital, some scanned (common for signed contracts: typed body + scanned signature page). | Phase 1 runs on every page; Phase 2 only fires for the pages flagged as image-only. The two phases compose page-by-page. |
+
+The OCR engine is selectable: `FLYCANON_PDF_OCR_ENGINE=tesseract`
+(default) or `FLYCANON_PDF_OCR_ENGINE=docling` after installing the
+`docling` extra for layout-aware OCR with native multi-column /
+table handling. OCR languages default to `eng+spa` and are
+overridable via `FLYCANON_OCR_LANG`.
+
+Encrypted PDFs are rejected up-front by `PdfGuard` (lightweight
+`pypdf` pre-flight) with `error_code=encrypted_pdf`. Corrupt PDFs
+fail fast with `error_code=corrupt_source`. MarkItDown is **not** on
+the PDF path -- it is reserved as the last-resort fallback for
+exotic formats only.
 
 ```
 POST /api/v1/candidates:propose
@@ -72,7 +96,9 @@ POST /api/v1/search    (raw hybrid retrieval)
   → SearchKnowledgeHandler → SearchService.search
       → RetrievalService.search
           → HybridRetriever (agentic):
-                BM25 over SQLite FTS5 + dense over the pluggable
+                BM25 over Postgres tsvector + GIN on canon_chunks
+                (default; SQLite FTS5 only for the file-backed
+                ``sqlite-vec`` backend) + dense over the pluggable
                 VectorStoreProtocol (pgvector / chroma / qdrant /
                 pinecone / sqlite-vec / memory),
                 fused via Reciprocal Rank Fusion (k = FLYCANON_RETRIEVAL_RRF_K)
