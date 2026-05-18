@@ -267,3 +267,190 @@ caller a direct human-readable label, and ``section_path`` / ``page``
 locate the exact span the answer drew from. Grounded "I don't know"
 responses look like ``{"answer": "", "citations": []}`` with
 ``no_answer: true``.
+
+## Knowledge graph
+
+### `GET /api/v1/knowledge/{id}/relations`
+
+```json
+{
+  "outgoing": [
+    { "id": "rel-...", "from_item_id": "...", "to_item_id": "...", "kind": "depends_on", "note": null, "created_at": "2026-05-18T12:00:00Z" }
+  ],
+  "incoming": []
+}
+```
+
+### `POST /api/v1/knowledge/{id}/relations`
+
+```json
+{ "to_item_id": "...", "kind": "depends_on", "note": "..." }
+```
+
+`kind` is one of `related` / `depends_on` / `conflicts_with` /
+`replaces`. The (from, to, kind) tuple is unique -- duplicates return
+`409 relation_already_exists`.
+
+### `GET /api/v1/knowledge:graph`
+
+JSON view (default):
+
+```json
+{
+  "nodes": [
+    { "id": "ki-...", "label": "Data retention", "domain": "compliance", "kind": "knowledge_item" }
+  ],
+  "edges": [
+    { "from": "ki-1", "to": "ki-2", "kind": "conflicts_with" }
+  ]
+}
+```
+
+Mermaid view (`Accept: text/vnd.mermaid`):
+
+```
+graph LR
+    ki1["Data retention"] -->|conflicts_with| ki2["Data retention -- security"]
+```
+
+Query: `domain`, `kind`, `include_sources=true|false`.
+
+### `GET /api/v1/knowledge/{id}/diff`
+
+```json
+{
+  "from_version": 1,
+  "to_version": 2,
+  "unified_diff": "@@ -1,3 +1,3 @@\n- old line\n+ new line\n ...",
+  "field_changes": [
+    { "field": "title", "from": "Data retention", "to": "Data retention v2" }
+  ],
+  "added_citations": ["src-..."],
+  "removed_citations": []
+}
+```
+
+## Conversations
+
+### `POST /api/v1/conversations/{id}/turns`
+
+```json
+{ "query": "What about the finance domain?", "max_chunks": 8 }
+```
+
+```json
+{
+  "turn_id": "trn-...",
+  "answer": "...",
+  "citations": [ /* same Hit shape as /query */ ],
+  "model": "anthropic:claude-sonnet-4-6"
+}
+```
+
+### `POST /api/v1/conversations/{id}/suggest`
+
+```json
+{ "questions": ["What changed in v2?", "Who approved this?", "..."] }
+```
+
+## Async ingest jobs
+
+### `POST /api/v1/sources:async`
+
+Same body as `POST /api/v1/sources`. Response:
+
+```json
+{ "job_id": "job-...", "status": "queued" }
+```
+
+### `GET /api/v1/jobs/{id}`
+
+```json
+{
+  "id": "job-...",
+  "status": "running",
+  "progress": 0.42,
+  "stage": "embedding",
+  "source_id": null,
+  "error_code": null,
+  "error_message": null,
+  "created_at": "2026-05-18T12:00:00Z",
+  "updated_at": "2026-05-18T12:00:18Z"
+}
+```
+
+### `GET /api/v1/jobs/{id}/stream`
+
+Server-Sent Events. See [async-ingest.md](async-ingest.md) for the
+frame format. Reconnect with `?cursor=N` to resume.
+
+## Quality scans
+
+### `GET /api/v1/knowledge:stale` -- `StaleReport`
+
+```json
+{
+  "items": [
+    { "knowledge_item_id": "...", "title": "...", "domain": "...", "score": 0.42, "max_similarity": 0.58, "sample_size": 12, "computed_at": "2026-05-18T12:00:00Z" }
+  ],
+  "total": 1
+}
+```
+
+### `POST /api/v1/knowledge:detect-conflicts` -- `ConflictScanResponse`
+
+```json
+{ "domain": "compliance", "min_similarity": 0.85, "max_items": 50, "actor": "u-1" }
+```
+
+```json
+{
+  "pairs_evaluated": 36,
+  "conflicts_found": 4,
+  "candidate_ids": ["cand-...", "..."],
+  "relation_ids":  ["rel-...",  "..."]
+}
+```
+
+## Billing
+
+### `GET /api/v1/billing`
+
+Query: `group_by` (csv), `actor`, `since`, `until`.
+
+```json
+{
+  "rows": [
+    {
+      "group": { "date": "2026-05-18", "model": "anthropic:claude-sonnet-4-6" },
+      "input_tokens": 12345,
+      "output_tokens": 6789,
+      "total_tokens": 19134,
+      "cost_usd": "0.04231",
+      "calls": 12
+    }
+  ],
+  "total_cost_usd": "0.04231",
+  "total_calls": 12
+}
+```
+
+## PII
+
+When `FLYCANON_PII_POLICY=reject`, the intake controller returns:
+
+```json
+{
+  "type": "about:blank",
+  "title": "PII detected",
+  "status": 422,
+  "code": "pii_violation",
+  "detail": "ingest rejected: 2 personal-data finding(s) (kinds: email, ssn)",
+  "findings": [
+    { "kind": "email", "start": 1234, "end": 1257 },
+    { "kind": "ssn",   "start": 4500, "end": 4511 }
+  ]
+}
+```
+
+See [pii.md](pii.md) for the full policy matrix.

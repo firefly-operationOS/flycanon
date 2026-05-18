@@ -18,7 +18,9 @@ backed by the durable Postgres outbox by default
 | Event type | Payload |
 |------------|---------|
 | `SourceIngested`         | `source_id`, `kind`, `content_sha256`, `n_chunks` |
+| `SourceReplaced`         | `source_id`, `kind`, `content_sha256`, `n_chunks` (emitted by `PUT /api/v1/sources/{id}`) |
 | `SourceIngestionFailed`  | `source_id`, `kind`, `code`, `message` |
+| `IngestRequested`        | `job_id`, `payload` (consumed by the async-ingest worker -- see [async-ingest.md](async-ingest.md)) |
 
 ## flycanon.knowledge
 
@@ -28,6 +30,8 @@ backed by the durable Postgres outbox by default
 | `KnowledgeItemDrafted`    | `item_id`, `version`, `status` |
 | `KnowledgeItemSuperseded` | `item_id`, `version`, `superseded_by_item_id` |
 | `KnowledgeItemRetired`    | `item_id`, `version`, `reason` |
+| `KnowledgeRelationAdded`  | `relation_id`, `from_item_id`, `to_item_id`, `kind` |
+| `KnowledgeRelationRemoved`| `relation_id`, `from_item_id`, `to_item_id`, `kind` |
 | `CandidateProposed`       | `candidate_id`, `source_id`, `domain`, `score` |
 | `CandidateAccepted`       | `candidate_id`, `materialised_knowledge_item_id`, `materialised_version` |
 | `CandidateRejected`       | `candidate_id`, `reason` |
