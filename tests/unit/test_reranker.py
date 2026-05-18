@@ -25,9 +25,7 @@ class TestBuilder:
         assert isinstance(build_reranker(""), NoOpReranker)
 
     def test_cohere_model_returns_cohere_adapter(self):
-        assert isinstance(
-            build_reranker("cohere:rerank-multilingual-v3.0"), CohereReranker
-        )
+        assert isinstance(build_reranker("cohere:rerank-multilingual-v3.0"), CohereReranker)
 
     def test_voyage_model_returns_voyage_adapter(self):
         assert isinstance(build_reranker("voyageai:rerank-2"), VoyageReranker)
@@ -49,9 +47,7 @@ class TestCohereAdapter:
     async def test_missing_api_key_short_circuits(self, monkeypatch):
         monkeypatch.delenv("COHERE_API_KEY", raising=False)
         hits = [_Hit("a"), _Hit("b")]
-        out = await CohereReranker("cohere:rerank-v3").rerank(
-            query="q", hits=hits, top_n=2
-        )
+        out = await CohereReranker("cohere:rerank-v3").rerank(query="q", hits=hits, top_n=2)
         assert out == hits
 
     @pytest.mark.asyncio
@@ -72,24 +68,18 @@ class TestCohereAdapter:
             )
         )
         hits = [_Hit("a"), _Hit("b"), _Hit("c")]
-        out = await CohereReranker("cohere:rerank-v3").rerank(
-            query="q", hits=hits, top_n=3
-        )
+        out = await CohereReranker("cohere:rerank-v3").rerank(query="q", hits=hits, top_n=3)
         assert [h.content for h in out] == ["c", "a", "b"]
 
     @pytest.mark.asyncio
     @respx.mock(assert_all_called=False)
-    async def test_provider_error_falls_back_to_input(
-        self, respx_mock, monkeypatch
-    ):
+    async def test_provider_error_falls_back_to_input(self, respx_mock, monkeypatch):
         monkeypatch.setenv("COHERE_API_KEY", "sk-test")
         respx_mock.post("https://api.cohere.com/v2/rerank").mock(
             return_value=httpx.Response(500, text="boom")
         )
         hits = [_Hit("a"), _Hit("b")]
-        out = await CohereReranker("cohere:rerank-v3").rerank(
-            query="q", hits=hits, top_n=2
-        )
+        out = await CohereReranker("cohere:rerank-v3").rerank(query="q", hits=hits, top_n=2)
         assert out == hits
 
 
@@ -110,7 +100,5 @@ class TestVoyageAdapter:
             )
         )
         hits = [_Hit("a"), _Hit("b")]
-        out = await VoyageReranker("voyageai:rerank-2").rerank(
-            query="q", hits=hits, top_n=2
-        )
+        out = await VoyageReranker("voyageai:rerank-2").rerank(query="q", hits=hits, top_n=2)
         assert [h.content for h in out] == ["b", "a"]

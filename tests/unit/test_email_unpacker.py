@@ -55,9 +55,7 @@ class TestSupports:
 
 class TestEmlParsing:
     def test_body_lands_as_markdown_with_headers(self, unpacker: EmailUnpacker):
-        members = list(
-            unpacker.unpack(_build_eml(), media_type="message/rfc822", filename="thread.eml")
-        )
+        members = list(unpacker.unpack(_build_eml(), media_type="message/rfc822", filename="thread.eml"))
         # First yielded entry is always the body markdown.
         body_name, body_bytes = members[0]
         assert body_name.endswith("-body.md")

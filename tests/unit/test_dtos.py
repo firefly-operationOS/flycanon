@@ -53,7 +53,5 @@ def test_answer_request_accepts_status_filter_enum():
 
 
 def test_create_knowledge_request_defaults_jurisdiction_to_global():
-    req = CreateKnowledgeRequest(
-        title="x", body="y", domain=Domain.process
-    )
+    req = CreateKnowledgeRequest(title="x", body="y", domain=Domain.process)
     assert req.jurisdiction == Jurisdiction.GLOBAL

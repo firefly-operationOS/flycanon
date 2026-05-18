@@ -36,8 +36,7 @@ class Reranker(Protocol):
         query: str,
         hits: list[Any],
         top_n: int,
-    ) -> list[Any]:
-        ...
+    ) -> list[Any]: ...
 
 
 class NoOpReranker:
@@ -106,9 +105,7 @@ class VoyageReranker:
         self._model = model.split(":", 1)[1] if ":" in model else model
 
     async def rerank(self, *, query: str, hits: list[Any], top_n: int) -> list[Any]:
-        api_key = os.environ.get("VOYAGEAI_API_KEY") or os.environ.get(
-            "VOYAGE_API_KEY"
-        )
+        api_key = os.environ.get("VOYAGEAI_API_KEY") or os.environ.get("VOYAGE_API_KEY")
         if not api_key:
             logger.debug("VOYAGEAI_API_KEY not set -- skipping rerank")
             return hits

@@ -23,8 +23,6 @@ class CandidateAlreadyDecided(ConsolidationError):
     http_status = 409
 
     def __init__(self, candidate_id: str, status: str) -> None:
-        super().__init__(
-            f"candidate {candidate_id!r} is already {status!r}; cannot re-decide"
-        )
+        super().__init__(f"candidate {candidate_id!r} is already {status!r}; cannot re-decide")
         self.candidate_id = candidate_id
         self.status = status

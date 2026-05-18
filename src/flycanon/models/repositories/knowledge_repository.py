@@ -186,7 +186,7 @@ class KnowledgeRepository:
     async def lookup_published_citations_for_chunks(
         self,
         chunk_ids: Sequence[str],
-    ) -> dict[str, "KnowledgeLink"]:
+    ) -> dict[str, KnowledgeLink]:
         """Resolve the chunk -> knowledge linkage for the retrieval hit hydration.
 
         Returns a mapping ``chunk_id -> KnowledgeLink`` for chunks

@@ -19,7 +19,6 @@ from flycanon.config import CanonSettings
 from flycanon.core.services.audit import AuditService
 from flycanon.core.services.knowledge.errors import KnowledgeItemNotFound
 from flycanon.interfaces.dtos.relation import CreateRelationRequest
-from flycanon.interfaces.enums import RelationKind
 from flycanon.models.entities.knowledge_relation import KnowledgeRelationRow
 from flycanon.models.repositories.knowledge_repository import KnowledgeRepository
 from flycanon.models.repositories.relation_repository import RelationRepository
@@ -34,9 +33,7 @@ class RelationConflictError(Exception):
     http_status = 409
 
     def __init__(self, from_item_id: str, to_item_id: str, kind: str) -> None:
-        super().__init__(
-            f"relation already exists: {from_item_id} -[{kind}]-> {to_item_id}"
-        )
+        super().__init__(f"relation already exists: {from_item_id} -[{kind}]-> {to_item_id}")
 
 
 class InvalidRelationError(Exception):
@@ -88,9 +85,7 @@ class KnowledgeRelationService:
             raise KnowledgeItemNotFound(from_item_id)
         to_item = await self._knowledge.get_item(request.to_item_id)
         if to_item is None:
-            raise InvalidRelationError(
-                f"to_item_id {request.to_item_id!r} does not exist"
-            )
+            raise InvalidRelationError(f"to_item_id {request.to_item_id!r} does not exist")
 
         row = KnowledgeRelationRow(
             from_item_id=from_item_id,
@@ -107,9 +102,7 @@ class KnowledgeRelationService:
             # generic SQLAlchemy IntegrityError covers it on every
             # dialect we ship against (Postgres + SQLite).
             if "unique" in str(exc).lower() or "UNIQUE" in str(exc):
-                raise RelationConflictError(
-                    from_item_id, request.to_item_id, request.kind.value
-                ) from exc
+                raise RelationConflictError(from_item_id, request.to_item_id, request.kind.value) from exc
             raise
 
         await self._audit.record(
@@ -196,6 +189,4 @@ class KnowledgeRelationService:
                 payload=payload,
             )
         except Exception as exc:
-            logger.warning(
-                "knowledge.relation publish failed event=%s: %s", event_type, exc
-            )
+            logger.warning("knowledge.relation publish failed event=%s: %s", event_type, exc)

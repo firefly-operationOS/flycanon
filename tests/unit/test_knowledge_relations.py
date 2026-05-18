@@ -104,14 +104,10 @@ class TestAddRelation:
             )
 
     @pytest.mark.asyncio
-    async def test_duplicate_kind_pair_rejected(
-        self, repositories, relation_service
-    ):
+    async def test_duplicate_kind_pair_rejected(self, repositories, relation_service):
         await _seed_item(repositories["knowledge"], "a")
         await _seed_item(repositories["knowledge"], "b")
-        await relation_service.add(
-            "a", CreateRelationRequest(to_item_id="b", kind=RelationKind.related)
-        )
+        await relation_service.add("a", CreateRelationRequest(to_item_id="b", kind=RelationKind.related))
         with pytest.raises(RelationConflictError):
             await relation_service.add(
                 "a",
@@ -119,19 +115,13 @@ class TestAddRelation:
             )
 
     @pytest.mark.asyncio
-    async def test_different_kind_same_pair_allowed(
-        self, repositories, relation_service
-    ):
+    async def test_different_kind_same_pair_allowed(self, repositories, relation_service):
         # ``a -[related]-> b`` and ``a -[depends_on]-> b`` co-exist
         # (different semantics; ((from, to, kind)) uniqueness only).
         await _seed_item(repositories["knowledge"], "a")
         await _seed_item(repositories["knowledge"], "b")
-        await relation_service.add(
-            "a", CreateRelationRequest(to_item_id="b", kind=RelationKind.related)
-        )
-        await relation_service.add(
-            "a", CreateRelationRequest(to_item_id="b", kind=RelationKind.depends_on)
-        )
+        await relation_service.add("a", CreateRelationRequest(to_item_id="b", kind=RelationKind.related))
+        await relation_service.add("a", CreateRelationRequest(to_item_id="b", kind=RelationKind.depends_on))
         out, _ = await relation_service.list_for_item("a")
         kinds = {row.kind for row in out}
         assert kinds == {"related", "depends_on"}
@@ -139,18 +129,12 @@ class TestAddRelation:
 
 class TestListForItem:
     @pytest.mark.asyncio
-    async def test_outgoing_and_incoming_split(
-        self, repositories, relation_service
-    ):
+    async def test_outgoing_and_incoming_split(self, repositories, relation_service):
         await _seed_item(repositories["knowledge"], "a")
         await _seed_item(repositories["knowledge"], "b")
         await _seed_item(repositories["knowledge"], "c")
-        await relation_service.add(
-            "a", CreateRelationRequest(to_item_id="b", kind=RelationKind.related)
-        )
-        await relation_service.add(
-            "c", CreateRelationRequest(to_item_id="a", kind=RelationKind.depends_on)
-        )
+        await relation_service.add("a", CreateRelationRequest(to_item_id="b", kind=RelationKind.related))
+        await relation_service.add("c", CreateRelationRequest(to_item_id="a", kind=RelationKind.depends_on))
         out, inc = await relation_service.list_for_item("a")
         assert [r.to_item_id for r in out] == ["b"]
         assert [r.from_item_id for r in inc] == ["c"]

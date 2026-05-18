@@ -68,6 +68,4 @@ class KnowledgeChunkRow(Base):
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
 
-    __table_args__ = (
-        Index("ix_canon_chunks_source_idx", "source_id", "index_in_source"),
-    )
+    __table_args__ = (Index("ix_canon_chunks_source_idx", "source_id", "index_in_source"),)

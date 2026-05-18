@@ -59,7 +59,22 @@ class AnswerService:
         self._fallback_model = fallback_model
         self._settings = settings
 
-    async def answer(self, request: AnswerRequest) -> AnswerResponse:
+    async def answer(
+        self,
+        request: AnswerRequest,
+        *,
+        prior_turns: list[tuple[str, str]] | None = None,
+    ) -> AnswerResponse:
+        """Single-turn (or conversational) RAG answer.
+
+        ``prior_turns`` is an optional ``[(user_text, assistant_text), ...]``
+        list. When set, the entries are translated into pydantic-ai
+        ``ModelRequest`` / ``ModelResponse`` messages and forwarded to
+        the agent as ``message_history`` -- the conversational-context
+        path used by :class:`ConversationService`. Single-shot callers
+        (``POST /api/v1/query``) leave it empty and the agent runs the
+        same way as before.
+        """
         start = time.perf_counter()
         result = await self._retrieval.search(
             query=request.question,
@@ -71,10 +86,7 @@ class AnswerService:
         if not result.hits:
             elapsed_ms = int((time.perf_counter() - start) * 1000)
             return AnswerResponse(
-                answer=(
-                    "There are no documents in the canon that support an "
-                    "answer to that question."
-                ),
+                answer=("There are no documents in the canon that support an answer to that question."),
                 citations=[],
                 model=request.model or self._default_model,
                 elapsed_ms=elapsed_ms,
@@ -99,13 +111,14 @@ class AnswerService:
             ],
         )
 
+        history = _build_message_history(prior_turns)
         model_id = request.model or self._default_model
         try:
-            output = await self._call_model(system_text, user_text, model_id)
+            output = await self._call_model(system_text, user_text, model_id, history)
         except Exception as exc:
             if self._fallback_model and self._fallback_model != model_id:
                 logger.warning("answer model %s failed (%s); trying fallback", model_id, exc)
-                output = await self._call_model(system_text, user_text, self._fallback_model)
+                output = await self._call_model(system_text, user_text, self._fallback_model, history)
                 model_id = self._fallback_model
             else:
                 raise
@@ -142,7 +155,13 @@ class AnswerService:
             no_answer=bool(output.no_answer),
         )
 
-    async def _call_model(self, system_text: str, user_text: str, model_id: str) -> AnswerOutput:
+    async def _call_model(
+        self,
+        system_text: str,
+        user_text: str,
+        model_id: str,
+        message_history: list[Any] | None = None,
+    ) -> AnswerOutput:
         # The answer stage emits a single grounded response + citation
         # list -- usually shorter than the consolidator's structured
         # output -- but bumping max_tokens past the 4096 provider
@@ -157,7 +176,15 @@ class AnswerService:
             settings=self._settings,
             max_output_tokens=self._settings.answer_max_output_tokens,
         )
-        result = await agent.run(user_text)
+        run_kwargs: dict[str, Any] = {}
+        if message_history:
+            # pydantic-ai's native ``message_history`` slot. FireflyAgent
+            # forwards arbitrary kwargs to the underlying
+            # ``pydantic_ai.Agent.run`` so the conversational context
+            # lands on the model as alternating user / assistant turns
+            # rather than being flattened into the system prompt.
+            run_kwargs["message_history"] = message_history
+        result = await agent.run(user_text, **run_kwargs)
         output: Any = getattr(result, "output", result)
         if isinstance(output, AnswerOutput):
             return output
@@ -166,6 +193,35 @@ class AnswerService:
         if isinstance(output, str):
             return AnswerOutput.model_validate_json(output)
         raise RuntimeError(f"unexpected answer output type {type(output).__name__}")
+
+
+def _build_message_history(
+    prior_turns: list[tuple[str, str]] | None,
+) -> list[Any] | None:
+    """Translate ``[(user, assistant), ...]`` into pydantic-ai messages.
+
+    Returns ``None`` (rather than an empty list) when the caller didn't
+    supply any prior turns -- ``None`` skips the message_history slot
+    entirely on the agent run.
+    """
+    if not prior_turns:
+        return None
+    try:
+        from pydantic_ai.messages import (
+            ModelRequest,
+            ModelResponse,
+            TextPart,
+            UserPromptPart,
+        )
+    except ImportError:  # pragma: no cover -- pydantic-ai always present in prod
+        return None
+    history: list[Any] = []
+    for user_text, assistant_text in prior_turns:
+        if not user_text and not assistant_text:
+            continue
+        history.append(ModelRequest(parts=[UserPromptPart(content=user_text or "")]))
+        history.append(ModelResponse(parts=[TextPart(content=assistant_text or "")]))
+    return history or None
 
 
 def _to_search_request(request: AnswerRequest):

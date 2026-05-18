@@ -162,7 +162,10 @@ class Hit(BaseModel):
     page: int | None = Field(
         default=None,
         ge=1,
-        description="1-based page number when the chunk's source has paginated layout (PDF, PPTX). ``null`` otherwise.",
+        description=(
+            "1-based page number when the chunk's source has paginated "
+            "layout (PDF, PPTX). ``null`` otherwise."
+        ),
         examples=[2],
     )
     knowledge_item_id: str | None = Field(
@@ -291,9 +294,7 @@ class AnswerResponse(BaseModel):
             "render the citation badge without a follow-up call."
         )
     )
-    model: str = Field(
-        description="Provider:model identifier actually used (after fallback)."
-    )
+    model: str = Field(description="Provider:model identifier actually used (after fallback).")
     elapsed_ms: int = Field(ge=0)
     no_answer: bool = Field(
         default=False,

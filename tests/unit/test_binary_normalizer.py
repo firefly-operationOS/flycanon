@@ -34,7 +34,6 @@ from flycanon.core.services.binary.errors import (
 from flycanon.core.services.binary.normalizer import BinaryNormalizer
 from flycanon.interfaces.enums import SourceKind
 
-
 # ---------------------------------------------------------------------------
 # Stubs
 # ---------------------------------------------------------------------------
@@ -214,9 +213,7 @@ class TestArchives:
 
     async def test_recursion_depth_cap_raises(self):
         # Use a self-referencing archive to blow past depth=1.
-        archive = StubArchiveUnpacker(
-            members=[("inner.zip", b"PK\x03\x04" + b"\x00" * 30)]
-        )
+        archive = StubArchiveUnpacker(members=[("inner.zip", b"PK\x03\x04" + b"\x00" * 30)])
         norm = _normaliser(
             settings=_settings(binary_max_recursion_depth=1),
             archive=archive,

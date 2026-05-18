@@ -73,9 +73,7 @@ class KnowledgeQualityController:
         ``score = 1 - max(cosine(version_body, recent_source))``.
         High = the canon disagrees with fresh sources.
         """
-        items, _total = await self._knowledge.list_items(
-            statuses=["published"], limit=200
-        )
+        items, _total = await self._knowledge.list_items(statuses=["published"], limit=200)
         rows: list[StaleItem] = []
         for item in items:
             stale = await self._stale.score(item)

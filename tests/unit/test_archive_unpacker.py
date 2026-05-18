@@ -84,9 +84,7 @@ class TestZip:
         members = list(unpacker.unpack(data, media_type="application/zip"))
         assert dict(members) == {"a.txt": b"A", "nested/b.txt": b"B"}
 
-    def test_encrypted_entries_raise_archive_extraction_error(
-        self, unpacker: ArchiveUnpacker
-    ):
+    def test_encrypted_entries_raise_archive_extraction_error(self, unpacker: ArchiveUnpacker):
         data = _zip_bytes({"secret.txt": b"hidden"}, encrypted=True)
         with pytest.raises(ArchiveExtractionError) as excinfo:
             list(unpacker.unpack(data, media_type="application/zip", filename="x.zip"))
@@ -127,17 +125,13 @@ class TestGzip:
     def test_single_member_decompresses(self, unpacker: ArchiveUnpacker):
         raw = b"a happy little payload"
         data = gzip.compress(raw)
-        members = list(
-            unpacker.unpack(data, media_type="application/gzip", filename="payload.txt.gz")
-        )
+        members = list(unpacker.unpack(data, media_type="application/gzip", filename="payload.txt.gz"))
         assert members == [("payload.txt", raw)]
 
     def test_strips_tgz_suffix_for_inner_name(self, unpacker: ArchiveUnpacker):
         raw = b"x"
         data = gzip.compress(raw)
-        members = list(
-            unpacker.unpack(data, media_type="application/gzip", filename="bundle.tgz")
-        )
+        members = list(unpacker.unpack(data, media_type="application/gzip", filename="bundle.tgz"))
         assert members[0][0] == "bundle"
 
     def test_corrupt_gzip_raises(self, unpacker: ArchiveUnpacker):

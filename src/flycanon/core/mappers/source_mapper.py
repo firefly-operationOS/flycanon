@@ -17,9 +17,7 @@ def _coerce_metadata(raw: dict | None) -> SourceMetadata:
         author=data.get("author"),
         domain=Domain(domain) if domain in Domain._value2member_map_ else None,
         jurisdiction=(
-            Jurisdiction(jurisdiction)
-            if jurisdiction in Jurisdiction._value2member_map_
-            else None
+            Jurisdiction(jurisdiction) if jurisdiction in Jurisdiction._value2member_map_ else None
         ),
         language=data.get("language"),
         tags=list(data.get("tags") or []),

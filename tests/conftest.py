@@ -8,8 +8,6 @@ No external services required.
 
 from __future__ import annotations
 
-import asyncio
-from collections.abc import AsyncIterator
 from pathlib import Path
 
 import pytest

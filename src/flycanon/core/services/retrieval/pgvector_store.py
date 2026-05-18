@@ -59,8 +59,7 @@ class PgVectorVectorStore:
             import pgvector  # noqa: F401  -- import to surface missing-extra failures
         except ImportError as exc:
             raise RuntimeError(
-                "pgvector backend requires the ``pgvector`` extra "
-                "(``uv sync --extra pgvector``)."
+                "pgvector backend requires the ``pgvector`` extra (``uv sync --extra pgvector``)."
             ) from exc
 
         self._url = _to_async_url(database_url)
@@ -109,9 +108,7 @@ class PgVectorVectorStore:
                 )
             )
             await conn.execute(
-                text(
-                    f"CREATE INDEX IF NOT EXISTS {self._table}_namespace ON {self._table} (namespace)"
-                )
+                text(f"CREATE INDEX IF NOT EXISTS {self._table}_namespace ON {self._table} (namespace)")
             )
 
     # ------------------------------------------------------------------
@@ -127,12 +124,11 @@ class PgVectorVectorStore:
         rows = [_doc_to_row(doc, namespace) for doc in documents]
         if not rows:
             return
-        async with factory() as session:
-            async with session.begin():
-                # Bulk upsert via INSERT ... ON CONFLICT (id) DO UPDATE.
-                await session.execute(
-                    text(
-                        f"""
+        async with factory() as session, session.begin():
+            # Bulk upsert via INSERT ... ON CONFLICT (id) DO UPDATE.
+            await session.execute(
+                text(
+                    f"""
                         INSERT INTO {self._table} (id, namespace, embedding, metadata, text)
                         VALUES (:id, :namespace, :embedding, CAST(:metadata AS jsonb), :text)
                         ON CONFLICT (id) DO UPDATE
@@ -141,9 +137,9 @@ class PgVectorVectorStore:
                             metadata  = EXCLUDED.metadata,
                             text      = EXCLUDED.text
                         """
-                    ),
-                    rows,
-                )
+                ),
+                rows,
+            )
 
     async def search(
         self,
@@ -196,22 +192,18 @@ class PgVectorVectorStore:
         filters: list[Any] | None = None,
     ) -> list[Any]:
         raise NotImplementedError(
-            "pgvector adapter requires a precomputed embedding; "
-            "use search(query_embedding=...) instead."
+            "pgvector adapter requires a precomputed embedding; use search(query_embedding=...) instead."
         )
 
     async def delete(self, ids: list[str], namespace: str = "default") -> None:
         if not ids:
             return
         factory = await self._ensure_engine()
-        async with factory() as session:
-            async with session.begin():
-                await session.execute(
-                    text(
-                        f"DELETE FROM {self._table} WHERE namespace = :namespace AND id = ANY(:ids)"
-                    ),
-                    {"namespace": namespace, "ids": list(ids)},
-                )
+        async with factory() as session, session.begin():
+            await session.execute(
+                text(f"DELETE FROM {self._table} WHERE namespace = :namespace AND id = ANY(:ids)"),
+                {"namespace": namespace, "ids": list(ids)},
+            )
 
     async def close(self) -> None:
         if self._engine is not None:
@@ -225,9 +217,7 @@ def _doc_to_row(doc: Any, namespace: str) -> dict[str, Any]:
 
     embedding = list(doc.embedding or [])
     if not embedding:
-        raise ValueError(
-            f"VectorDocument {doc.id!r} has no embedding; pgvector requires one"
-        )
+        raise ValueError(f"VectorDocument {doc.id!r} has no embedding; pgvector requires one")
     return {
         "id": str(doc.id),
         "namespace": getattr(doc, "namespace", None) or namespace,

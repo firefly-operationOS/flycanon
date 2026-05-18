@@ -124,9 +124,7 @@ def _scalar_field_changes(
     return changes
 
 
-def _citation_set_diff(
-    before, after
-) -> tuple[list[Citation], list[Citation]]:
+def _citation_set_diff(before, after) -> tuple[list[Citation], list[Citation]]:
     """Compare two citation lists as sets keyed by (source_id, chunk_id).
 
     Citation order does not carry canonical meaning -- two versions

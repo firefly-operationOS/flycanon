@@ -56,9 +56,7 @@ class SourceRepository:
         if not ids:
             return []
         async with self._session_factory() as session:
-            result = await session.execute(
-                select(SourceRow).where(SourceRow.id.in_(ids))
-            )
+            result = await session.execute(select(SourceRow).where(SourceRow.id.in_(ids)))
             return list(result.scalars().all())
 
     async def get_by_content_sha256(self, content_sha256: str) -> SourceRow | None:

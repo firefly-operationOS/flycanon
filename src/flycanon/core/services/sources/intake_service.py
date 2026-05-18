@@ -102,9 +102,7 @@ class IntakeService:
             policy = PiiPolicy.warn
         self._pii_policy = policy
         self._pii_scanner: PiiScanner | None = (
-            build_pii_scanner(settings.pii_scanner)
-            if policy != PiiPolicy.disabled
-            else None
+            build_pii_scanner(settings.pii_scanner) if policy != PiiPolicy.disabled else None
         )
 
     async def submit(
@@ -124,14 +122,9 @@ class IntakeService:
             filename=filename,
         )
         merged_kind, merged_content, merged_metadata = self._merge_artifacts(artifacts, filename)
-        merged_content, merged_metadata = self._apply_pii_policy(
-            merged_content, merged_metadata
-        )
+        merged_content, merged_metadata = self._apply_pii_policy(merged_content, merged_metadata)
 
-        if request.kind != SourceKind.unknown:
-            primary_kind = request.kind
-        else:
-            primary_kind = merged_kind
+        primary_kind = request.kind if request.kind != SourceKind.unknown else merged_kind
 
         source = SourceRow(
             id=str(uuid.uuid4()),
@@ -269,16 +262,12 @@ class IntakeService:
             declared_media_type=content_type,
             filename=filename,
         )
-        merged_kind, merged_content, merged_metadata = self._merge_artifacts(
-            artifacts, filename
-        )
+        merged_kind, merged_content, merged_metadata = self._merge_artifacts(artifacts, filename)
         # PII guardrail runs on the re-ingest path too: a clean v1 of
         # a file may be replaced with a v2 that introduces emails /
         # SSNs / etc., and the policy must catch that just like
         # initial submit. Same scanner + policy resolution as submit().
-        merged_content, merged_metadata = self._apply_pii_policy(
-            merged_content, merged_metadata
-        )
+        merged_content, merged_metadata = self._apply_pii_policy(merged_content, merged_metadata)
         primary_kind = request.kind if request.kind != SourceKind.unknown else merged_kind
 
         # Build a transient SourceRow carrying the NEW values so the
@@ -305,9 +294,7 @@ class IntakeService:
 
         # Per-format metadata extraction (identical to submit()).
         primary_artifact = artifacts[0] if artifacts else None
-        primary_media = primary_artifact.media_type if primary_artifact else (
-            content_type or ""
-        )
+        primary_media = primary_artifact.media_type if primary_artifact else (content_type or "")
         primary_bytes = primary_artifact.bytes if primary_artifact else merged_content
         text_sample = self._first_text(result.chunks)
         extracted = self._metadata.extract(
@@ -535,9 +522,7 @@ class IntakeService:
                 headers={"correlation-id": correlation_id} if correlation_id else None,
             )
         except Exception as inner:
-            logger.warning(
-                "source.failed publish failed source_id=%s: %s", source.id, inner
-            )
+            logger.warning("source.failed publish failed source_id=%s: %s", source.id, inner)
 
 
 def _metadata_to_json(metadata: SourceMetadata) -> dict[str, Any]:

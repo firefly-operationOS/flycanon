@@ -64,7 +64,7 @@ class QuestionSuggester:
         user_msg = (
             f"User question: {question}\n\n"
             + (f"Assistant answer:\n{answer}\n\n" if answer else "")
-            + f"Emit at most {n} follow-up question suggestions as JSON ``{{suggestions: [\"...\"]}}``."
+            + f'Emit at most {n} follow-up question suggestions as JSON ``{{suggestions: ["..."]}}``.'
         )
         try:
             result = await agent.run(user_msg)

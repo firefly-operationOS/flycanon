@@ -150,9 +150,7 @@ class CostRepository:
         if not cols:
             cols = [CostEventRow.model]
         async with self._session_factory() as session:
-            stmt = select(*cols, CostEventRow.latency_ms).where(
-                CostEventRow.latency_ms.isnot(None)
-            )
+            stmt = select(*cols, CostEventRow.latency_ms).where(CostEventRow.latency_ms.isnot(None))
             if since is not None:
                 stmt = stmt.where(CostEventRow.occurred_at >= since)
             if until is not None:

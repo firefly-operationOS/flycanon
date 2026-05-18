@@ -42,15 +42,9 @@ def upgrade() -> None:
         sa.Column("id", sa.Integer(), primary_key=True, autoincrement=True),
         sa.Column("agent_name", sa.String(length=128), nullable=False),
         sa.Column("model", sa.String(length=128), nullable=False),
-        sa.Column(
-            "input_tokens", sa.Integer(), nullable=False, server_default="0"
-        ),
-        sa.Column(
-            "output_tokens", sa.Integer(), nullable=False, server_default="0"
-        ),
-        sa.Column(
-            "total_tokens", sa.Integer(), nullable=False, server_default="0"
-        ),
+        sa.Column("input_tokens", sa.Integer(), nullable=False, server_default="0"),
+        sa.Column("output_tokens", sa.Integer(), nullable=False, server_default="0"),
+        sa.Column("total_tokens", sa.Integer(), nullable=False, server_default="0"),
         sa.Column(
             "cost_usd",
             sa.Numeric(12, 6),
@@ -82,8 +76,6 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.drop_index(
-        "ix_canon_cost_events_actor_occurred", table_name="canon_cost_events"
-    )
+    op.drop_index("ix_canon_cost_events_actor_occurred", table_name="canon_cost_events")
     op.drop_index("ix_canon_cost_events_occurred", table_name="canon_cost_events")
     op.drop_table("canon_cost_events")

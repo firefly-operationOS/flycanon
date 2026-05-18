@@ -79,9 +79,7 @@ class CorpusStats(BaseModel):
     generated_at: datetime
     sources: SourceStats
     knowledge_items: KnowledgeItemStats
-    knowledge_versions: int = Field(
-        ge=0, description="Total rows across ``canon_knowledge_versions``."
-    )
+    knowledge_versions: int = Field(ge=0, description="Total rows across ``canon_knowledge_versions``.")
     candidates: CandidateStats
     chunks: ChunkStats
     ingest_jobs: JobStats

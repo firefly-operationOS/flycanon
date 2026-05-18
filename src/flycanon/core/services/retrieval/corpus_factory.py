@@ -144,8 +144,7 @@ def _build_vector_store(*, settings: CanonSettings, backend: str) -> object:
             from fireflyframework_agentic.vectorstores.chroma_store import ChromaVectorStore
         except ImportError as exc:
             raise RuntimeError(
-                "chroma backend requires the ``vectorstores-chroma`` extra of "
-                "fireflyframework-agentic."
+                "chroma backend requires the ``vectorstores-chroma`` extra of fireflyframework-agentic."
             ) from exc
         return ChromaVectorStore(
             collection_name=settings.chroma_collection,
@@ -156,8 +155,7 @@ def _build_vector_store(*, settings: CanonSettings, backend: str) -> object:
             from fireflyframework_agentic.vectorstores.qdrant_store import QdrantVectorStore
         except ImportError as exc:
             raise RuntimeError(
-                "qdrant backend requires the ``vectorstores-qdrant`` extra of "
-                "fireflyframework-agentic."
+                "qdrant backend requires the ``vectorstores-qdrant`` extra of fireflyframework-agentic."
             ) from exc
         return QdrantVectorStore(
             collection_name=settings.qdrant_collection,
@@ -171,8 +169,7 @@ def _build_vector_store(*, settings: CanonSettings, backend: str) -> object:
             from fireflyframework_agentic.vectorstores.pinecone_store import PineconeVectorStore
         except ImportError as exc:
             raise RuntimeError(
-                "pinecone backend requires the ``vectorstores-pinecone`` extra "
-                "of fireflyframework-agentic."
+                "pinecone backend requires the ``vectorstores-pinecone`` extra of fireflyframework-agentic."
             ) from exc
         return PineconeVectorStore(
             index_name=settings.pinecone_index,

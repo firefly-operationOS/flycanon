@@ -76,9 +76,7 @@ class CandidatesController:
 
     @get_mapping("/{candidate_id}")
     async def get_candidate(self, candidate_id: PathVar[str]) -> CandidateRecord:
-        record = await self._queries.query(
-            GetCandidateQuery(candidate_id=candidate_id)
-        )
+        record = await self._queries.query(GetCandidateQuery(candidate_id=candidate_id))
         if record is None:
             raise ResourceNotFoundException(f"candidate {candidate_id!r} not found")
         return record

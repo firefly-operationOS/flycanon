@@ -108,9 +108,7 @@ class JobsController:
                     },
                 )
             while True:
-                events = await self._queries.query(
-                    ListIngestJobEventsQuery(job_id=job_id, after_id=cursor)
-                )
+                events = await self._queries.query(ListIngestJobEventsQuery(job_id=job_id, after_id=cursor))
                 for event in events:
                     cursor = event.id
                     yield _sse_event(
@@ -120,9 +118,7 @@ class JobsController:
                             "stage": event.stage,
                             "message": event.message,
                             "payload": event.payload,
-                            "occurred_at": event.occurred_at.isoformat()
-                            if event.occurred_at
-                            else None,
+                            "occurred_at": event.occurred_at.isoformat() if event.occurred_at else None,
                         },
                     )
                 current = await self._queries.query(GetIngestJobQuery(job_id=job_id))

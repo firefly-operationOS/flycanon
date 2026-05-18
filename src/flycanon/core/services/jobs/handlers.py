@@ -70,19 +70,13 @@ class ListIngestJobEventsQuery(Query[list[IngestJobEvent]]):
 
 @query_handler
 @service
-class ListIngestJobEventsHandler(
-    QueryHandler[ListIngestJobEventsQuery, list[IngestJobEvent]]
-):
+class ListIngestJobEventsHandler(QueryHandler[ListIngestJobEventsQuery, list[IngestJobEvent]]):
     def __init__(self, repository: IngestJobRepository) -> None:
         super().__init__()
         self._repository = repository
 
-    async def do_handle(
-        self, query: ListIngestJobEventsQuery
-    ) -> list[IngestJobEvent]:
-        rows = await self._repository.list_events(
-            query.job_id, after_id=query.after_id, limit=query.limit
-        )
+    async def do_handle(self, query: ListIngestJobEventsQuery) -> list[IngestJobEvent]:
+        rows = await self._repository.list_events(query.job_id, after_id=query.after_id, limit=query.limit)
         return [_event_to_dto(r) for r in rows]
 
 

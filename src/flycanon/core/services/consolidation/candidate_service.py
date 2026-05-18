@@ -16,7 +16,6 @@ The :class:`CandidateService` materialises LLM proposals as
 from __future__ import annotations
 
 import logging
-from collections.abc import Sequence
 from datetime import UTC, datetime
 from typing import Any
 
@@ -88,8 +87,8 @@ class CandidateService:
     ) -> list[CandidateRow]:
         source = await self._sources.get(request.source_id)
         if source is None:
-            from flycanon.models.entities.source import SourceRow as _SourceRow  # noqa: F401
             from flycanon.core.services.consolidation.errors import ConsolidationError
+            from flycanon.models.entities.source import SourceRow as _SourceRow  # noqa: F401
 
             raise ConsolidationError(f"source {request.source_id!r} not found")
         chunks = await self._chunks.list_for_source(request.source_id)
@@ -134,9 +133,7 @@ class CandidateService:
                     "score": row.score,
                 },
             )
-        logger.info(
-            "candidates proposed source=%s count=%d", request.source_id, len(stored)
-        )
+        logger.info("candidates proposed source=%s count=%d", request.source_id, len(stored))
         return stored
 
     # ------------------------------------------------------------------
@@ -284,9 +281,7 @@ class CandidateService:
                 exc,
             )
 
-    async def _citations_from_candidate(
-        self, candidate: CandidateRow
-    ) -> list[Citation]:
+    async def _citations_from_candidate(self, candidate: CandidateRow) -> list[Citation]:
         """Hydrate the candidate's citations into ``Citation`` DTOs.
 
         The candidate's ``citations_json`` only stores
@@ -348,5 +343,3 @@ def _proposal_to_row(
         rationale=proposal.rationale,
         actor=actor,
     )
-
-

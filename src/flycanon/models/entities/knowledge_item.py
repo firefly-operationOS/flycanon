@@ -54,6 +54,4 @@ class KnowledgeItemRow(Base):
         DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
     )
 
-    __table_args__ = (
-        Index("ix_canon_knowledge_items_domain_status", "domain", "status"),
-    )
+    __table_args__ = (Index("ix_canon_knowledge_items_domain_status", "domain", "status"),)

@@ -92,12 +92,14 @@ class TestBuildAgent:
         assert kwargs["model_settings"]["temperature"] == 0.0
 
     def test_missing_framework_raises_runtime_error(self, settings):
-        with patch.dict("sys.modules", {"fireflyframework_agentic.agents": None}):
-            with pytest.raises(RuntimeError, match="fireflyframework_agentic"):
-                build_agent(
-                    name="x",
-                    model="m",
-                    output_type=_StubOutput,
-                    instructions="hi",
-                    settings=settings,
-                )
+        with (
+            patch.dict("sys.modules", {"fireflyframework_agentic.agents": None}),
+            pytest.raises(RuntimeError, match="fireflyframework_agentic"),
+        ):
+            build_agent(
+                name="x",
+                model="m",
+                output_type=_StubOutput,
+                instructions="hi",
+                settings=settings,
+            )

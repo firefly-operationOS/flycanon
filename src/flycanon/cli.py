@@ -64,9 +64,7 @@ def cmd_worker(_: argparse.Namespace) -> int:
         worker_mod = importlib.import_module("flycanon.core.services.workers.ingest_worker")
         ingestion_mod = importlib.import_module("flycanon.core.services.ingestion")
         repo_mod = importlib.import_module("flycanon.models.repositories")
-        async_ingest_mod = importlib.import_module(
-            "flycanon.core.services.sources.async_ingest_service"
-        )
+        async_ingest_mod = importlib.import_module("flycanon.core.services.sources.async_ingest_service")
 
         from flycanon.app import CanonApplication
         from flycanon.config import CanonSettings

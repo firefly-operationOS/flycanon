@@ -197,8 +197,9 @@ class LibreOfficeConverter:
                     filename=filename,
                 ) from exc
             if completed.returncode != 0:
+                stderr_tail = completed.stderr.decode("utf-8", "replace")[:200]
                 raise OfficeConversionError(
-                    f"LibreOffice exited {completed.returncode}: {completed.stderr.decode('utf-8', 'replace')[:200]}",
+                    f"LibreOffice exited {completed.returncode}: {stderr_tail}",
                     filename=filename,
                 )
             pdfs = list(Path(workdir).glob("*.pdf"))

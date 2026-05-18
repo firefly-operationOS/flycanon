@@ -182,9 +182,7 @@ class TestShutdownDrain:
 
     @pytest.mark.asyncio
     async def test_run_forever_cancels_inflight_after_grace_expires(self):
-        settings = _settings(
-            worker_handler_timeout_s=10.0, worker_shutdown_grace_s=0.1
-        )
+        settings = _settings(worker_handler_timeout_s=10.0, worker_shutdown_grace_s=0.1)
         worker = _make_worker(settings)
 
         async def never_returns(envelope):

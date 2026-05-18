@@ -47,9 +47,7 @@ class ExceptionAdvice:
         )
 
     @exception_handler(KnowledgeVersionNotFound)
-    async def knowledge_version_not_found(
-        self, exc: KnowledgeVersionNotFound
-    ) -> dict[str, Any]:
+    async def knowledge_version_not_found(self, exc: KnowledgeVersionNotFound) -> dict[str, Any]:
         return _problem(
             type_="https://flycanon.dev/problems/knowledge-version-not-found",
             title="Knowledge version not found",
@@ -60,9 +58,7 @@ class ExceptionAdvice:
         )
 
     @exception_handler(KnowledgeItemAlreadyRetired)
-    async def knowledge_item_already_retired(
-        self, exc: KnowledgeItemAlreadyRetired
-    ) -> dict[str, Any]:
+    async def knowledge_item_already_retired(self, exc: KnowledgeItemAlreadyRetired) -> dict[str, Any]:
         return _problem(
             type_="https://flycanon.dev/problems/knowledge-item-already-retired",
             title="Knowledge item already retired",
@@ -73,9 +69,7 @@ class ExceptionAdvice:
         )
 
     @exception_handler(InvalidSupersedeTarget)
-    async def invalid_supersede_target(
-        self, exc: InvalidSupersedeTarget
-    ) -> dict[str, Any]:
+    async def invalid_supersede_target(self, exc: InvalidSupersedeTarget) -> dict[str, Any]:
         return _problem(
             type_="https://flycanon.dev/problems/invalid-supersede-target",
             title="Invalid supersede target",
@@ -108,9 +102,7 @@ class ExceptionAdvice:
         )
 
     @exception_handler(CandidateAlreadyDecided)
-    async def candidate_already_decided(
-        self, exc: CandidateAlreadyDecided
-    ) -> dict[str, Any]:
+    async def candidate_already_decided(self, exc: CandidateAlreadyDecided) -> dict[str, Any]:
         return _problem(
             type_="https://flycanon.dev/problems/candidate-already-decided",
             title="Candidate already decided",

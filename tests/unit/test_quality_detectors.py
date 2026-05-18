@@ -12,6 +12,8 @@ from __future__ import annotations
 from flycanon.core.services.quality.conflict_detector import _cosine as cdc_cosine
 from flycanon.core.services.quality.stale_detector import (
     _cosine as sdc_cosine,
+)
+from flycanon.core.services.quality.stale_detector import (
     _empty_score,
     _is_fresh,
 )

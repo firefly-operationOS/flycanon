@@ -57,9 +57,7 @@ async def _seed_item_with_version(
 
 class TestBuildJson:
     @pytest.mark.asyncio
-    async def test_renders_items_with_no_relations_or_sources(
-        self, repositories, graph_service
-    ):
+    async def test_renders_items_with_no_relations_or_sources(self, repositories, graph_service):
         await _seed_item_with_version(repositories["knowledge"], item_id="a")
         await _seed_item_with_version(repositories["knowledge"], item_id="b")
         graph = await graph_service.build(include_sources=False)
@@ -69,19 +67,13 @@ class TestBuildJson:
         assert graph.total_nodes == 2
 
     @pytest.mark.asyncio
-    async def test_relation_edges_only_between_rendered_items(
-        self, repositories, graph_service
-    ):
+    async def test_relation_edges_only_between_rendered_items(self, repositories, graph_service):
         await _seed_item_with_version(repositories["knowledge"], item_id="a")
         await _seed_item_with_version(repositories["knowledge"], item_id="b")
-        await _seed_item_with_version(
-            repositories["knowledge"], item_id="legal", domain="legal"
-        )
+        await _seed_item_with_version(repositories["knowledge"], item_id="legal", domain="legal")
         # ``a -depends_on-> b`` -- both in process domain.
         await repositories["relation"].add(
-            KnowledgeRelationRow(
-                from_item_id="a", to_item_id="b", kind="depends_on"
-            )
+            KnowledgeRelationRow(from_item_id="a", to_item_id="b", kind="depends_on")
         )
         # ``a -related-> legal`` -- target outside the process filter.
         await repositories["relation"].add(
@@ -90,22 +82,14 @@ class TestBuildJson:
         # Filter to process domain only.
         from flycanon.interfaces.enums import Domain
 
-        graph = await graph_service.build(
-            domains=[Domain.process], include_sources=False
-        )
+        graph = await graph_service.build(domains=[Domain.process], include_sources=False)
         # Only the a->b edge survives -- the a->legal edge points
         # outside the rendered set and is suppressed.
-        assert [(e.source, e.target, e.kind) for e in graph.edges] == [
-            ("a", "b", "depends_on")
-        ]
+        assert [(e.source, e.target, e.kind) for e in graph.edges] == [("a", "b", "depends_on")]
 
     @pytest.mark.asyncio
-    async def test_citation_edges_collapsed_per_source(
-        self, repositories, graph_service
-    ):
-        version = await _seed_item_with_version(
-            repositories["knowledge"], item_id="a"
-        )
+    async def test_citation_edges_collapsed_per_source(self, repositories, graph_service):
+        version = await _seed_item_with_version(repositories["knowledge"], item_id="a")
         # Seed a source + 2 chunks both cited by the same version -- the
         # graph view should collapse these to ONE cites edge.
         await repositories["source"].add(
@@ -146,9 +130,7 @@ class TestBuildMermaid:
         await _seed_item_with_version(repositories["knowledge"], item_id="a")
         await _seed_item_with_version(repositories["knowledge"], item_id="b")
         await repositories["relation"].add(
-            KnowledgeRelationRow(
-                from_item_id="a", to_item_id="b", kind="depends_on"
-            )
+            KnowledgeRelationRow(from_item_id="a", to_item_id="b", kind="depends_on")
         )
         m = await graph_service.build_mermaid(include_sources=False)
         # First line is the orientation header.

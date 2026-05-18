@@ -61,9 +61,12 @@ class ImageNormalizer:
     # ------------------------------------------------------------------
 
     def _heif_to_png(self, data: bytes, filename: str | None) -> NormalisedImage:
+        # ``pillow_heif`` registers itself as a Pillow plugin on
+        # import, which is what lets ``self._pillow_open`` decode
+        # HEIC / HEIF / AVIF below. The import is therefore
+        # load-bearing despite looking unused.
         try:
-            import pillow_heif  # noqa: F401 -- registers Pillow plugin on import
-            from PIL import Image
+            import pillow_heif  # noqa: F401
         except ImportError as exc:
             raise ImageConversionError(
                 f"pillow-heif is required for HEIC/HEIF/AVIF decoding: {exc}",

@@ -80,9 +80,7 @@ def diff_service(repositories):
 
 class TestUnifiedBodyDiff:
     @pytest.mark.asyncio
-    async def test_identical_body_returns_empty_diff(
-        self, repositories, diff_service
-    ):
+    async def test_identical_body_returns_empty_diff(self, repositories, diff_service):
         repo = repositories["knowledge"]
         await _seed(repo, item_id="k1", version=1, body="hello\nworld")
         await _seed(repo, item_id="k1", version=2, body="hello\nworld")
@@ -134,9 +132,7 @@ class TestFieldChanges:
 
 class TestCitationSetDiff:
     @pytest.mark.asyncio
-    async def test_added_and_removed_citations_surface(
-        self, repositories, diff_service
-    ):
+    async def test_added_and_removed_citations_surface(self, repositories, diff_service):
         repo = repositories["knowledge"]
         await _seed(
             repo,

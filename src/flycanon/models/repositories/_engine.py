@@ -39,7 +39,9 @@ def build_engine(database_url: str, *, echo: bool = False) -> AsyncEngine:
     return cached
 
 
-def build_session_factory(database_url: str, *, echo: bool = False) -> tuple[
+def build_session_factory(
+    database_url: str, *, echo: bool = False
+) -> tuple[
     async_sessionmaker[AsyncSession],
     AsyncEngine,
 ]:

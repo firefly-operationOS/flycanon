@@ -9,9 +9,7 @@ from flycanon.core.services.ingestion.loaders import LoadedDocument, Section
 
 def _doc(sections: list[tuple[list[str], str]]) -> LoadedDocument:
     return LoadedDocument(
-        sections=[
-            Section(path=list(path), body=body, order=i) for i, (path, body) in enumerate(sections)
-        ]
+        sections=[Section(path=list(path), body=body, order=i) for i, (path, body) in enumerate(sections)]
     )
 
 

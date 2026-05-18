@@ -17,7 +17,6 @@ from flycanon.core.services.conversations import (
 )
 from flycanon.interfaces.dtos.conversation import (
     Conversation,
-    ConversationTurn,
     CreateConversationRequest,
     CreateTurnRequest,
     TurnResponse,
@@ -45,15 +44,11 @@ class ConversationsController:
         request: Valid[Body[CreateConversationRequest]],
     ) -> Conversation:
         """Open a fresh conversation -- returns the empty session."""
-        row = await self._service.create(
-            request, correlation_id=get_correlation_id()
-        )
+        row = await self._service.create(request, correlation_id=get_correlation_id())
         return await self._service.get(row.id)
 
     @get_mapping("/{conversation_id}")
-    async def get_conversation(
-        self, conversation_id: PathVar[str]
-    ) -> Conversation:
+    async def get_conversation(self, conversation_id: PathVar[str]) -> Conversation:
         """Return the full session + turn history."""
         try:
             return await self._service.get(conversation_id)

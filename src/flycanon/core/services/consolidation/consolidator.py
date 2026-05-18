@@ -163,6 +163,4 @@ class Consolidator:
         if isinstance(output, str):
             # Fallback: model returned a JSON string.
             return ConsolidationOutput.model_validate_json(output)
-        raise ConsolidationError(
-            f"unexpected consolidation output type {type(output).__name__}"
-        )
+        raise ConsolidationError(f"unexpected consolidation output type {type(output).__name__}")
