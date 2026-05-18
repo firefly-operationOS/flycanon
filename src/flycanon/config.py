@@ -126,6 +126,26 @@ class CanonSettings(BaseSettings):
     retrieval_per_query_k: int = Field(default=30, ge=1, le=500)
     retrieval_rrf_k: int = Field(default=60, ge=1, le=1000)
 
+    # Optional cross-encoder reranker. Empty value disables it
+    # (the default). Accepts ``cohere:rerank-multilingual-v3.0``,
+    # ``voyageai:rerank-2``, or another supported model id. The
+    # provider's API key is read from the standard environment
+    # variable (COHERE_API_KEY / VOYAGEAI_API_KEY).
+    reranker_model: str = Field(default="", description="Empty = disabled.")
+    # Candidates sent to the reranker per query -- we widen the
+    # post-fusion top-N to give the cross-encoder room to surface
+    # buried gems, then trim back to ``retrieval_top_k`` after.
+    reranker_top_n: int = Field(default=20, ge=1, le=200)
+
+    # Optional LLM-driven query expansion. The pre-retrieval stage
+    # asks the answer model for N paraphrases of the user query,
+    # runs each through the retriever, and RRF-fuses the result
+    # lists for higher recall. Costs an extra LLM call per query
+    # so off by default; flip on for high-stakes corpora where
+    # missed hits hurt more than answer latency.
+    query_expansion_enabled: bool = Field(default=False)
+    query_expansion_n: int = Field(default=3, ge=1, le=10)
+
     # -- Vector store ---------------------------------------------------
     # Backend selector. Every option implements the agentic
     # ``VectorStoreProtocol``; BM25 stays on SQLite regardless of the

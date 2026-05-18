@@ -56,6 +56,8 @@ from flycanon.core.services.retrieval import (
     RetrievalService,
     build_corpus_context,
 )
+from flycanon.core.services.retrieval.query_expander import QueryExpander
+from flycanon.core.services.retrieval.reranker import build_reranker
 from flycanon.core.services.sources import IntakeService
 from flycanon.core.services.taxonomy import TaxonomyService
 from flycanon.models.repositories import (
@@ -192,6 +194,21 @@ class CanonCoreConfiguration:
         knowledge_repository: KnowledgeRepository,
         settings: CanonSettings,
     ) -> RetrievalService:
+        # Optional retrieval enhancements driven by env config:
+        # * Reranker -- cross-encoder over the fused hit set
+        #   (FLYCANON_RERANKER_MODEL = "" disables it). Adapters
+        #   for Cohere + Voyage ship; falling back to NoOp when
+        #   the API key is missing keeps the path resilient.
+        # * Query expander -- LLM paraphrase + multi-query RRF
+        #   fusion (FLYCANON_QUERY_EXPANSION_ENABLED=true). Each
+        #   query expansion costs one extra LLM call so off by
+        #   default.
+        reranker = build_reranker(settings.reranker_model)
+        expander = (
+            QueryExpander(model=settings.answer_model, settings=settings)
+            if settings.query_expansion_enabled
+            else None
+        )
         return RetrievalService(
             context=corpus_context,
             embeddings=embedding_service,
@@ -201,6 +218,10 @@ class CanonCoreConfiguration:
             default_top_k=settings.retrieval_top_k,
             default_per_query_k=settings.retrieval_per_query_k,
             rrf_k=settings.retrieval_rrf_k,
+            reranker=reranker,
+            reranker_top_n=settings.reranker_top_n,
+            query_expander=expander,
+            query_expansion_n=settings.query_expansion_n if expander else 1,
         )
 
     # ------------------------------------------------------------------
