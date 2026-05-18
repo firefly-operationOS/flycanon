@@ -197,6 +197,169 @@ class IntakeService:
         )
         return result.source
 
+    async def replace(
+        self,
+        *,
+        source_id: str,
+        request: SubmitSourceRequest,
+        content: bytes,
+        filename: str | None = None,
+        content_type: str | None = None,
+        actor: str | None = None,
+        correlation_id: str | None = None,
+    ) -> SourceRow:
+        """Re-ingest an existing source in place, preserving the row id.
+
+        Use when a canonical file is updated and downstream citations
+        should follow the new content rather than orphan to the deleted
+        row. The flow:
+
+        1. Look up the existing :class:`SourceRow` -- 404 propagates
+           up if it's missing.
+        2. Normalise + load + chunk + embed the new bytes through the
+           same pipeline as :meth:`submit`.
+        3. Drop the existing chunks + their vector projection via
+           :meth:`ChunkRepository.replace_for_source` /
+           :meth:`IndexService.replace_for_source` (idempotent --
+           same calls the submit path makes).
+        4. UPDATE the existing source row's mutable fields
+           (filename, uri, content_sha256, content_bytes, n_chunks,
+           metadata_json) instead of inserting a new row.
+        5. Audit ``source.replaced`` + publish a ``SourceReplaced``
+           EDA event so downstream projections can re-sync.
+
+        Citations referencing chunks that disappear in the new
+        emission are not deleted -- a future pass surfaces them as
+        ``dangling_citation`` audit warnings. v1 simply preserves
+        the citation rows (their ``chunk_id`` will resolve to
+        ``None`` in the provenance graph; out of scope for this
+        commit to repair).
+        """
+        existing = await self._sources.get(source_id)
+        if existing is None:
+            from flycanon.core.services.sources.errors import SourceNotFound
+
+            raise SourceNotFound(source_id)
+
+        artifacts = await self._binary_normalizer.normalise(
+            content,
+            declared_media_type=content_type,
+            filename=filename,
+        )
+        merged_kind, merged_content, merged_metadata = self._merge_artifacts(
+            artifacts, filename
+        )
+        primary_kind = request.kind if request.kind != SourceKind.unknown else merged_kind
+
+        # Build a transient SourceRow carrying the NEW values so the
+        # ingestion pipeline (which already knows how to chunk +
+        # compute content_sha256 + emit chunks for a row) does its
+        # work; we then transplant the result onto the EXISTING row
+        # (preserving its id + created_at + audit history).
+        scratch = SourceRow(
+            id=existing.id,
+            kind=primary_kind.value,
+            status=SourceStatus.pending.value,
+            filename=filename or existing.filename,
+            uri=request.uri or existing.uri,
+            content_type=content_type or existing.content_type,
+            content_sha256="",
+            content_bytes=0,
+            metadata_json={
+                **(existing.metadata_json or {}),
+                **_metadata_to_json(request.metadata),
+                **merged_metadata,
+            },
+        )
+        result = self._ingestion.ingest(source=scratch, content=merged_content)
+
+        # Per-format metadata extraction (identical to submit()).
+        primary_artifact = artifacts[0] if artifacts else None
+        primary_media = primary_artifact.media_type if primary_artifact else (
+            content_type or ""
+        )
+        primary_bytes = primary_artifact.bytes if primary_artifact else merged_content
+        text_sample = self._first_text(result.chunks)
+        extracted = self._metadata.extract(
+            primary_bytes,
+            media_type=primary_media,
+            filename=filename,
+            text_sample=text_sample,
+        )
+        metadata = dict(result.source.metadata_json or {})
+        metadata["extracted"] = extracted.to_dict()
+
+        # Now flip the existing row in place with the new content
+        # (preserves id, created_at, ingested_at history).
+        existing.kind = result.source.kind
+        existing.status = SourceStatus.ingested.value
+        existing.filename = scratch.filename
+        existing.uri = scratch.uri
+        existing.content_type = scratch.content_type
+        existing.content_sha256 = result.source.content_sha256
+        existing.content_bytes = result.source.content_bytes
+        existing.n_chunks = result.source.n_chunks
+        existing.metadata_json = metadata
+        existing.error_code = None
+        existing.error_message = None
+        updated_row = await self._sources.update(existing)
+
+        if result.chunks:
+            texts = [chunk.content for chunk in result.chunks]
+            embeddings = await self._embeddings.embed(texts)
+            for chunk in result.chunks:
+                chunk.embedding_model = self._embeddings.model
+                chunk.source_id = updated_row.id
+            await self._chunks.replace_for_source(updated_row.id, result.chunks)
+            await self._indexer.replace_for_source(
+                source=updated_row,
+                chunks=result.chunks,
+                embeddings=embeddings,
+                embedding_model=self._embeddings.model,
+            )
+        else:
+            await self._chunks.replace_for_source(updated_row.id, [])
+
+        await self._audit.record(
+            event_type="source.replaced",
+            subject_kind="source",
+            subject_id=updated_row.id,
+            actor=actor,
+            correlation_id=correlation_id,
+            payload={
+                "kind": updated_row.kind,
+                "content_sha256": updated_row.content_sha256,
+                "n_chunks": updated_row.n_chunks,
+                "n_artifacts": len(artifacts),
+            },
+        )
+        if self._publisher is not None:
+            try:
+                await self._publisher.publish(  # type: ignore[attr-defined]
+                    destination=self._settings.ingest_topic,
+                    event_type="SourceReplaced",
+                    payload={
+                        "source_id": updated_row.id,
+                        "kind": updated_row.kind,
+                        "content_sha256": updated_row.content_sha256,
+                        "n_chunks": updated_row.n_chunks,
+                    },
+                    headers={"correlation-id": correlation_id} if correlation_id else None,
+                )
+            except Exception as exc:
+                logger.warning(
+                    "SourceReplaced publish failed source_id=%s: %s",
+                    updated_row.id,
+                    exc,
+                )
+        logger.info(
+            "intake replaced id=%s kind=%s n_chunks=%d",
+            updated_row.id,
+            updated_row.kind,
+            updated_row.n_chunks,
+        )
+        return updated_row
+
     @staticmethod
     def _first_text(chunks: list[Any]) -> str:
         """Return up to ~2 000 chars of the first ingested chunk's

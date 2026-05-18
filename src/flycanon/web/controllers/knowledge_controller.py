@@ -20,6 +20,7 @@ from pyfly.web import (
 
 from flycanon.core.services.knowledge.handlers import (
     CreateKnowledgeCommand,
+    GetKnowledgeDiffQuery,
     GetKnowledgeHistoryQuery,
     GetKnowledgeQuery,
     GetProvenanceQuery,
@@ -33,6 +34,7 @@ from flycanon.interfaces.dtos.knowledge import (
     KnowledgeItem,
     KnowledgeItemsPage,
     KnowledgeVersion,
+    KnowledgeVersionDiff,
     Provenance,
     RetireKnowledgeRequest,
     SupersedeKnowledgeRequest,
@@ -100,6 +102,41 @@ class KnowledgeController:
         """Resolve the citation graph for ``(item_id, version)``."""
         return await self._queries.query(
             GetProvenanceQuery(item_id=item_id, version=version or None)
+        )
+
+    @get_mapping("/{item_id}/diff")
+    async def get_diff(
+        self,
+        item_id: PathVar[str],
+        from_version: QueryParam[int] = 0,
+        to_version: QueryParam[int] = 0,
+    ) -> KnowledgeVersionDiff:
+        """Diff two versions of a knowledge item.
+
+        ``from_version`` / ``to_version`` are 1-based and both
+        required. Returns a structured diff: unified-diff body,
+        scalar field changes (title / summary / domain /
+        jurisdiction / status / tags), and citation set deltas
+        (added / removed).
+
+        Errors:
+
+        * ``400`` -- either query param is 0 / missing.
+        * ``404 knowledge_item_not_found`` -- item id is unknown.
+        * ``404 knowledge_version_not_found`` -- one of the
+          requested versions doesn't exist.
+        """
+        if from_version <= 0 or to_version <= 0:
+            raise ValueError(
+                "Both from_version and to_version query params are required "
+                "(use ?from_version=X&to_version=Y)."
+            )
+        return await self._queries.query(
+            GetKnowledgeDiffQuery(
+                item_id=item_id,
+                from_version=from_version,
+                to_version=to_version,
+            )
         )
 
     # -- Writes --------------------------------------------------------

@@ -21,6 +21,7 @@ from __future__ import annotations
 import base64
 import logging
 
+from pydantic import BaseModel, Field
 from pyfly.container import rest_controller
 from pyfly.cqrs import DefaultCommandBus, DefaultQueryBus
 from pyfly.kernel import ResourceNotFoundException
@@ -32,15 +33,20 @@ from pyfly.web import (
     Valid,
     get_mapping,
     post_mapping,
+    put_mapping,
     request_mapping,
 )
 
 from flycanon.core.services.sources import (
     GetSourceQuery,
     ListSourcesQuery,
+    ReplaceSourceCommand,
     SubmitSourceCommand,
 )
+from flycanon.core.services.sources.url_fetcher import UrlFetcher
 from flycanon.interfaces.dtos.source import (
+    BulkSourceResult,
+    BulkSourcesResponse,
     SourceRecord,
     SourcesPage,
     SubmitSourceRequest,
@@ -74,14 +80,39 @@ class SubmitSourceJsonPayload(SubmitSourceRequest):
     content_type: str | None = None
 
 
+class BulkSubmitSourcesPayload(BaseModel):
+    """Wire payload for ``POST /api/v1/sources:bulk``.
+
+    Carries up to ``MAX_BULK_SOURCES`` source submissions in a
+    single request. Each entry is processed independently -- a
+    parse / normalisation failure on one entry does not abort the
+    batch.
+    """
+
+    sources: list[SubmitSourceJsonPayload] = Field(
+        min_length=1,
+        max_length=100,
+        description=(
+            "Up to 100 source submissions. Each entry is the same "
+            "shape as the JSON body of ``POST /api/v1/sources``."
+        ),
+    )
+
+
 @rest_controller
 @request_mapping("/api/v1/sources")
 class SourcesController:
     """REST adapter for the source-intake + read surfaces."""
 
-    def __init__(self, commands: DefaultCommandBus, queries: DefaultQueryBus) -> None:
+    def __init__(
+        self,
+        commands: DefaultCommandBus,
+        queries: DefaultQueryBus,
+        url_fetcher: UrlFetcher,
+    ) -> None:
         self._commands = commands
         self._queries = queries
+        self._url_fetcher = url_fetcher
 
     @post_mapping("", status_code=201)
     async def submit_json(
@@ -141,24 +172,65 @@ class SourcesController:
         ``status=failed`` and the typed ``error_code`` /
         ``error_message`` so callers can inspect and re-submit.
         """
-        if not payload.content_base64:
-            raise ValueError(
-                "content_base64 is required; URL-fetched sources are not yet supported"
-            )
-        try:
-            content = base64.b64decode(payload.content_base64)
-        except Exception as exc:
-            raise ValueError(f"content_base64 is not valid base64: {exc}") from exc
+        content, content_type, filename = await self._resolve_payload_content(payload)
         return await self._commands.send(
             SubmitSourceCommand(
                 content=content,
                 metadata=payload.metadata,
-                filename=payload.filename,
-                content_type=payload.content_type,
+                filename=filename,
+                content_type=content_type,
                 kind=payload.kind,
                 uri=payload.uri,
                 correlation_id=get_correlation_id(),
             )
+        )
+
+    async def _resolve_payload_content(
+        self,
+        payload: SubmitSourceJsonPayload,
+    ) -> tuple[bytes, str | None, str | None]:
+        """Return ``(content_bytes, content_type, filename)`` for a payload.
+
+        Two modes:
+
+        * ``content_base64`` provided -- decode + return (caller-mode).
+        * ``uri`` provided (and no base64) -- fetch the bytes via
+          :class:`UrlFetcher` with the size + scheme + timeout
+          caps. The content-type from the response headers wins
+          over a caller-supplied hint when the latter is absent;
+          the filename is derived from the URL's final path
+          segment when the caller didn't override it.
+        """
+        if payload.content_base64:
+            try:
+                return (
+                    base64.b64decode(payload.content_base64),
+                    payload.content_type,
+                    payload.filename,
+                )
+            except Exception as exc:
+                raise ValueError(f"content_base64 is not valid base64: {exc}") from exc
+
+        if payload.uri:
+            fetched = await self._url_fetcher.fetch(payload.uri)
+            # The URL's terminal path component is the safest filename
+            # default -- ``Manifiesto.pdf`` from
+            # ``https://x.com/docs/Manifiesto.pdf?ts=1``.
+            url_filename = payload.filename
+            if not url_filename:
+                from urllib.parse import urlparse, unquote
+
+                terminal = urlparse(fetched.final_url).path.rsplit("/", 1)[-1]
+                if terminal:
+                    url_filename = unquote(terminal)
+            return (
+                fetched.content,
+                payload.content_type or fetched.content_type,
+                url_filename,
+            )
+
+        raise ValueError(
+            "either content_base64 (inline bytes) or uri (URL to fetch) is required"
         )
 
     @get_mapping("/{source_id}")
@@ -178,6 +250,134 @@ class SourcesController:
         if record is None:
             raise ResourceNotFoundException(f"source {source_id!r} not found")
         return record
+
+    @post_mapping(":bulk", status_code=200)
+    async def submit_bulk(
+        self,
+        payload: Valid[Body[BulkSubmitSourcesPayload]],
+    ) -> BulkSourcesResponse:
+        """Submit up to 100 sources in one call.
+
+        Each entry runs through the same intake pipeline as
+        :meth:`submit_json` (binary normaliser -> loader -> chunker
+        -> embedder -> indexer -> audit + event). Entries are
+        processed **sequentially** (we don't fan out internally so
+        the binary normaliser's caps remain meaningful per-entry),
+        but a failure on any entry never aborts the batch.
+
+        Returns :class:`BulkSourcesResponse` with one
+        :class:`BulkSourceResult` per input entry carrying the
+        outcome:
+
+        * ``status=succeeded`` -- ``source`` is populated.
+        * ``status=failed`` -- ``error_code`` + ``error_message``
+          carry the typed failure reason (same codes as the
+          single-source endpoint).
+
+        The HTTP status is **always 200** regardless of per-entry
+        outcomes; clients inspect each result's ``status`` to
+        decide what to retry. The wire shape mirrors the AWS
+        SQS / S3 batch-API convention so an SDK retry helper can
+        operate on the result list directly.
+        """
+        correlation_id = get_correlation_id()
+        results: list[BulkSourceResult] = []
+        succeeded = 0
+        failed = 0
+        for index, entry in enumerate(payload.sources):
+            try:
+                if not entry.content_base64:
+                    raise ValueError(
+                        "content_base64 is required; URL-fetched sources "
+                        "are not yet supported in the bulk endpoint"
+                    )
+                content = base64.b64decode(entry.content_base64)
+                source = await self._commands.send(
+                    SubmitSourceCommand(
+                        content=content,
+                        metadata=entry.metadata,
+                        filename=entry.filename,
+                        content_type=entry.content_type,
+                        kind=entry.kind,
+                        uri=entry.uri,
+                        correlation_id=correlation_id,
+                    )
+                )
+                results.append(
+                    BulkSourceResult(index=index, status="succeeded", source=source)
+                )
+                succeeded += 1
+            except Exception as exc:  # noqa: BLE001
+                code = getattr(exc, "code", None) or type(exc).__name__
+                results.append(
+                    BulkSourceResult(
+                        index=index,
+                        status="failed",
+                        error_code=str(code),
+                        error_message=str(exc),
+                    )
+                )
+                failed += 1
+                logger.warning(
+                    "bulk source entry failed index=%d error=%s message=%s",
+                    index,
+                    code,
+                    exc,
+                )
+        return BulkSourcesResponse(
+            results=results,
+            total=len(payload.sources),
+            succeeded=succeeded,
+            failed=failed,
+        )
+
+    @put_mapping("/{source_id}")
+    async def replace_source(
+        self,
+        source_id: PathVar[str],
+        payload: Valid[Body[SubmitSourceJsonPayload]],
+    ) -> SourceRecord:
+        """Re-ingest an existing source under the same ``source_id``.
+
+        Use when the canonical file has been updated and you want
+        downstream citations to follow the new content rather than
+        orphan to a deleted row. The handler:
+
+        1. Validates the existing ``SourceRow`` exists (returns
+           404 ``source_not_found`` otherwise).
+        2. Drops the existing chunks + vector projection for the
+           row (keeps the row id + audit history).
+        3. Runs the same intake pipeline as :meth:`submit_json`
+           against the new bytes.
+        4. Emits a ``source.replaced`` audit event +
+           ``SourceReplaced`` EDA event so downstream projections
+           can re-sync.
+
+        Citations pointing at chunks that disappear in the new
+        emission raise a ``dangling_citation`` audit warning (per
+        citation) but do NOT block the replacement -- the audit
+        trail is the system of record for that case.
+        """
+        if not payload.content_base64:
+            raise ValueError(
+                "content_base64 is required; URL-fetched re-ingestion is on the roadmap"
+            )
+        try:
+            content = base64.b64decode(payload.content_base64)
+        except Exception as exc:
+            raise ValueError(f"content_base64 is not valid base64: {exc}") from exc
+        return await self._commands.send(
+            ReplaceSourceCommand(
+                source_id=source_id,
+                content=content,
+                metadata=payload.metadata,
+                filename=payload.filename,
+                content_type=payload.content_type,
+                kind=payload.kind,
+                uri=payload.uri,
+                correlation_id=get_correlation_id(),
+            )
+        )
 
     @get_mapping("")
     async def list_sources(

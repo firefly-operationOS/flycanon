@@ -189,6 +189,12 @@ class CanonSettings(BaseSettings):
         description="``token`` | ``sentence`` | ``paragraph``.",
     )
     max_bytes: int = 32 * 1024 * 1024  # 32 MiB
+    # Timeout for URL-fetched source intake (``POST /api/v1/sources``
+    # with ``uri`` set instead of ``content_base64``). Origins that
+    # take longer than this fail with ``url_fetch_failed`` rather than
+    # pinning a request worker indefinitely. Connect timeout is
+    # capped at min(total, 10s).
+    url_fetch_timeout_s: float = Field(default=60.0, gt=0.0)
 
     # -- Binary normalisation -------------------------------------------
     # The binary normaliser (``core/services/binary/``) routes every
