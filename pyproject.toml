@@ -27,14 +27,36 @@ dependencies = [
     # store backend, openai-embeddings, and sqlglot.
     "fireflyframework-agentic[rest,security,redis,corpus-search]>=26.5.11",
 
-    # Source intake -- ``python-docx`` for direct DOCX parsing in the
-    # docx loader, ``pypdf`` for PDF text extraction, ``beautifulsoup4``
-    # for HTML normalisation. MarkItDown (bundled via the corpus-search
-    # extra above) is the canonical loader for everything else.
+    # Source intake -- the high-fidelity per-format loaders + the
+    # universal MarkItDown fallback. MarkItDown ships via the agentic
+    # ``corpus-search`` extra above and covers DOCX / XLSX / PPTX /
+    # PDF / HTML / CSV / JSON / XML / EPUB. The dedicated wheels
+    # listed here back the specific loaders and the binary
+    # normaliser:
+    #
+    # * ``python-docx`` -- :class:`DocxLoader` (Heading1-9 detection).
+    # * ``pypdf``        -- :class:`PdfLoader` text extraction.
+    # * ``beautifulsoup4``+ ``lxml`` -- :class:`HtmlLoader`.
+    # * ``Pillow`` + ``pillow-heif`` + ``cairosvg`` -- image format
+    #   normalisation (HEIC / HEIF / AVIF / TIFF / BMP / SVG -> PNG)
+    #   used by :class:`ImageNormalizer` and :class:`ImageLoader`.
+    # * ``pytesseract`` -- :class:`ImageLoader` OCR. The runtime
+    #   Dockerfile installs the ``tesseract`` binary + the common
+    #   European language packs (``-spa``, ``-eng``, ``-fra``, ...).
+    # * ``py7zr`` -- 7-Zip archive expansion. ``.zip`` and ``.tar``
+    #   are stdlib.
+    # * ``extract-msg`` -- Outlook ``.msg`` parsing. ``.eml`` uses
+    #   stdlib ``email``.
     "python-docx>=1.1",
     "pypdf>=4.3.0",
     "beautifulsoup4>=4.12",
     "lxml>=5.0",
+    "Pillow>=11.0",
+    "pillow-heif>=0.18",
+    "cairosvg>=2.7",
+    "pytesseract>=0.3.13",
+    "py7zr>=0.22",
+    "extract-msg>=0.51",
 
     # HTTP client for outbound calls (webhooks, future SOTA monitors).
     "httpx>=0.28.0",

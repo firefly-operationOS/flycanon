@@ -76,6 +76,31 @@ FLYCANON_CHUNK_STRATEGY=paragraph
 FLYCANON_MAX_BYTES=33554432
 
 # ----------------------------------------------------------------------------
+# Binary normalisation
+# ----------------------------------------------------------------------------
+# Master kill-switch for the binary normaliser. ``false`` bypasses
+# image / archive / email / Office handling and feeds raw bytes
+# directly to the loader registry -- useful when the caller already
+# normalises upstream.
+FLYCANON_BINARY_NORMALIZE_ENABLED=true
+# Max depth + max files for archive / email expansion. Defends
+# against zip-bomb style fan-out.
+FLYCANON_BINARY_MAX_RECURSION_DEPTH=4
+FLYCANON_BINARY_MAX_EXPANDED_FILES=50
+# Office converter: ``none`` (default; rely on in-process MarkItDown),
+# ``gotenberg`` (HTTP sidecar), or ``libreoffice`` (in-container
+# subprocess).
+FLYCANON_OFFICE_CONVERTER=none
+FLYCANON_GOTENBERG_URL=http://gotenberg:3000
+FLYCANON_GOTENBERG_TIMEOUT_S=60
+FLYCANON_BINARY_LIBREOFFICE_PATH=soffice
+FLYCANON_BINARY_LIBREOFFICE_TIMEOUT_S=60
+# Tesseract OCR language. ``+``-joined ISO 639-2/B codes. The runtime
+# image ships ``spa``, ``eng``, ``fra``, ``deu``, ``ita``, ``por``,
+# ``cat``; extend the Dockerfile to add more.
+FLYCANON_OCR_LANG=eng+spa
+
+# ----------------------------------------------------------------------------
 # Provider credentials -- pulled from the standard env vars. Set only
 # the ones you need.
 # ----------------------------------------------------------------------------

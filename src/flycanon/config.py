@@ -118,6 +118,41 @@ class CanonSettings(BaseSettings):
     )
     max_bytes: int = 32 * 1024 * 1024  # 32 MiB
 
+    # -- Binary normalisation -------------------------------------------
+    # The binary normaliser (``core/services/binary/``) routes every
+    # inbound payload through magic-byte sniffing, image format
+    # conversion (HEIC / AVIF / TIFF / BMP / SVG -> PNG), archive
+    # expansion (ZIP / 7Z / TAR / GZ), email decomposition (EML /
+    # MSG), and the optional Office -> PDF converter (Gotenberg or
+    # LibreOffice). Set ``binary_normalize_enabled=False`` to bypass
+    # the entire stage -- useful for callers that pre-normalise
+    # upstream or for debugging.
+    binary_normalize_enabled: bool = True
+    binary_max_recursion_depth: int = Field(default=4, ge=0, le=10)
+    binary_max_expanded_files: int = Field(default=50, ge=1, le=500)
+    office_converter: str = Field(
+        default="none",
+        description=(
+            "``none`` (default; flycanon relies on MarkItDown for DOCX / "
+            "XLSX / PPTX / HTML in-process), ``gotenberg`` (HTTP sidecar; "
+            "distroless-friendly), or ``libreoffice`` (in-container "
+            "subprocess; requires ``soffice`` in the runtime image)."
+        ),
+    )
+    gotenberg_url: str = "http://gotenberg:3000"
+    gotenberg_timeout_s: int = 60
+    binary_libreoffice_path: str = "soffice"
+    binary_libreoffice_timeout_s: int = 60
+    ocr_lang: str = Field(
+        default="eng+spa",
+        description=(
+            "Default Tesseract ``-l`` argument used by the ImageLoader. "
+            "``+``-joined ISO 639-2/B language codes. The runtime "
+            "Dockerfile installs the most common European packs by "
+            "default."
+        ),
+    )
+
     # -- Security -------------------------------------------------------
     api_keys: str | None = Field(
         default=None,

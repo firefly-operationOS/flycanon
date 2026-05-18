@@ -76,11 +76,33 @@ ENV PYTHONUNBUFFERED=1 \
     UV_PROJECT_ENVIRONMENT=/app/.venv \
     PATH="/app/.venv/bin:${PATH}"
 
-# Minimal system deps: ``curl`` for healthchecks. The intake path is
-# pure-Python (python-docx / pypdf / beautifulsoup4 / markitdown) so no
-# system libraries are required for the canonical formats.
+# System deps for the binary normaliser:
+# * ``curl``                                           -- container healthchecks
+# * ``libheif1``                                       -- pillow-heif (HEIC / HEIF / AVIF)
+# * ``libcairo2`` + ``libpango*`` + ``libgdk-pixbuf*`` -- cairosvg (SVG)
+# * ``tesseract-ocr`` + European language packs        -- ImageLoader (Tesseract)
+#
+# LibreOffice (`soffice`) is intentionally NOT installed by default;
+# operators that want the in-container subprocess path set
+# ``FLYCANON_OFFICE_CONVERTER=libreoffice`` and extend this Dockerfile
+# with ``libreoffice-core``. The canonical Office path is the
+# Gotenberg sidecar (see docker-compose.yml).
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends curl \
+    && apt-get install -y --no-install-recommends \
+        curl \
+        libheif1 \
+        libcairo2 \
+        libpango-1.0-0 \
+        libpangocairo-1.0-0 \
+        libgdk-pixbuf-2.0-0 \
+        tesseract-ocr \
+        tesseract-ocr-spa \
+        tesseract-ocr-eng \
+        tesseract-ocr-fra \
+        tesseract-ocr-deu \
+        tesseract-ocr-ita \
+        tesseract-ocr-por \
+        tesseract-ocr-cat \
     && rm -rf /var/lib/apt/lists/* \
     && useradd --uid 10001 --shell /usr/sbin/nologin --no-create-home canon
 
