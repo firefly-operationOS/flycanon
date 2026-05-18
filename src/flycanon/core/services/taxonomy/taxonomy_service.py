@@ -11,6 +11,8 @@ from __future__ import annotations
 
 import logging
 
+from pyfly.container import service
+
 from flycanon.config import CanonSettings
 from flycanon.core.services.audit import AuditService
 from flycanon.interfaces.dtos.taxonomy import CreateTaxonomyNodeRequest
@@ -30,10 +32,10 @@ class TaxonomyNotFound(Exception):
         self.node_id = node_id
 
 
+@service
 class TaxonomyService:
     def __init__(
         self,
-        *,
         repository: TaxonomyRepository,
         audit: AuditService,
         settings: CanonSettings,

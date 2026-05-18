@@ -103,9 +103,10 @@ class IndexService:
             chunk.embedding_model = embedding_model
 
         logger.info(
-            "indexed source=%s chunks=%d backend=sqlite-vec",
+            "indexed source=%s chunks=%d backend=%s",
             source.id,
             len(stored_chunks),
+            getattr(self._context, "backend", "unknown"),
         )
         return len(stored_chunks)
 

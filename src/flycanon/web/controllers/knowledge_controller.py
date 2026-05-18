@@ -51,7 +51,7 @@ class KnowledgeController:
 
     # -- Reads ---------------------------------------------------------
 
-    @get_mapping("", tags=["Knowledge"])
+    @get_mapping("")
     async def list_knowledge(
         self,
         status: QueryParam[str] = "",
@@ -76,7 +76,7 @@ class KnowledgeController:
             )
         )
 
-    @get_mapping("/{item_id}", tags=["Knowledge"])
+    @get_mapping("/{item_id}")
     async def get_knowledge(self, item_id: PathVar[str]) -> KnowledgeItem:
         """Fetch a single knowledge item by id (returns the pointer
         view, not the body -- use the history endpoint for content)."""
@@ -85,12 +85,12 @@ class KnowledgeController:
             raise ResourceNotFoundException(f"knowledge item {item_id!r} not found")
         return record
 
-    @get_mapping("/{item_id}/history", tags=["Knowledge"])
+    @get_mapping("/{item_id}/history")
     async def get_history(self, item_id: PathVar[str]) -> list[KnowledgeVersion]:
         """Full version history (oldest first)."""
         return await self._queries.query(GetKnowledgeHistoryQuery(item_id=item_id))
 
-    @get_mapping("/{item_id}/provenance", tags=["Knowledge"])
+    @get_mapping("/{item_id}/provenance")
     async def get_provenance(
         self,
         item_id: PathVar[str],
@@ -103,7 +103,7 @@ class KnowledgeController:
 
     # -- Writes --------------------------------------------------------
 
-    @post_mapping("", status_code=201, tags=["Knowledge"])
+    @post_mapping("", status_code=201)
     async def create_knowledge(
         self,
         request: Valid[Body[CreateKnowledgeRequest]],
@@ -111,7 +111,7 @@ class KnowledgeController:
         """Create a fresh knowledge item + version=1."""
         return await self._commands.send(CreateKnowledgeCommand(request=request))
 
-    @put_mapping("/{item_id}", tags=["Knowledge"])
+    @put_mapping("/{item_id}")
     async def update_knowledge(
         self,
         item_id: PathVar[str],
@@ -123,7 +123,7 @@ class KnowledgeController:
             UpdateKnowledgeCommand(item_id=item_id, request=request)
         )
 
-    @post_mapping("/{item_id}:supersede", tags=["Knowledge"])
+    @post_mapping("/{item_id}:supersede")
     async def supersede_knowledge(
         self,
         item_id: PathVar[str],
@@ -134,7 +134,7 @@ class KnowledgeController:
             SupersedeKnowledgeCommand(item_id=item_id, request=request)
         )
 
-    @post_mapping("/{item_id}:retire", tags=["Knowledge"])
+    @post_mapping("/{item_id}:retire")
     async def retire_knowledge(
         self,
         item_id: PathVar[str],

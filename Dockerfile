@@ -122,6 +122,13 @@ RUN find /app -type f -exec chmod a+r {} + \
     && find /app -type d -exec chmod a+rx {} + \
     && chmod a+x /app/docker-entrypoint.sh
 
+# Stateful directory that the runtime writes to (BM25 SQLite corpus +
+# any other on-disk projection). Pre-created with canon ownership so
+# the named volume mount inherits the right permissions on first
+# use; FLYCANON_CORPUS_PATH defaults to /app/canon-data/corpus.db in
+# the compose stack.
+RUN mkdir -p /app/canon-data && chown -R canon:canon /app/canon-data
+
 ENV PYTHONPATH=/app/src
 
 USER canon

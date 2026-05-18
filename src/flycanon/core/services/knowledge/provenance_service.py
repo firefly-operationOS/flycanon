@@ -11,6 +11,8 @@ full why-this-is-canonical story without follow-up requests:
 
 from __future__ import annotations
 
+from pyfly.container import service
+
 from flycanon.core.services.knowledge.errors import KnowledgeItemNotFound, KnowledgeVersionNotFound
 from flycanon.models.entities.knowledge_version import KnowledgeVersionRow
 from flycanon.models.entities.source import SourceRow
@@ -18,10 +20,10 @@ from flycanon.models.repositories.knowledge_repository import KnowledgeRepositor
 from flycanon.models.repositories.source_repository import SourceRepository
 
 
+@service
 class ProvenanceService:
     def __init__(
         self,
-        *,
         knowledge_repository: KnowledgeRepository,
         source_repository: SourceRepository,
     ) -> None:

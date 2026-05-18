@@ -44,6 +44,45 @@ services:
       timeout: 3s
       retries: 30
 
+  # Optional local embedding sidecar via Ollama. Off by default;
+  # enable with ``docker compose --profile local-embeddings up`` (or
+  # by setting COMPOSE_PROFILES=local-embeddings). The
+  # ``ollama-pull`` init service pre-fetches the embedding model so
+  # the first ingest doesn't pay a 60-second download.
+  #
+  # Switch the embedder by exporting:
+  #   FLYCANON_EMBEDDING_MODEL=ollama:nomic-embed-text
+  #   FLYCANON_EMBEDDING_DIMENSIONS=768
+  #   FLYCANON_OLLAMA_BASE_URL=http://ollama:11434
+  ollama:
+    image: ollama/ollama:latest
+    container_name: flycanon-ollama
+    profiles: ["local-embeddings"]
+    ports:
+      - "${OLLAMA_PORT:-11434}:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    healthcheck:
+      test: ["CMD-SHELL", "ollama list >/dev/null 2>&1 || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+  ollama-pull:
+    image: ollama/ollama:latest
+    container_name: flycanon-ollama-pull
+    profiles: ["local-embeddings"]
+    depends_on:
+      ollama:
+        condition: service_healthy
+    environment:
+      OLLAMA_HOST: ollama:11434
+      OLLAMA_EMBEDDING_MODEL: ${OLLAMA_EMBEDDING_MODEL:-nomic-embed-text}
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - 'ollama pull "$$OLLAMA_EMBEDDING_MODEL" && echo "[ollama-pull] $$OLLAMA_EMBEDDING_MODEL ready"'
+    restart: "no"
+
   api:
     build: *service-build
     image: flycanon:latest
@@ -62,10 +101,19 @@ services:
       FLYCANON_REDIS_URL: redis://redis:6379/0
       FLYCANON_EDA_ADAPTER: postgres
       FLYCANON_EMBEDDING_MODEL: ${FLYCANON_EMBEDDING_MODEL:-openai:text-embedding-3-small}
+      FLYCANON_EMBEDDING_DIMENSIONS: ${FLYCANON_EMBEDDING_DIMENSIONS:-1536}
       FLYCANON_ANSWER_MODEL: ${FLYCANON_ANSWER_MODEL:-anthropic:claude-sonnet-4-6}
+      FLYCANON_OLLAMA_BASE_URL: ${FLYCANON_OLLAMA_BASE_URL:-http://ollama:11434}
+      FLYCANON_CORPUS_PATH: /app/canon-data/corpus.db
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      VOYAGE_API_KEY: ${VOYAGE_API_KEY:-}
+      COHERE_API_KEY: ${COHERE_API_KEY:-}
+      GOOGLE_API_KEY: ${GOOGLE_API_KEY:-}
+      MISTRAL_API_KEY: ${MISTRAL_API_KEY:-}
       RUN_MIGRATIONS: "true"
+    volumes:
+      - canon_data:/app/canon-data
     depends_on:
       postgres:
         condition: service_healthy
@@ -90,10 +138,19 @@ services:
       FLYCANON_REDIS_URL: redis://redis:6379/0
       FLYCANON_EDA_ADAPTER: postgres
       FLYCANON_EMBEDDING_MODEL: ${FLYCANON_EMBEDDING_MODEL:-openai:text-embedding-3-small}
+      FLYCANON_EMBEDDING_DIMENSIONS: ${FLYCANON_EMBEDDING_DIMENSIONS:-1536}
       FLYCANON_ANSWER_MODEL: ${FLYCANON_ANSWER_MODEL:-anthropic:claude-sonnet-4-6}
+      FLYCANON_OLLAMA_BASE_URL: ${FLYCANON_OLLAMA_BASE_URL:-http://ollama:11434}
+      FLYCANON_CORPUS_PATH: /app/canon-data/corpus.db
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      VOYAGE_API_KEY: ${VOYAGE_API_KEY:-}
+      COHERE_API_KEY: ${COHERE_API_KEY:-}
+      GOOGLE_API_KEY: ${GOOGLE_API_KEY:-}
+      MISTRAL_API_KEY: ${MISTRAL_API_KEY:-}
       RUN_MIGRATIONS: "false"
+    volumes:
+      - canon_data:/app/canon-data
     depends_on:
       api:
         condition: service_healthy
@@ -121,3 +178,5 @@ services:
 
 volumes:
   postgres_data:
+  ollama_data:
+  canon_data:

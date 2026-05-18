@@ -35,7 +35,7 @@ class VersionController:
     def __init__(self, queries: DefaultQueryBus) -> None:
         self._queries = queries
 
-    @get_mapping("/version", tags=["Version"])
+    @get_mapping("/version")
     async def version(self) -> VersionInfo:
         """Return the service identity + provider selection.
 

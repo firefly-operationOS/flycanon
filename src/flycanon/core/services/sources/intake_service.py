@@ -37,12 +37,16 @@ import logging
 import uuid
 from typing import Any
 
+from pyfly.container import service
+from pyfly.eda import EventPublisher
+
 from flycanon.config import CanonSettings
 from flycanon.core.services.audit import AuditService
 from flycanon.core.services.binary import BinaryNormalizer, NormalizedArtifact
 from flycanon.core.services.embeddings import EmbeddingService
 from flycanon.core.services.ingestion import IngestionService, LoadedDocument
 from flycanon.core.services.ingestion.loaders import LoaderRegistry
+from flycanon.core.services.metadata import MetadataExtractor
 from flycanon.core.services.retrieval import IndexService
 from flycanon.interfaces.dtos.source import SourceMetadata, SubmitSourceRequest
 from flycanon.interfaces.enums import SourceKind, SourceStatus
@@ -53,21 +57,22 @@ from flycanon.models.repositories.source_repository import SourceRepository
 logger = logging.getLogger(__name__)
 
 
+@service
 class IntakeService:
     """End-to-end source intake: normalise -> load -> chunk -> embed -> index."""
 
     def __init__(
         self,
-        *,
         binary_normalizer: BinaryNormalizer,
         ingestion: IngestionService,
         loaders: LoaderRegistry,
         embeddings: EmbeddingService,
         indexer: IndexService,
+        metadata_extractor: MetadataExtractor,
         source_repository: SourceRepository,
         chunk_repository: ChunkRepository,
         audit: AuditService,
-        event_publisher: object | None,
+        event_publisher: EventPublisher,
         settings: CanonSettings,
     ) -> None:
         self._binary_normalizer = binary_normalizer
@@ -75,6 +80,7 @@ class IntakeService:
         self._loaders = loaders
         self._embeddings = embeddings
         self._indexer = indexer
+        self._metadata = metadata_extractor
         self._sources = source_repository
         self._chunks = chunk_repository
         self._audit = audit
@@ -126,21 +132,47 @@ class IntakeService:
             await self._publish_failure(source=source, exc=exc, correlation_id=correlation_id)
             raise
 
+        # Per-format metadata extraction. We feed the loader-produced
+        # text back into the language detector so the ``language``
+        # field is populated even when the embedded metadata doesn't
+        # carry one. The extracted dict lands under
+        # ``metadata_json.extracted`` so the source schema stays
+        # stable while still exposing the rich facets.
+        primary_artifact = artifacts[0] if artifacts else None
+        primary_media = primary_artifact.media_type if primary_artifact else (content_type or "")
+        primary_bytes = primary_artifact.bytes if primary_artifact else merged_content
+        text_sample = self._first_text(result.chunks)
+        extracted = self._metadata.extract(
+            primary_bytes,
+            media_type=primary_media,
+            filename=filename,
+            text_sample=text_sample,
+        )
+        metadata = dict(result.source.metadata_json or {})
+        metadata["extracted"] = extracted.to_dict()
+        result.source.metadata_json = metadata
+
         await self._sources.add(result.source)
-        await self._chunks.replace_for_source(result.source.id, result.chunks)
 
         if result.chunks:
             texts = [chunk.content for chunk in result.chunks]
             embeddings = await self._embeddings.embed(texts)
+            # Stamp the model on the chunks BEFORE persisting so the
+            # canon_chunks row carries the right ``embedding_model``
+            # column on its single INSERT. The vector projection then
+            # mirrors the same chunk ids into the chosen vector store
+            # for retrieval-time RRF fusion.
+            for chunk in result.chunks:
+                chunk.embedding_model = self._embeddings.model
+            await self._chunks.replace_for_source(result.source.id, result.chunks)
             await self._indexer.replace_for_source(
                 source=result.source,
                 chunks=result.chunks,
                 embeddings=embeddings,
                 embedding_model=self._embeddings.model,
             )
-            for chunk in result.chunks:
-                chunk.embedding_model = self._embeddings.model
-            await self._chunks.replace_for_source(result.source.id, result.chunks)
+        else:
+            await self._chunks.replace_for_source(result.source.id, [])
 
         await self._audit.record(
             event_type="source.ingested",
@@ -164,6 +196,16 @@ class IntakeService:
             len(artifacts),
         )
         return result.source
+
+    @staticmethod
+    def _first_text(chunks: list[Any]) -> str:
+        """Return up to ~2 000 chars of the first ingested chunk's
+        text so the language detector has something to work with.
+        """
+        if not chunks:
+            return ""
+        body = getattr(chunks[0], "content", "") or ""
+        return body[:2000]
 
     # ------------------------------------------------------------------
     # Helpers

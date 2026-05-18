@@ -38,7 +38,7 @@ class QueryController:
     def __init__(self, queries: DefaultQueryBus) -> None:
         self._queries = queries
 
-    @post_mapping("/search", tags=["Query"])
+    @post_mapping("/search")
     async def search(self, request: Valid[Body[SearchRequest]]) -> SearchResponse:
         """Hybrid retrieval over the canon corpus.
 
@@ -71,7 +71,7 @@ class QueryController:
         """
         return await self._queries.query(SearchKnowledgeQuery(request=request))
 
-    @post_mapping("/query", tags=["Query"])
+    @post_mapping("/query")
     async def answer(self, request: Valid[Body[AnswerRequest]]) -> AnswerResponse:
         """Grounded RAG answer with explicit citations.
 

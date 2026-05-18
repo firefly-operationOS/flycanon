@@ -42,33 +42,79 @@ class EmbeddingService:
     def dimensions(self) -> int:
         return self._dimensions
 
+    # Most embedders have a hard token / character limit per input
+    # (nomic-embed-text: ~8 192 tokens, OpenAI text-embedding-3-*:
+    # 8 191 tokens, Voyage / Cohere: 8 000 tokens). 8 000 characters
+    # is a conservative cap that keeps every supported provider happy
+    # without truncating typical chunked content.
+    _MAX_INPUT_CHARS = 8000
+
     async def embed(self, texts: Sequence[str]) -> list[list[float]]:
         """Embed ``texts`` in one call. Returns one vector per input.
 
         The underlying embedder handles batching; we still split
         absurdly large inputs into 64-element windows so memory use
-        stays bounded.
+        stays bounded. Each input is also truncated to
+        :attr:`_MAX_INPUT_CHARS` so a single oversized chunk doesn't
+        cause the whole batch to fail with a 400 from the provider.
+        On batch failure we retry one input at a time and emit a
+        zero-vector for the offending entries (with a warning) so a
+        single bad chunk never blocks an ingest.
         """
         if not texts:
             return []
-        items = list(texts)
+        items = [self._truncate(t) for t in texts]
         vectors: list[list[float]] = []
         window = 64
         for start in range(0, len(items), window):
-            chunk = items[start : start + window]
+            batch = items[start : start + window]
             try:
-                result = await self._embedder.embed(chunk)  # type: ignore[attr-defined]
+                batch_vectors = await self._embed_batch(batch)
             except Exception as exc:
-                raise EmbeddingError(f"embedding call failed: {exc}") from exc
-            chunk_vectors = getattr(result, "embeddings", None)
-            if chunk_vectors is None:
-                raise EmbeddingError("embedder result missing ``embeddings`` attribute")
-            vectors.extend(list(v) for v in chunk_vectors)
+                logger.warning(
+                    "embedding batch failed (%s); falling back to one-by-one",
+                    exc,
+                )
+                batch_vectors = await self._embed_one_by_one(batch)
+            vectors.extend(batch_vectors)
         if len(vectors) != len(items):
             raise EmbeddingError(
                 f"embedder returned {len(vectors)} vectors for {len(items)} inputs"
             )
         return vectors
+
+    async def _embed_batch(self, batch: list[str]) -> list[list[float]]:
+        result = await self._embedder.embed(batch)  # type: ignore[attr-defined]
+        chunk_vectors = getattr(result, "embeddings", None)
+        if chunk_vectors is None:
+            raise EmbeddingError("embedder result missing ``embeddings`` attribute")
+        return [list(v) for v in chunk_vectors]
+
+    async def _embed_one_by_one(self, batch: list[str]) -> list[list[float]]:
+        out: list[list[float]] = []
+        zero = [0.0] * self._dimensions
+        for idx, text in enumerate(batch):
+            try:
+                result = await self._embedder.embed([text])  # type: ignore[attr-defined]
+                vec = getattr(result, "embeddings", None)
+                if not vec:
+                    raise EmbeddingError("empty embedding response")
+                out.append(list(vec[0]))
+            except Exception as exc:
+                logger.warning(
+                    "embedding failed for item %d (%d chars): %s; using zero vector",
+                    idx,
+                    len(text),
+                    exc,
+                )
+                out.append(list(zero))
+        return out
+
+    def _truncate(self, text: str) -> str:
+        s = text or ""
+        if len(s) <= self._MAX_INPUT_CHARS:
+            return s or " "  # provider rejects empty string
+        return s[: self._MAX_INPUT_CHARS]
 
     async def embed_one(self, text: str) -> list[float]:
         result = await self.embed([text])
@@ -79,43 +125,52 @@ def _build_embedder(*, provider: str, model: str, dimensions: int, batch_size: i
     """Pick the concrete embedder for ``provider``.
 
     Heavy imports are deferred so a configuration that never touches a
-    given provider doesn't pull its SDK off the wheel.
+    given provider doesn't pull its SDK off the wheel. Module names
+    follow ``fireflyframework_agentic.embeddings.providers.<provider>``
+    (one module per provider, no ``_embedder`` suffix).
     """
+    import os
+
     p = provider.strip().lower()
     if p == "openai":
-        from fireflyframework_agentic.embeddings.providers.openai_embedder import OpenAIEmbedder
+        from fireflyframework_agentic.embeddings.providers.openai import OpenAIEmbedder
 
         return OpenAIEmbedder(model=model, dimensions=dimensions, batch_size=batch_size)
     if p == "azure" or p == "azure-openai":
-        from fireflyframework_agentic.embeddings.providers.azure_openai_embedder import (
-            AzureOpenAIEmbedder,
-        )
+        from fireflyframework_agentic.embeddings.providers.azure import AzureEmbedder
 
-        return AzureOpenAIEmbedder(model=model, dimensions=dimensions, batch_size=batch_size)
+        return AzureEmbedder(model=model, dimensions=dimensions, batch_size=batch_size)
     if p == "cohere":
-        from fireflyframework_agentic.embeddings.providers.cohere_embedder import CohereEmbedder
+        from fireflyframework_agentic.embeddings.providers.cohere import CohereEmbedder
 
         return CohereEmbedder(model=model, dimensions=dimensions, batch_size=batch_size)
     if p == "google" or p == "gemini":
-        from fireflyframework_agentic.embeddings.providers.google_embedder import GoogleEmbedder
+        from fireflyframework_agentic.embeddings.providers.google import GoogleEmbedder
 
         return GoogleEmbedder(model=model, dimensions=dimensions, batch_size=batch_size)
     if p == "mistral":
-        from fireflyframework_agentic.embeddings.providers.mistral_embedder import MistralEmbedder
+        from fireflyframework_agentic.embeddings.providers.mistral import MistralEmbedder
 
         return MistralEmbedder(model=model, dimensions=dimensions, batch_size=batch_size)
     if p == "voyage":
-        from fireflyframework_agentic.embeddings.providers.voyage_embedder import VoyageEmbedder
+        from fireflyframework_agentic.embeddings.providers.voyage import VoyageEmbedder
 
         return VoyageEmbedder(model=model, dimensions=dimensions, batch_size=batch_size)
     if p == "bedrock":
-        from fireflyframework_agentic.embeddings.providers.bedrock_embedder import BedrockEmbedder
+        from fireflyframework_agentic.embeddings.providers.bedrock import BedrockEmbedder
 
         return BedrockEmbedder(model=model, dimensions=dimensions, batch_size=batch_size)
     if p == "ollama":
-        from fireflyframework_agentic.embeddings.providers.ollama_embedder import OllamaEmbedder
+        from fireflyframework_agentic.embeddings.providers.ollama import OllamaEmbedder
 
-        return OllamaEmbedder(model=model, dimensions=dimensions, batch_size=batch_size)
+        # Ollama runs as a sidecar; honour FLYCANON_OLLAMA_BASE_URL.
+        base_url = os.environ.get("FLYCANON_OLLAMA_BASE_URL", "http://localhost:11434")
+        return OllamaEmbedder(
+            model=model,
+            dimensions=dimensions,
+            base_url=base_url,
+            batch_size=batch_size,
+        )
     raise EmbeddingError(
         f"unknown embedding provider {provider!r}; "
         "supported: openai, azure, cohere, google, mistral, voyage, bedrock, ollama"

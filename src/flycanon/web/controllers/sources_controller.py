@@ -82,7 +82,7 @@ class SourcesController:
         self._commands = commands
         self._queries = queries
 
-    @post_mapping("", status_code=201, tags=["Sources"])
+    @post_mapping("", status_code=201)
     async def submit_json(
         self,
         payload: Valid[Body[SubmitSourceJsonPayload]],
@@ -159,7 +159,7 @@ class SourcesController:
             )
         )
 
-    @get_mapping("/{source_id}", tags=["Sources"])
+    @get_mapping("/{source_id}")
     async def get_source(self, source_id: PathVar[str]) -> SourceRecord:
         """Fetch a single source by id.
 
@@ -177,7 +177,7 @@ class SourcesController:
             raise ResourceNotFoundException(f"source {source_id!r} not found")
         return record
 
-    @get_mapping("", tags=["Sources"])
+    @get_mapping("")
     async def list_sources(
         self,
         status: QueryParam[str] = "",

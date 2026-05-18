@@ -16,6 +16,9 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from pyfly.container import service
+from pyfly.eda import EventPublisher
+
 from flycanon.config import CanonSettings
 from flycanon.models.entities.audit_event import AuditEventRow
 from flycanon.models.repositories.audit_repository import AuditRepository
@@ -23,14 +26,21 @@ from flycanon.models.repositories.audit_repository import AuditRepository
 logger = logging.getLogger(__name__)
 
 
+@service
 class AuditService:
-    """Persist + publish audit events."""
+    """Persist + publish audit events.
+
+    Marked ``@service`` so pyfly's container auto-discovers it via
+    ``scan_packages`` and resolves its dependencies (including the
+    :class:`EventPublisher` registered by pyfly's
+    ``EdaAutoConfiguration``) at first lookup -- after every
+    auto-configuration has run.
+    """
 
     def __init__(
         self,
-        *,
         repository: AuditRepository,
-        event_publisher: object | None,
+        event_publisher: EventPublisher,
         settings: CanonSettings,
     ) -> None:
         self._repository = repository

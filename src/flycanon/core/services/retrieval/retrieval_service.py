@@ -190,6 +190,14 @@ class _EmbedderShim:
         vectors = await self._service.embed(texts)
         return _EmbedResult(embeddings=vectors)
 
+    async def embed_one(self, text: str) -> list[float]:
+        """Single-text convenience used by the agentic ``HybridRetriever``.
+
+        The retriever calls this for the search query path; returning
+        the raw vector keeps the call cheap and avoids the wrapper.
+        """
+        return await self._service.embed_one(text)
+
 
 @dataclass(slots=True)
 class _EmbedResult:
