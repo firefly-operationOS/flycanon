@@ -1,0 +1,76 @@
+# Copyright 2026 Firefly Software Solutions Inc
+"""``canon_knowledge_versions`` -- the per-revision content row.
+
+Every published / draft revision of a knowledge item gets a row here.
+The combination ``(knowledge_item_id, version)`` is unique; the item's
+``current_version`` points at the active row.
+"""
+
+from __future__ import annotations
+
+import uuid
+from datetime import datetime
+from typing import Any
+
+from sqlalchemy import (
+    JSON,
+    DateTime,
+    ForeignKey,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+    func,
+)
+from sqlalchemy.orm import Mapped, mapped_column
+
+from flycanon.models.entities.base import Base
+
+
+class KnowledgeVersionRow(Base):
+    __tablename__ = "canon_knowledge_versions"
+
+    id: Mapped[str] = mapped_column(
+        String(36),
+        primary_key=True,
+        default=lambda: str(uuid.uuid4()),
+    )
+    knowledge_item_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("canon_knowledge_items.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    version: Mapped[int] = mapped_column(Integer, nullable=False)
+    status: Mapped[str] = mapped_column(String(24), nullable=False, index=True)
+
+    # Content.
+    title: Mapped[str] = mapped_column(String(512), nullable=False)
+    summary: Mapped[str | None] = mapped_column(Text, nullable=True)
+    body: Mapped[str] = mapped_column(Text, nullable=False)
+
+    # Header.
+    domain: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    jurisdiction: Mapped[str] = mapped_column(String(32), nullable=False, default="GLOBAL")
+    tags_json: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
+
+    # Version chain.
+    supersedes_version: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    superseded_by_version: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+    # Origin trace.
+    originating_candidate_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    created_by: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+    metadata_json: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
+
+    __table_args__ = (
+        UniqueConstraint(
+            "knowledge_item_id",
+            "version",
+            name="uq_canon_knowledge_versions_item_version",
+        ),
+    )

@@ -1,0 +1,73 @@
+# Copyright 2026 Firefly Software Solutions Inc
+"""``canon_chunks`` -- retrieval-grade fragments of a source.
+
+A chunk carries:
+
+* the verbatim text fragment (``content``),
+* an optional pre-computed embedding (``embedding``) -- nullable so
+  re-embedding with a different provider is a no-op for the schema,
+* a serialised hint for the loader's positional bookkeeping
+  (``positional``) so callers can reconstruct a citation context.
+
+The BM25 projection lives in the agentic framework's ``SqliteCorpus``
+side-table (FTS5); the row here is the system-of-record for the
+chunk's content + provenance.
+"""
+
+from __future__ import annotations
+
+import uuid
+from datetime import datetime
+from typing import Any
+
+from sqlalchemy import JSON, DateTime, ForeignKey, Index, Integer, String, Text, func
+from sqlalchemy.orm import Mapped, mapped_column
+
+from flycanon.models.entities.base import Base
+
+
+class KnowledgeChunkRow(Base):
+    __tablename__ = "canon_chunks"
+
+    id: Mapped[str] = mapped_column(
+        String(36),
+        primary_key=True,
+        default=lambda: str(uuid.uuid4()),
+    )
+    source_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("canon_sources.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
+    # Position within the source: 0-based.
+    index_in_source: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    total_chunks: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+
+    # Verbatim content + raw character offsets for citation rendering.
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    char_start: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    char_end: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    page: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    section_path: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True,
+        doc="Heading path (e.g. ``Scope > In scope``) recovered by the loader.",
+    )
+
+    # Optional dense embedding. Kept JSON for backend portability; the
+    # pgvector adapter mirrors this column into a typed vector when
+    # ``FLYCANON_VECTOR_STORE=pgvector`` is set.
+    embedding_model: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    embedding: Mapped[list[float] | None] = mapped_column(JSON, nullable=True)
+
+    metadata_json: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+    __table_args__ = (
+        Index("ix_canon_chunks_source_idx", "source_id", "index_in_source"),
+    )
