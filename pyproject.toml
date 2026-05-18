@@ -66,15 +66,20 @@ dependencies = [
     "pydantic>=2.10.0",
     "pydantic-settings>=2.7.0",
 
-    # Persistence stack. asyncpg drives the runtime (async engine); psycopg
-    # is the sync sibling used by Alembic for migrations (env.py rewrites
-    # ``+asyncpg`` -> ``+psycopg`` so a single DATABASE_URL covers both).
+    # Persistence stack. asyncpg drives the runtime (async engine);
+    # psycopg is the sync sibling used by Alembic for migrations
+    # (env.py rewrites ``+asyncpg`` -> ``+psycopg`` so a single
+    # DATABASE_URL covers both). ``pgvector`` is core (not an extra)
+    # because Postgres + the pgvector extension is the DEFAULT
+    # vector backend -- the canonical store + the dense-vector
+    # projection co-reside in one operational Postgres instance.
     "sqlalchemy[asyncio]>=2.0",
     "asyncpg>=0.30",
     "psycopg[binary]>=3.2",
     "aiosqlite>=0.22",
     "alembic>=1.14",
     "redis>=5.2",
+    "pgvector>=0.3.6",
 
     # Structured logging + tracing.
     "structlog>=25.5.0",
@@ -96,14 +101,6 @@ dev = [
     "httpx>=0.28",
     "reportlab>=4.2",
     "python-docx>=1.1",
-]
-
-# Optional ``pgvector`` adapter for the dense-vector projection.
-# Activates when FLYCANON_VECTOR_STORE=pgvector. Co-locates the
-# vector store inside the canonical Postgres instance (no extra
-# service to operate). Requires the ``vector`` Postgres extension.
-pgvector = [
-    "pgvector>=0.3.6",
 ]
 
 # Optional Chroma adapter (managed or self-hosted ChromaDB). Activates

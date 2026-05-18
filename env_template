@@ -61,15 +61,22 @@ FLYCANON_RETRIEVAL_RRF_K=60
 # VectorStoreProtocol and is wired first-class in
 # ``core/services/retrieval/corpus_factory.py``.
 #
-#   sqlite-vec  -- single-file SQLite (FTS5 + sqlite-vec). Default.
 #   pgvector    -- HNSW index in the canonical Postgres (extension
-#                  ``vector`` required). Install with
-#                  ``uv sync --extra pgvector``.
-#   chroma      -- ChromaDB (managed or self-hosted).
-#   qdrant      -- Qdrant (self-hosted or Cloud).
-#   pinecone    -- Pinecone Serverless.
+#                  ``vector`` required). DEFAULT -- the canonical
+#                  store already runs Postgres so co-locating the
+#                  vector projection means one operational service,
+#                  not two. The docker-compose stack uses the
+#                  ``pgvector/pgvector:pg16`` image so the
+#                  ``vector`` extension is ready out of the box.
+#   sqlite-vec  -- single-file SQLite (FTS5 + sqlite-vec). Best for
+#                  single-node dev / test deployments.
+#   chroma      -- ChromaDB (managed or self-hosted). Requires the
+#                  ``chroma`` extra.
+#   qdrant      -- Qdrant (self-hosted or Cloud). Requires the
+#                  ``qdrant`` extra.
+#   pinecone    -- Pinecone Serverless. Requires the ``pinecone`` extra.
 #   memory      -- in-memory, ephemeral (test-only).
-FLYCANON_VECTOR_STORE=sqlite-vec
+FLYCANON_VECTOR_STORE=pgvector
 # SQLite path the BM25 corpus + sqlite-vec backend use. The directory
 # is created on startup if it does not exist. The BM25 corpus file is
 # also created for the non-sqlite-vec backends -- it's the BM25 index
