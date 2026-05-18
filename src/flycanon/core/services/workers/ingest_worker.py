@@ -44,6 +44,10 @@ from typing import Any
 
 from flycanon.config import CanonSettings
 from flycanon.core.services.ingestion import IngestionService  # noqa: F401  (used by the CLI helper)
+from flycanon.core.services.sources.async_ingest_service import (
+    INGEST_REQUESTED_EVENT,
+    AsyncIngestService,
+)
 from flycanon.models.repositories import SourceRepository
 
 logger = logging.getLogger(__name__)
@@ -70,11 +74,13 @@ class IngestWorker:
         repository: SourceRepository,
         event_publisher: object,
         settings: CanonSettings,
+        async_ingest: AsyncIngestService | None = None,
     ) -> None:
         self._ingestion = ingestion
         self._repository = repository
         self._publisher = event_publisher
         self._settings = settings
+        self._async_ingest = async_ingest
         self._stop_event = asyncio.Event()
         # The bounded semaphore is the load-shedding primitive: when
         # ``max_concurrency`` tasks are inflight, ``acquire()`` blocks
@@ -102,6 +108,16 @@ class IngestWorker:
                 self._settings.audit_event,
                 self._make_dispatcher(self._on_audit_event, "audit"),
             )
+            # Async-ingest jobs land here. The handler picks up the
+            # job_id from the payload and runs the full intake
+            # pipeline via AsyncIngestService.process(). All the
+            # back-pressure / timeout / failure isolation the
+            # dispatcher provides applies uniformly.
+            if self._async_ingest is not None:
+                subscribe(
+                    INGEST_REQUESTED_EVENT,
+                    self._make_dispatcher(self._on_ingest_requested, "ingest_job"),
+                )
 
         start = getattr(self._publisher, "start", None)
         if start is not None:
@@ -266,6 +282,22 @@ class IngestWorker:
             payload.get("subject_id"),
             payload.get("actor"),
         )
+
+    async def _on_ingest_requested(self, envelope: Any) -> None:
+        payload = self._payload_of(envelope)
+        job_id = payload.get("job_id")
+        if not job_id:
+            logger.warning(
+                "%s without job_id -- dropping", self._event_type_of(envelope)
+            )
+            return
+        if self._async_ingest is None:
+            logger.warning(
+                "async ingest service not wired -- cannot process job_id=%s", job_id
+            )
+            return
+        logger.info("ingest worker processing job_id=%s", job_id)
+        await self._async_ingest.process(str(job_id))
 
     # ------------------------------------------------------------------
     # Helpers
