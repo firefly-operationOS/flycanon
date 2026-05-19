@@ -351,9 +351,7 @@ def register_problem_handlers(app: FastAPI) -> None:
 
     app.add_exception_handler(ResourceNotFoundException, not_found)  # type: ignore[arg-type]
 
-    async def command_processing(
-        request: Request, exc: CommandProcessingException
-    ) -> JSONResponse:
+    async def command_processing(request: Request, exc: CommandProcessingException) -> JSONResponse:
         cause = exc.cause
         if cause is not None:
             response = _dispatch_typed(cause)
@@ -371,9 +369,7 @@ def register_problem_handlers(app: FastAPI) -> None:
             detail=str(exc),
         )
 
-    async def query_processing(
-        request: Request, exc: QueryProcessingException
-    ) -> JSONResponse:
+    async def query_processing(request: Request, exc: QueryProcessingException) -> JSONResponse:
         cause = exc.cause
         if cause is not None:
             response = _dispatch_typed(cause)

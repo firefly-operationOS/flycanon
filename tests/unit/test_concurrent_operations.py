@@ -517,12 +517,8 @@ class TestKnowledgeRetireServiceConcurrency:
         )
         item_id = version.knowledge_item_id
         results = await asyncio.gather(
-            knowledge_service.retire(
-                item_id, RetireKnowledgeRequest(reason="alice", actor="alice")
-            ),
-            knowledge_service.retire(
-                item_id, RetireKnowledgeRequest(reason="bob", actor="bob")
-            ),
+            knowledge_service.retire(item_id, RetireKnowledgeRequest(reason="alice", actor="alice")),
+            knowledge_service.retire(item_id, RetireKnowledgeRequest(reason="bob", actor="bob")),
             return_exceptions=True,
         )
         winners = [r for r in results if not isinstance(r, Exception)]
@@ -544,9 +540,7 @@ class TestKnowledgeSupersedeServiceConcurrency:
     Now the claim_status_transition primitive gates the transition."""
 
     @pytest.mark.asyncio
-    async def test_concurrent_supersede_one_pointer_survives(
-        self, knowledge_service, repositories
-    ):
+    async def test_concurrent_supersede_one_pointer_survives(self, knowledge_service, repositories):
         # Build three items: A (subject), B and C (targets).
         a = await knowledge_service.create(
             CreateKnowledgeRequest(
@@ -605,9 +599,7 @@ class TestCandidateAcceptServiceConcurrency:
     the local status guard and both wrote a knowledge item."""
 
     @pytest.mark.asyncio
-    async def test_concurrent_accept_creates_only_one_item(
-        self, candidate_service, repositories
-    ):
+    async def test_concurrent_accept_creates_only_one_item(self, candidate_service, repositories):
         # Seed a proposed candidate. (Skip the consolidator -- just
         # plant the row the way propose_from_source would.)
         candidate = CandidateRow(
@@ -658,12 +650,8 @@ class TestCandidateAcceptServiceConcurrency:
         await repositories["candidate"].add_many([candidate])
 
         results = await asyncio.gather(
-            candidate_service.reject(
-                "cand-svc-2", RejectCandidateRequest(reason="alice", actor="alice")
-            ),
-            candidate_service.reject(
-                "cand-svc-2", RejectCandidateRequest(reason="bob", actor="bob")
-            ),
+            candidate_service.reject("cand-svc-2", RejectCandidateRequest(reason="alice", actor="alice")),
+            candidate_service.reject("cand-svc-2", RejectCandidateRequest(reason="bob", actor="bob")),
             return_exceptions=True,
         )
         winners = [r for r in results if not isinstance(r, Exception)]
@@ -681,9 +669,7 @@ class TestRelationServiceTypedConflict:
     error text."""
 
     @pytest.mark.asyncio
-    async def test_duplicate_relation_raises_typed_conflict(
-        self, relation_service, knowledge_service
-    ):
+    async def test_duplicate_relation_raises_typed_conflict(self, relation_service, knowledge_service):
         a = await knowledge_service.create(
             CreateKnowledgeRequest(
                 title="A", body="a", domain=Domain.process, jurisdiction=Jurisdiction.GLOBAL
