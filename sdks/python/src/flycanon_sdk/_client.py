@@ -85,7 +85,7 @@ class CanonClient:
     ) -> None:
         merged_headers: dict[str, str] = {
             "Accept": "application/json",
-            "User-Agent": "flycanon-sdk-python/26.5.5",
+            "User-Agent": "flycanon-sdk-python/26.5.6",
         }
         if api_key:
             merged_headers["Authorization"] = f"Bearer {api_key}"
