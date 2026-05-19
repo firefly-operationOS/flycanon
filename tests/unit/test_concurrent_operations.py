@@ -389,3 +389,320 @@ class TestKnowledgeClaimStatusTransition:
             mark_retired_at=True,
         )
         assert result is None  # already retired -> the loser branch
+
+
+# ---------------------------------------------------------------------------
+# Service-level integration tests
+#
+# The primitives above prove the repository contract. These tests
+# exercise the full service path (KnowledgeService / CandidateService)
+# so the orchestration around the atomic claim -- ordering of audit
+# events, EDA publishes, response wiring -- is regression-covered, not
+# just the storage layer.
+# ---------------------------------------------------------------------------
+
+
+from flycanon.config import CanonSettings  # noqa: E402
+from flycanon.core.services.audit import AuditService  # noqa: E402
+from flycanon.core.services.consolidation.candidate_service import (  # noqa: E402
+    CandidateService,
+)
+from flycanon.core.services.consolidation.consolidator import Consolidator  # noqa: E402
+from flycanon.core.services.consolidation.errors import (  # noqa: E402
+    CandidateAlreadyDecided,
+)
+from flycanon.core.services.knowledge import (  # noqa: E402
+    KnowledgeItemAlreadyRetired,
+    KnowledgeService,
+)
+from flycanon.core.services.knowledge.errors import (  # noqa: E402
+    InvalidSupersedeTarget,
+)
+from flycanon.core.services.knowledge.relation_service import (  # noqa: E402
+    KnowledgeRelationService,
+    RelationConflictError,
+)
+from flycanon.interfaces.dtos.candidate import (  # noqa: E402
+    AcceptCandidateRequest,
+    RejectCandidateRequest,
+)
+from flycanon.interfaces.dtos.knowledge import (  # noqa: E402
+    CreateKnowledgeRequest,
+    RetireKnowledgeRequest,
+    SupersedeKnowledgeRequest,
+)
+from flycanon.interfaces.dtos.relation import CreateRelationRequest  # noqa: E402
+from flycanon.interfaces.enums import (  # noqa: E402
+    CandidateStatus,
+    Domain,
+    Jurisdiction,
+    RelationKind,
+)
+
+
+@pytest.fixture
+def settings() -> CanonSettings:
+    return CanonSettings()
+
+
+@pytest.fixture
+def audit_service(repositories, settings):
+    return AuditService(
+        repository=repositories["audit"],
+        event_publisher=None,
+        settings=settings,
+    )
+
+
+@pytest.fixture
+def knowledge_service(repositories, audit_service, settings):
+    return KnowledgeService(
+        repository=repositories["knowledge"],
+        audit=audit_service,
+        event_publisher=None,
+        settings=settings,
+    )
+
+
+@pytest.fixture
+def relation_service(repositories, audit_service, settings):
+    return KnowledgeRelationService(
+        knowledge_repository=repositories["knowledge"],
+        relation_repository=repositories["relation"],
+        audit=audit_service,
+        event_publisher=None,
+        settings=settings,
+    )
+
+
+class _StubConsolidator(Consolidator):  # pragma: no cover -- never invoked
+    """Candidate service requires a Consolidator at construction; the
+    accept/reject paths under test never invoke it, but the DI graph
+    expects something callable."""
+
+    def __init__(self) -> None:
+        pass
+
+
+@pytest.fixture
+def candidate_service(repositories, knowledge_service, audit_service, settings):
+    return CandidateService(
+        candidate_repository=repositories["candidate"],
+        source_repository=repositories["source"],
+        chunk_repository=repositories["chunk"],
+        knowledge=knowledge_service,
+        consolidator=_StubConsolidator(),
+        audit=audit_service,
+        event_publisher=None,
+        settings=settings,
+    )
+
+
+class TestKnowledgeRetireServiceConcurrency:
+    """End-to-end: two concurrent ``KnowledgeService.retire`` calls
+    on the same item must produce exactly one mutation and the loser
+    must raise ``KnowledgeItemAlreadyRetired``. Before the atomic
+    claim landed, both ``upsert_item`` calls succeeded with
+    last-writer-wins on lifecycle pointers."""
+
+    @pytest.mark.asyncio
+    async def test_concurrent_retire_one_winner(self, knowledge_service, repositories):
+        version = await knowledge_service.create(
+            CreateKnowledgeRequest(
+                title="Item to retire",
+                body="body",
+                domain=Domain.process,
+                jurisdiction=Jurisdiction.GLOBAL,
+            )
+        )
+        item_id = version.knowledge_item_id
+        results = await asyncio.gather(
+            knowledge_service.retire(
+                item_id, RetireKnowledgeRequest(reason="alice", actor="alice")
+            ),
+            knowledge_service.retire(
+                item_id, RetireKnowledgeRequest(reason="bob", actor="bob")
+            ),
+            return_exceptions=True,
+        )
+        winners = [r for r in results if not isinstance(r, Exception)]
+        losers = [r for r in results if isinstance(r, Exception)]
+        assert len(winners) == 1
+        assert len(losers) == 1
+        assert isinstance(losers[0], KnowledgeItemAlreadyRetired)
+        # Exactly one retired_at + one reason landed on the row.
+        final = await repositories["knowledge"].get_item(item_id)
+        assert final.status == "retired"
+        assert final.retired_reason in ("alice", "bob")
+
+
+class TestKnowledgeSupersedeServiceConcurrency:
+    """End-to-end: two concurrent ``KnowledgeService.supersede`` calls
+    on the same item with different targets must produce exactly one
+    mutation. The previously-documented gap in docs/concurrency.md
+    let both writes land (last-writer-wins on superseded_by_item_id).
+    Now the claim_status_transition primitive gates the transition."""
+
+    @pytest.mark.asyncio
+    async def test_concurrent_supersede_one_pointer_survives(
+        self, knowledge_service, repositories
+    ):
+        # Build three items: A (subject), B and C (targets).
+        a = await knowledge_service.create(
+            CreateKnowledgeRequest(
+                title="A", body="a", domain=Domain.process, jurisdiction=Jurisdiction.GLOBAL
+            )
+        )
+        b = await knowledge_service.create(
+            CreateKnowledgeRequest(
+                title="B", body="b", domain=Domain.process, jurisdiction=Jurisdiction.GLOBAL
+            )
+        )
+        c = await knowledge_service.create(
+            CreateKnowledgeRequest(
+                title="C", body="c", domain=Domain.process, jurisdiction=Jurisdiction.GLOBAL
+            )
+        )
+        item_id = a.knowledge_item_id
+        target_b = b.knowledge_item_id
+        target_c = c.knowledge_item_id
+
+        results = await asyncio.gather(
+            knowledge_service.supersede(
+                item_id,
+                SupersedeKnowledgeRequest(superseded_by_item_id=target_b, actor="alice"),
+            ),
+            knowledge_service.supersede(
+                item_id,
+                SupersedeKnowledgeRequest(superseded_by_item_id=target_c, actor="bob"),
+            ),
+            return_exceptions=True,
+        )
+        # The atomic claim must fire on exactly one of the two operators:
+        # one observes ``InvalidSupersedeTarget`` (the loser branch in
+        # KnowledgeService.supersede when claim_status_transition returns
+        # None). Under SQLite's single-writer model the winner's audit
+        # write can still race with the loser's read at the engine level
+        # -- the orchestration invariant is what we're checking here, not
+        # the storage engine's parallel-write tolerance.
+        supersede_losers = [r for r in results if isinstance(r, InvalidSupersedeTarget)]
+        assert len(supersede_losers) == 1, (
+            f"expected exactly one InvalidSupersedeTarget loser; results="
+            f"{[type(r).__name__ for r in results]}"
+        )
+        # Final row state: status flipped to superseded with exactly one
+        # of the two targets, not a frankenstein overwrite.
+        final = await repositories["knowledge"].get_item(item_id)
+        assert final.status == "superseded"
+        assert final.superseded_by_item_id in (target_b, target_c)
+
+
+class TestCandidateAcceptServiceConcurrency:
+    """End-to-end: two concurrent ``CandidateService.accept`` calls on
+    the same proposed candidate must produce exactly one knowledge
+    item (or version) and one accepted candidate, with the loser
+    raising ``CandidateAlreadyDecided``. Pre-fix, both calls passed
+    the local status guard and both wrote a knowledge item."""
+
+    @pytest.mark.asyncio
+    async def test_concurrent_accept_creates_only_one_item(
+        self, candidate_service, repositories
+    ):
+        # Seed a proposed candidate. (Skip the consolidator -- just
+        # plant the row the way propose_from_source would.)
+        candidate = CandidateRow(
+            id="cand-svc-1",
+            status=CandidateStatus.proposed.value,
+            source_id="src-1",
+            title="Proposed canonical statement",
+            body="The body",
+            summary=None,
+            domain=Domain.process.value,
+            jurisdiction=Jurisdiction.GLOBAL.value,
+        )
+        await repositories["candidate"].add_many([candidate])
+
+        results = await asyncio.gather(
+            candidate_service.accept(
+                "cand-svc-1",
+                AcceptCandidateRequest(actor="alice", publish=True),
+            ),
+            candidate_service.accept(
+                "cand-svc-1",
+                AcceptCandidateRequest(actor="bob", publish=True),
+            ),
+            return_exceptions=True,
+        )
+        winners = [r for r in results if not isinstance(r, Exception)]
+        losers = [r for r in results if isinstance(r, Exception)]
+        assert len(winners) == 1, f"want 1 winner, got {len(winners)}; losers={losers}"
+        assert len(losers) == 1
+        assert isinstance(losers[0], CandidateAlreadyDecided)
+        # Verify only ONE knowledge item was created (the loser must
+        # have short-circuited BEFORE calling knowledge.create).
+        items, total = await repositories["knowledge"].list_items(
+            statuses=["draft", "published"],
+        )
+        assert total == 1, f"expected exactly 1 item, got {total}: {[i.title for i in items]}"
+
+    @pytest.mark.asyncio
+    async def test_concurrent_reject_one_winner(self, candidate_service, repositories):
+        candidate = CandidateRow(
+            id="cand-svc-2",
+            status=CandidateStatus.proposed.value,
+            source_id="src-2",
+            title="t",
+            body="b",
+            domain=Domain.process.value,
+        )
+        await repositories["candidate"].add_many([candidate])
+
+        results = await asyncio.gather(
+            candidate_service.reject(
+                "cand-svc-2", RejectCandidateRequest(reason="alice", actor="alice")
+            ),
+            candidate_service.reject(
+                "cand-svc-2", RejectCandidateRequest(reason="bob", actor="bob")
+            ),
+            return_exceptions=True,
+        )
+        winners = [r for r in results if not isinstance(r, Exception)]
+        losers = [r for r in results if isinstance(r, Exception)]
+        assert len(winners) == 1
+        assert len(losers) == 1
+        assert isinstance(losers[0], CandidateAlreadyDecided)
+
+
+class TestRelationServiceTypedConflict:
+    """End-to-end: adding a duplicate relation must raise the typed
+    ``RelationConflictError`` (HTTP 409) rather than a generic
+    IntegrityError. The narrowed except-clause catches the typed
+    SQLAlchemy exception, not a string match on the engine's
+    error text."""
+
+    @pytest.mark.asyncio
+    async def test_duplicate_relation_raises_typed_conflict(
+        self, relation_service, knowledge_service
+    ):
+        a = await knowledge_service.create(
+            CreateKnowledgeRequest(
+                title="A", body="a", domain=Domain.process, jurisdiction=Jurisdiction.GLOBAL
+            )
+        )
+        b = await knowledge_service.create(
+            CreateKnowledgeRequest(
+                title="B", body="b", domain=Domain.process, jurisdiction=Jurisdiction.GLOBAL
+            )
+        )
+        req = CreateRelationRequest(
+            to_item_id=b.knowledge_item_id,
+            kind=RelationKind.related,
+            actor="alice",
+        )
+        await relation_service.add(a.knowledge_item_id, req)
+        # Second add with the same (from, to, kind) hits the UNIQUE
+        # constraint. The narrowed IntegrityError catch is what makes
+        # this surface as RelationConflictError rather than the raw
+        # SQLAlchemy exception.
+        with pytest.raises(RelationConflictError):
+            await relation_service.add(a.knowledge_item_id, req)
