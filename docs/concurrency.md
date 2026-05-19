@@ -64,6 +64,18 @@ in `AsyncIngestService.process` aborts after
 `FLYCANON_INGEST_MAX_ATTEMPTS` reclaims so a broken payload can't
 eat replica budget forever.
 
+**Lease-poaching guard.** `mark_succeeded` and `mark_failed` carry
+an optional `expected_attempts` parameter; `AsyncIngestService.process`
+captures the `attempts` value from the original `mark_running` claim
+and passes it back. The terminal UPDATE only matches when
+`attempts` still equals the captured value. If the lease was
+poached mid-run (worker took longer than the lease window and
+another replica re-claimed, bumping `attempts`), the original
+worker's commit returns `None` and it logs + bows out without
+double-publishing the terminal event. Without this guard the
+slow worker's late `mark_succeeded` would silently overwrite the
+new owner's state.
+
 > **EDA fan-out caveat.** The default postgres EDA adapter delivers
 > every event to every replica that subscribes (one offset per
 > consumer_group; if every replica picks a distinct group, they each
@@ -168,10 +180,14 @@ once at the top of the function, append the turn (correctly
 serialised via `UNIQUE(conversation_id, turn_index)` + retry), and
 then write the next summary computed from the stale captured row.
 Two concurrent turns would lose one summary line in the process.
-The summary is now recomputed from a fresh `repository.get` after
-the turn insert, so each call appends one line cleanly. The audit
-log and turn rows are unaffected — both already serialise via
-their own constraints.
+
+The summary is now **derived from the turn rows on demand** via
+`ConversationService._summary_from_turns`. No cached column is
+written during `append_turn`; the summary used in subsequent turns'
+system instructions and the one returned from
+`ConversationService.get` are both computed from the (already
+serialised) `canon_conversation_turns` rows. The write race
+disappears entirely because there is no longer a write to race on.
 
 ### Audit log + EDA outbox
 

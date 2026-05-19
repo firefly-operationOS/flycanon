@@ -170,16 +170,44 @@ class IngestJobRepository:
         *,
         source_id: str,
         content_sha256: str | None,
+        expected_attempts: int | None = None,
     ) -> IngestJobRow | None:
+        """Flip the job to ``succeeded`` -- atomically guarded by the
+        original claim's lease.
+
+        When ``expected_attempts`` is provided, the UPDATE only fires
+        if the row's ``attempts`` still matches what the caller
+        observed at claim time. This protects against the
+        lease-poaching scenario: worker A claims, runs longer than
+        ``ingest_timeout_s``, worker B re-claims (bumping attempts),
+        worker A then tries to commit its result. Without the
+        ``attempts`` guard worker A's success would silently
+        overwrite worker B's state -- and worker B's later result
+        publish would conflict with worker A's already-published one.
+        With the guard, A's commit returns ``None`` and A logs +
+        bows out.
+        """
         async with self.session() as session:
-            row = await session.get(IngestJobRow, job_id)
-            if row is None:
-                return None
-            row.status = "succeeded"
-            row.source_id = source_id
-            row.content_sha256 = content_sha256
-            row.finished_at = datetime.now(UTC)
-            await session.flush()
+            conditions: list[Any] = [
+                IngestJobRow.id == job_id,
+                IngestJobRow.status == "running",
+            ]
+            if expected_attempts is not None:
+                conditions.append(IngestJobRow.attempts == expected_attempts)
+            result = await session.execute(
+                update(IngestJobRow)
+                .where(*conditions)
+                .values(
+                    status="succeeded",
+                    source_id=source_id,
+                    content_sha256=content_sha256,
+                    finished_at=func.now(),
+                )
+                .returning(IngestJobRow)
+            )
+            row = result.scalar_one_or_none()
+            if row is not None:
+                await session.refresh(row)
             return row
 
     async def mark_failed(
@@ -188,16 +216,31 @@ class IngestJobRepository:
         *,
         code: str,
         message: str,
+        expected_attempts: int | None = None,
     ) -> IngestJobRow | None:
+        """Flip the job to ``failed`` -- mirrors the lease guard on
+        :meth:`mark_succeeded`. See that docstring for the rationale."""
         async with self.session() as session:
-            row = await session.get(IngestJobRow, job_id)
-            if row is None:
-                return None
-            row.status = "failed"
-            row.error_code = code
-            row.error_message = message
-            row.finished_at = datetime.now(UTC)
-            await session.flush()
+            conditions: list[Any] = [
+                IngestJobRow.id == job_id,
+                IngestJobRow.status == "running",
+            ]
+            if expected_attempts is not None:
+                conditions.append(IngestJobRow.attempts == expected_attempts)
+            result = await session.execute(
+                update(IngestJobRow)
+                .where(*conditions)
+                .values(
+                    status="failed",
+                    error_code=code,
+                    error_message=message,
+                    finished_at=func.now(),
+                )
+                .returning(IngestJobRow)
+            )
+            row = result.scalar_one_or_none()
+            if row is not None:
+                await session.refresh(row)
             return row
 
     async def list_jobs(
