@@ -257,10 +257,29 @@ class KnowledgeService:
         if target.status == KnowledgeStatus.retired.value:
             raise InvalidSupersedeTarget(item_id, request.superseded_by_item_id, "target is retired")
 
-        item.status = KnowledgeStatus.superseded.value
-        item.superseded_by_item_id = request.superseded_by_item_id
-        item.updated_at = datetime.now(UTC)
-        stored = await self._repository.upsert_item(item)
+        # Atomic lifecycle flip: two simultaneous ``:supersede`` calls
+        # on the same item used to race on ``superseded_by_item_id``
+        # (last writer wins on the field). The single-statement
+        # ``UPDATE ... WHERE status IN (...) RETURNING`` lets the DB
+        # pick one winner; the loser observes ``None`` and we surface
+        # it as a 409 typed conflict instead of a silent overwrite.
+        stored = await self._repository.claim_status_transition(
+            item_id,
+            from_statuses=[KnowledgeStatus.draft.value, KnowledgeStatus.published.value],
+            to_status=KnowledgeStatus.superseded.value,
+            superseded_by_item_id=request.superseded_by_item_id,
+        )
+        if stored is None:
+            # Refresh the row to surface the current state in the
+            # 409 -- the most useful signal for the caller is "what
+            # status is it now?".
+            current = await self._repository.get_item(item_id)
+            current_status = current.status if current else "unknown"
+            raise InvalidSupersedeTarget(
+                item_id,
+                request.superseded_by_item_id,
+                f"item already in {current_status!r} -- supersede requires draft|published",
+            )
 
         await self._audit.record(
             event_type="knowledge.superseded",
@@ -299,10 +318,20 @@ class KnowledgeService:
         if item.status == KnowledgeStatus.retired.value:
             raise KnowledgeItemAlreadyRetired(item_id)
 
-        item.status = KnowledgeStatus.retired.value
-        item.retired_at = datetime.now(UTC)
-        item.retired_reason = request.reason
-        stored = await self._repository.upsert_item(item)
+        stored = await self._repository.claim_status_transition(
+            item_id,
+            from_statuses=[
+                KnowledgeStatus.draft.value,
+                KnowledgeStatus.published.value,
+                KnowledgeStatus.superseded.value,
+            ],
+            to_status=KnowledgeStatus.retired.value,
+            retired_reason=request.reason,
+            mark_retired_at=True,
+        )
+        if stored is None:
+            # Another operator beat us OR the item is already retired.
+            raise KnowledgeItemAlreadyRetired(item_id)
 
         await self._audit.record(
             event_type="knowledge.retired",

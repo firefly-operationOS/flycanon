@@ -8,7 +8,7 @@ from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from typing import Any
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 from flycanon.models.entities.citation import CitationRow
@@ -107,6 +107,52 @@ class KnowledgeRepository:
             merged = await session.merge(row)
             await session.flush()
             return merged
+
+    async def claim_status_transition(
+        self,
+        item_id: str,
+        *,
+        from_statuses: Sequence[str],
+        to_status: str,
+        superseded_by_item_id: str | None = None,
+        retired_reason: str | None = None,
+        mark_retired_at: bool = False,
+    ) -> KnowledgeItemRow | None:
+        """Atomic ``status`` flip on an item, gated by ``from_statuses``.
+
+        Used by :class:`KnowledgeService.supersede` / ``retire`` to
+        defeat the check-then-act race: two operators driving the same
+        lifecycle transition would otherwise both pass the local
+        status guard and both call ``upsert_item``; last writer wins
+        on the lifecycle pointers (``superseded_by_item_id`` /
+        ``retired_at``).
+
+        Returns the updated row when the caller wins the race;
+        ``None`` when the item is in a status outside
+        ``from_statuses`` (already transitioned or unknown id). The
+        service layer maps ``None`` to the typed 4xx contract.
+        """
+        async with self.session() as session:
+            values: dict[str, Any] = {"status": to_status}
+            if superseded_by_item_id is not None:
+                values["superseded_by_item_id"] = superseded_by_item_id
+            if mark_retired_at:
+                values["retired_at"] = func.now()
+            if retired_reason is not None:
+                values["retired_reason"] = retired_reason
+            result = await session.execute(
+                update(KnowledgeItemRow)
+                .where(
+                    KnowledgeItemRow.id == item_id,
+                    KnowledgeItemRow.status.in_(list(from_statuses)),
+                )
+                .values(**values)
+                .returning(KnowledgeItemRow)
+            )
+            row = result.scalar_one_or_none()
+            if row is not None:
+                await session.refresh(row)
+            return row
 
     # ------------------------------------------------------------------
     # Versions
