@@ -34,7 +34,7 @@ all three. The differences are how you wire the dependencies.
 
 ```bash
 docker pull ghcr.io/firefly-operationos/flycanon:latest          # latest main
-docker pull ghcr.io/firefly-operationos/flycanon:26.5.4          # specific release
+docker pull ghcr.io/firefly-operationos/flycanon:26.5.6          # specific release
 docker pull ghcr.io/firefly-operationos/flycanon:26.5            # latest 26.5.x
 ```
 
