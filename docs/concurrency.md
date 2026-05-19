@@ -38,18 +38,31 @@ atomic claim:
 UPDATE canon_ingest_jobs
    SET status = 'running',
        attempts = attempts + 1,
-       started_at = COALESCE(started_at, now())
+       started_at = now(),
+       error_code = NULL,
+       error_message = NULL
  WHERE id = $1
-   AND status = 'queued'
+   AND ( status = 'queued'
+      OR (status = 'running' AND started_at < now() - lease) )
 RETURNING *;
 ```
 
-The `WHERE status = 'queued'` is the lock — only one transaction can
-flip the row out of `queued`. Subsequent workers receive zero rows
-back; `AsyncIngestService.process` short-circuits with a logged
-"duplicate delivery skipped" line. The previous read-modify-write
-pattern would let two replicas both succeed and double-ingest the
-same payload.
+The `WHERE` clause is the lock — only one transaction can flip the
+row out of `queued`. Subsequent workers receive zero rows back;
+`AsyncIngestService.process` short-circuits with a logged "duplicate
+delivery skipped" line. The previous read-modify-write pattern would
+let two replicas both succeed and double-ingest the same payload.
+
+**Stuck-job recovery.** The second branch on the `WHERE` clause
+re-claims `running` rows whose lease (`FLYCANON_INGEST_TIMEOUT_S`,
+default 600s) has expired. That handles the worker-crash-mid-run
+case: without recovery a row sitting at `running` would be
+unreachable forever because the next worker's claim would never
+match. `IngestJobRepository.reclaim_stuck` is the matching bulk
+sweep for rows whose EDA delivery was also lost. A poison-job guard
+in `AsyncIngestService.process` aborts after
+`FLYCANON_INGEST_MAX_ATTEMPTS` reclaims so a broken payload can't
+eat replica budget forever.
 
 > **EDA fan-out caveat.** The default postgres EDA adapter delivers
 > every event to every replica that subscribes (one offset per
@@ -108,12 +121,57 @@ edge side is independently protected by the
 `(from_item_id, to_item_id, kind)` UNIQUE constraint and was
 already idempotent.
 
+### Candidate accept / reject
+
+`CandidateService.accept` and `reject` used to do check-then-act on
+`status == 'proposed'`. Two operators clicking accept in the inbox
+both passed the gate, both wrote a knowledge item, then the second
+`candidate.update` silently overwrote the first. The fix splits the
+decision into two atomic steps:
+
+1. `CandidateRepository.claim_decision` — single-statement
+   `UPDATE … WHERE id=$1 AND status='proposed' RETURNING` that flips
+   status to `accepted` / `rejected`. The loser observes `None` and
+   the service raises `CandidateAlreadyDecided` (HTTP 409).
+2. The knowledge-item write (create or update) runs only after the
+   claim is held. `CandidateRepository.finalise` then attaches the
+   materialised pointers in a second atomic UPDATE.
+
 ### Knowledge graph relations
 
 `(from_item_id, to_item_id, kind)` on `canon_knowledge_relations`
 carries a UNIQUE constraint. `KnowledgeRelationService.add` catches
-the IntegrityError and translates it into `RelationConflictError`
-(HTTP 409, code `relation_already_exists`).
+the `IntegrityError` (the typed SQLAlchemy exception, not a substring
+match on the engine's text) and translates it into
+`RelationConflictError` (HTTP 409, code `relation_already_exists`).
+
+### Knowledge supersede / retire
+
+Lifecycle transitions on `canon_knowledge_items.status` are now
+atomic. `KnowledgeRepository.claim_status_transition` does a single
+`UPDATE … WHERE id=$1 AND status IN (allowed) RETURNING` that flips
+the status and, in the same statement, updates the matching
+pointers (`superseded_by_item_id` for supersede;
+`retired_at` + `retired_reason` for retire). The loser branch returns
+`None`, surfaced as a typed 409.
+
+Two simultaneous `:supersede` calls used to race on
+`superseded_by_item_id` (last writer wins on the field). They now
+serialise cleanly: one operator's pointer survives; the other gets
+a typed `InvalidSupersedeTarget`. Retire is similar — concurrent
+`:retire` calls no longer double-publish lifecycle events.
+
+### Conversation rolling summary
+
+`ConversationService.append_turn` used to read the conversation row
+once at the top of the function, append the turn (correctly
+serialised via `UNIQUE(conversation_id, turn_index)` + retry), and
+then write the next summary computed from the stale captured row.
+Two concurrent turns would lose one summary line in the process.
+The summary is now recomputed from a fresh `repository.get` after
+the turn insert, so each call appends one line cleanly. The audit
+log and turn rows are unaffected — both already serialise via
+their own constraints.
 
 ### Audit log + EDA outbox
 
@@ -124,12 +182,6 @@ the originating mutation).
 
 ## What's not protected (yet)
 
-* **Knowledge supersession** -- the lifecycle pointers update on the
-  item row aren't wrapped in a row-lock. Two simultaneous
-  `:supersede` calls on the same item could race on the
-  `superseded_by_item_id` field; last writer wins, but both audit
-  rows still land. Acceptable for v1 (supersession is a low-frequency
-  admin operation); a follow-up could add row-level locking.
 * **Stale-score cache** -- `KnowledgeItemRow.metadata_json.staleness`
   uses last-write-wins. The values are deterministic per item +
   version, so two concurrent scans converge on the same number;
