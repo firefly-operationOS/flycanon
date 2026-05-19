@@ -49,3 +49,24 @@ class InvalidSupersedeTarget(KnowledgeServiceError):
         super().__init__(f"cannot supersede {item_id!r} with {target_id!r}: {detail}")
         self.item_id = item_id
         self.target_id = target_id
+
+
+class KnowledgeVersionConflict(KnowledgeServiceError):
+    """Another writer beat us to ``current_version + 1`` for this item.
+
+    Surfaced when two concurrent ``PUT /api/v1/knowledge/{id}`` calls
+    both compute the same next-version number and only one wins on
+    insert. The losing caller should re-read the item (the version is
+    now higher than they expected) and re-submit.
+    """
+
+    code = "knowledge_version_conflict"
+    http_status = 409
+
+    def __init__(self, item_id: str, attempted_version: int) -> None:
+        super().__init__(
+            f"version {attempted_version} of knowledge item {item_id!r} "
+            "was claimed by a concurrent writer; re-read and try again"
+        )
+        self.item_id = item_id
+        self.attempted_version = attempted_version

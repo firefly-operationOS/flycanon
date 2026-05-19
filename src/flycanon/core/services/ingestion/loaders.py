@@ -214,7 +214,8 @@ class PdfLoader:
         try:
             for page_index in range(page_count):
                 try:
-                    text = (doc[page_index].get_text() or "").strip()
+                    raw = doc[page_index].get_text("text") or ""
+                    text = raw.strip() if isinstance(raw, str) else ""
                 except Exception:
                     text = ""
                 text_per_page.append(text)
@@ -304,8 +305,8 @@ class PdfLoader:
         extra: ``uv pip install flycanon[docling]``.
         """
         try:
-            from docling.datamodel.base_models import DocumentStream
-            from docling.document_converter import DocumentConverter
+            from docling.datamodel.base_models import DocumentStream  # type: ignore[import-not-found]
+            from docling.document_converter import DocumentConverter  # type: ignore[import-not-found]
         except ImportError as exc:
             logger.warning(
                 "docling not installed; install the ``docling`` extra "
@@ -318,10 +319,10 @@ class PdfLoader:
             converter = DocumentConverter()
             stream = DocumentStream(name="ingested.pdf", stream=io.BytesIO(pdf_bytes))
             doc_result = converter.convert(stream)
-            text_per_page: dict[int, str] = {}
             # Docling represents the document as a tree of items each
             # carrying a page index. We project them down to per-page
             # plain text in reading order.
+            buckets: dict[int, list[str]] = {}
             for item in getattr(doc_result.document, "iterate_items", lambda: [])():
                 page = getattr(item, "prov", None)
                 page_idx = 0
@@ -329,11 +330,8 @@ class PdfLoader:
                     page_idx = max(0, int(getattr(page[0], "page_no", 1)) - 1)
                 text = getattr(item, "text", None) or ""
                 if text.strip():
-                    text_per_page.setdefault(page_idx, [])
-                    text_per_page[page_idx].append(text)
-            return {
-                idx: "\n".join(parts).strip() for idx, parts in text_per_page.items() if idx in page_indices
-            }
+                    buckets.setdefault(page_idx, []).append(text)
+            return {idx: "\n".join(parts).strip() for idx, parts in buckets.items() if idx in page_indices}
         except Exception as exc:  # noqa: BLE001 -- fall back to tesseract
             logger.warning("docling OCR failed: %s", exc)
             return {}
@@ -377,10 +375,11 @@ class HtmlLoader:
             text = tag.get_text(" ", strip=True)
             if not text:
                 continue
-            if tag.name and tag.name.startswith("h") and tag.name[1:].isdigit():
+            name = getattr(tag, "name", None) or ""
+            if name.startswith("h") and name[1:].isdigit():
                 _flush()
                 current_body = []
-                level = int(tag.name[1:])
+                level = int(name[1:])
                 while len(heading_stack) >= level:
                     heading_stack.pop()
                 heading_stack.append(text)

@@ -28,6 +28,7 @@ from flycanon.core.services.knowledge.errors import (
     KnowledgeItemAlreadyRetired,
     KnowledgeItemNotFound,
     KnowledgeServiceError,
+    KnowledgeVersionConflict,
     KnowledgeVersionNotFound,
 )
 from flycanon.interfaces.dtos.error import ProblemDetails
@@ -77,6 +78,17 @@ class ExceptionAdvice:
             code=exc.code,
             detail=str(exc),
             extensions={"item_id": exc.item_id, "target_id": exc.target_id},
+        )
+
+    @exception_handler(KnowledgeVersionConflict)
+    async def knowledge_version_conflict(self, exc: KnowledgeVersionConflict) -> dict[str, Any]:
+        return _problem(
+            type_="https://flycanon.dev/problems/knowledge-version-conflict",
+            title="Knowledge version conflict",
+            status=409,
+            code=exc.code,
+            detail=str(exc),
+            extensions={"item_id": exc.item_id, "attempted_version": exc.attempted_version},
         )
 
     @exception_handler(KnowledgeServiceError)

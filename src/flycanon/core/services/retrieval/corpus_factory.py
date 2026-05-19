@@ -54,7 +54,7 @@ class CorpusContext:
         await self.corpus.close()  # type: ignore[attr-defined]
         close = getattr(self.vector_store, "close", None)
         if callable(close):
-            await close()
+            await close()  # type: ignore[misc]
 
 
 def build_corpus_context(

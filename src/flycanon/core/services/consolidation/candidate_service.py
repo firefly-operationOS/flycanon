@@ -294,7 +294,7 @@ class CandidateService:
         when the source chunk has a known page.
         """
         raw_citations = candidate.citations_json or []
-        chunk_ids = sorted({raw.get("chunk_id") for raw in raw_citations if raw.get("chunk_id")})
+        chunk_ids: list[str] = sorted({cid for raw in raw_citations if (cid := raw.get("chunk_id"))})
         page_by_chunk: dict[str, int | None] = {}
         if chunk_ids:
             chunk_rows = await self._chunks.get_many(chunk_ids)

@@ -57,7 +57,8 @@ class RelationRepository:
             result = await session.execute(
                 delete(KnowledgeRelationRow).where(KnowledgeRelationRow.id == relation_id)
             )
-            return (result.rowcount or 0) > 0
+            rowcount = getattr(result, "rowcount", 0) or 0
+            return rowcount > 0
 
     async def list_for_item(
         self,

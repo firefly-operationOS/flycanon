@@ -137,7 +137,13 @@ def _build_embedder(*, provider: str, model: str, dimensions: int, batch_size: i
     if p == "azure" or p == "azure-openai":
         from fireflyframework_agentic.embeddings.providers.azure import AzureEmbedder
 
-        return AzureEmbedder(model=model, dimensions=dimensions, batch_size=batch_size)
+        azure_endpoint = os.environ.get("AZURE_OPENAI_ENDPOINT", "")
+        return AzureEmbedder(
+            model=model,
+            dimensions=dimensions,
+            batch_size=batch_size,
+            azure_endpoint=azure_endpoint,
+        )
     if p == "cohere":
         from fireflyframework_agentic.embeddings.providers.cohere import CohereEmbedder
 

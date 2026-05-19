@@ -137,6 +137,26 @@ class ConflictDetector:
             judgment = await self._judge(items_by_id[pair.from_id], items_by_id[pair.to_id])
             if judgment is None or not judgment.is_conflict:
                 continue
+            # Dedup: don't queue a new CandidateRow when a previous
+            # detection pass already proposed the same pair and the
+            # human reviewer hasn't acted on it yet. Repeated scans
+            # would otherwise fill the inbox with duplicate proposals.
+            existing = await self._candidates.find_conflict_candidate(
+                from_item_id=pair.from_id,
+                to_item_id=pair.to_id,
+            )
+            if existing is not None:
+                logger.info(
+                    "conflict scan dedup: candidate %s already proposed for %s <-> %s",
+                    existing.id,
+                    pair.from_id,
+                    pair.to_id,
+                )
+                candidate_ids.append(existing.id)
+                # No conflicts_found bump -- we didn't actually find a
+                # NEW conflict, the previous pass already accounted for
+                # this pair.
+                continue
             row = await self._record_candidate(
                 pair=pair,
                 judgment=judgment,

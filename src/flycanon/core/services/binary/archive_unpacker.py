@@ -106,7 +106,7 @@ class ArchiveUnpacker:
                         "password-protected 7z archives are not supported",
                         filename=filename,
                     )
-                for name, bio in sz.readall().items():
+                for name, bio in sz.readall().items():  # type: ignore[attr-defined]
                     if not bio:
                         continue
                     bio.seek(0)

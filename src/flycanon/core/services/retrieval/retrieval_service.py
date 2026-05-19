@@ -111,9 +111,9 @@ class RetrievalService:
         # The agentic embedder protocol is honoured by our EmbeddingService
         # via the ``embed`` method; pass it through directly.
         retriever = HybridRetriever(
-            corpus=self._context.corpus,
-            vector_store=self._context.vector_store,
-            embedder=_EmbedderShim(self._embeddings),
+            corpus=self._context.corpus,  # type: ignore[arg-type]
+            vector_store=self._context.vector_store,  # type: ignore[arg-type]
+            embedder=_EmbedderShim(self._embeddings),  # type: ignore[arg-type]
         )
         effective_top_k = top_k or self._default_top_k
         effective_per_query_k = per_query_k or self._default_per_query_k

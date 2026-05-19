@@ -167,6 +167,16 @@ class AsyncIngestService:
 
         running = await self._repository.mark_running(job_id)
         if running is None:
+            # Another worker already claimed (or finished) this job --
+            # the atomic ``UPDATE ... WHERE status = 'queued'``
+            # returns nothing when the row has left ``queued``. The
+            # original delivery was lost OR another replica beat us;
+            # either way, idempotent skip is the right answer.
+            logger.info(
+                "ingest job %s could not be claimed (already running or terminal) "
+                "-- skipping duplicate delivery",
+                job_id,
+            )
             return
         job = running
 
@@ -294,6 +304,8 @@ class AsyncIngestService:
         headers = {}
         if job.correlation_id:
             headers["X-Correlation-Id"] = job.correlation_id
+        if not job.callback_url:
+            return
         try:
             async with httpx.AsyncClient(timeout=10.0) as client:
                 await client.post(job.callback_url, json=payload, headers=headers)

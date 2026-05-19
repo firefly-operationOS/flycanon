@@ -19,6 +19,7 @@ from typing import Any
 
 from pyfly.container import service
 from pyfly.eda import EventPublisher
+from sqlalchemy.exc import IntegrityError
 
 from flycanon.config import CanonSettings
 from flycanon.core.services.audit import AuditService
@@ -26,6 +27,7 @@ from flycanon.core.services.knowledge.errors import (
     InvalidSupersedeTarget,
     KnowledgeItemAlreadyRetired,
     KnowledgeItemNotFound,
+    KnowledgeVersionConflict,
 )
 from flycanon.interfaces.dtos.knowledge import (
     Citation,
@@ -177,7 +179,14 @@ class KnowledgeService:
                 dict(request.metadata) if request.metadata is not None else dict(current.metadata_json or {})
             ),
         )
-        stored_version = await self._repository.add_version(new)
+        try:
+            stored_version = await self._repository.add_version(new)
+        except IntegrityError as exc:
+            # UNIQUE(knowledge_item_id, version) caught a concurrent
+            # writer that beat us to ``current_version + 1``. Translate
+            # the raw DB error into a typed 409 so the caller can
+            # re-read + retry cleanly instead of seeing a 500.
+            raise KnowledgeVersionConflict(item_id, new_version) from exc
         citations = request.citations if request.citations is not None else []
         await self._repository.add_citations(_citations_for(stored_version.id, citations))
 
@@ -293,7 +302,6 @@ class KnowledgeService:
         item.status = KnowledgeStatus.retired.value
         item.retired_at = datetime.now(UTC)
         item.retired_reason = request.reason
-        item.updated_at = item.retired_at
         stored = await self._repository.upsert_item(item)
 
         await self._audit.record(

@@ -39,6 +39,7 @@ from typing import Any
 
 from pyfly.container import service
 from pyfly.eda import EventPublisher
+from sqlalchemy.exc import IntegrityError
 
 from flycanon.config import CanonSettings
 from flycanon.core.services.audit import AuditService
@@ -168,7 +169,33 @@ class IntakeService:
         metadata["extracted"] = extracted.to_dict()
         result.source.metadata_json = metadata
 
-        await self._sources.add(result.source)
+        # Idempotent on the SHA-256: the same bytes resolve to the
+        # same row, no matter how many parallel callers submit them.
+        # We pre-check + handle IntegrityError so the race window
+        # between the SELECT and the INSERT is also covered (without
+        # the recovery branch, the second caller would see a 500
+        # IntegrityError from the partial-unique index on
+        # ``content_sha256``).
+        existing = await self._sources.get_by_content_sha256(result.source.content_sha256)
+        if existing is not None:
+            logger.info(
+                "intake idempotent: content_sha256=%s already mapped to source_id=%s",
+                result.source.content_sha256,
+                existing.id,
+            )
+            return existing
+        try:
+            await self._sources.add(result.source)
+        except IntegrityError:
+            existing = await self._sources.get_by_content_sha256(result.source.content_sha256)
+            if existing is not None:
+                logger.info(
+                    "intake idempotent (race-resolved): content_sha256=%s -> source_id=%s",
+                    result.source.content_sha256,
+                    existing.id,
+                )
+                return existing
+            raise
 
         if result.chunks:
             texts = [chunk.content for chunk in result.chunks]

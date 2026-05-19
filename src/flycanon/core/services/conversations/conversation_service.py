@@ -36,6 +36,7 @@ import uuid
 from collections.abc import Sequence
 
 from pyfly.container import service
+from sqlalchemy.exc import IntegrityError
 
 from flycanon.config import CanonSettings
 from flycanon.core.services.audit import AuditService
@@ -146,17 +147,37 @@ class ConversationService:
             prior_turns=message_history,
         )
 
-        turn_row = ConversationTurnRow(
-            conversation_id=conversation_id,
-            turn_index=await self._repository.next_turn_index(conversation_id),
-            question=request.question,
-            answer=answer_response.answer,
-            citations_json=[cit.model_dump(mode="json") for cit in answer_response.citations],
-            model=answer_response.model,
-            elapsed_ms=answer_response.elapsed_ms,
-            no_answer=answer_response.no_answer,
-        )
-        turn_stored = await self._repository.add_turn(turn_row)
+        # Retry on the UNIQUE(conversation_id, turn_index) collision
+        # that two parallel ``POST /turn`` callers would otherwise
+        # produce. Three attempts is generous -- only realistic when
+        # a tight client loop races itself; the answer call is the
+        # dominant latency so the practical contention window is
+        # microseconds wide. Re-compute the index each round so a
+        # legitimate concurrent turn doesn't starve us.
+        turn_stored: ConversationTurnRow | None = None
+        for attempt in range(3):
+            turn_row = ConversationTurnRow(
+                conversation_id=conversation_id,
+                turn_index=await self._repository.next_turn_index(conversation_id),
+                question=request.question,
+                answer=answer_response.answer,
+                citations_json=[cit.model_dump(mode="json") for cit in answer_response.citations],
+                model=answer_response.model,
+                elapsed_ms=answer_response.elapsed_ms,
+                no_answer=answer_response.no_answer,
+            )
+            try:
+                turn_stored = await self._repository.add_turn(turn_row)
+                break
+            except IntegrityError:
+                if attempt == 2:
+                    raise
+                logger.info(
+                    "conversation %s turn index race -- retrying (attempt %d)",
+                    conversation_id,
+                    attempt + 1,
+                )
+        assert turn_stored is not None  # noqa: S101 -- guarded by the loop
 
         # Bounded rolling summary -- one-line per turn, capped at 16
         # turns. Beyond that the earliest turn drops out. For
