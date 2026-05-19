@@ -134,6 +134,7 @@ class ConversationService:
         steering = self._build_steering(
             conversation=conversation,
             extra_instructions=request.instructions,
+            summary=self._summary_from_turns(prior),
         )
         message_history = self._recent_turns_for_history(prior)
 
@@ -179,24 +180,16 @@ class ConversationService:
                 )
         assert turn_stored is not None  # noqa: S101 -- guarded by the loop
 
-        # Bounded rolling summary -- one-line per turn, capped at 16
-        # turns. Beyond that the earliest turn drops out. For
-        # production deployments that want a semantic summary, a
-        # follow-up can plug an LLM-driven summarisation step here.
-        #
-        # Re-read the conversation row before computing the next
-        # summary so a concurrent turn append's summary line isn't
-        # lost. Two turns on the same conversation correctly serialise
-        # the turn rows (UNIQUE(conversation_id, turn_index) +
-        # retry), but the rolling summary used to read from a
-        # function-local ``conversation`` captured before either
-        # write; whoever called ``update`` second would clobber the
-        # other's line.
-        fresh = await self._repository.get(conversation_id)
-        if fresh is not None:
-            fresh.summary = self._next_summary(fresh, turn_stored)
-            await self._repository.update(fresh)
-            conversation = fresh
+        # Rolling summary is now derived from canon_conversation_turns
+        # on demand (see :meth:`_summary_from_turns`); we no longer
+        # write a cached copy to canon_conversations. Two concurrent
+        # turn appends previously raced on that cache -- both would
+        # read the same stale ``conversation.summary``, both compute a
+        # next-summary differing by one line, and the second write
+        # would clobber the first's line. The turn rows themselves
+        # already serialise via UNIQUE(conversation_id, turn_index);
+        # deriving the summary from those rows makes the write race
+        # disappear entirely.
 
         await self._audit.record(
             event_type="conversation.turn_appended",
@@ -220,7 +213,7 @@ class ConversationService:
         return Conversation(
             id=conv.id,
             title=conv.title,
-            summary=conv.summary,
+            summary=self._summary_from_turns(turns),
             actor=conv.actor,
             model=conv.model,
             turns=[_turn_to_dto(t) for t in turns],
@@ -237,6 +230,7 @@ class ConversationService:
         *,
         conversation: ConversationRow,
         extra_instructions: str | None,
+        summary: str | None,
     ) -> str:
         """Compose the system-instructions slot for this turn.
 
@@ -245,7 +239,8 @@ class ConversationService:
         1. Caller-supplied ``instructions`` (highest precedence).
         2. Rolling summary -- one-line synopsis of every turn so
            older context isn't lost once it falls outside the
-           ``message_history`` window.
+           ``message_history`` window. Derived on demand from the
+           turn rows; see :meth:`_summary_from_turns`.
 
         The last few turns no longer ride here -- they are forwarded
         through ``message_history`` instead, see
@@ -254,8 +249,8 @@ class ConversationService:
         lines: list[str] = []
         if extra_instructions:
             lines.append(extra_instructions.strip())
-        if conversation.summary:
-            lines.append("Prior conversation summary:\n" + conversation.summary.strip())
+        if summary:
+            lines.append("Prior conversation summary:\n" + summary.strip())
         return "\n\n".join(line for line in lines if line)
 
     @staticmethod
@@ -280,17 +275,30 @@ class ConversationService:
         return out
 
     @staticmethod
-    def _next_summary(
-        conversation: ConversationRow,
-        new_turn: ConversationTurnRow,
+    def _summary_from_turns(
+        turns: Sequence[ConversationTurnRow],
         *,
         max_lines: int = 16,
-    ) -> str:
-        prior = (conversation.summary or "").splitlines()
-        prior.append(
-            f"- T{new_turn.turn_index}: {new_turn.question[:120]} -> {(new_turn.answer or '')[:200]}"
-        )
-        return "\n".join(prior[-max_lines:])
+    ) -> str | None:
+        """Derive the bounded rolling summary from the turn rows.
+
+        Replaces the previous ``_next_summary`` cache update on
+        ``conversation.summary``. Two concurrent turn appends used to
+        race on that cache -- both read the same stale string, both
+        appended their line, the second write clobbered the first.
+        Deriving the summary from the (already serialised) turn rows
+        eliminates the race: the summary is a pure function of
+        ``canon_conversation_turns`` ordered by ``turn_index``.
+
+        Returns ``None`` when the conversation has no turns yet so the
+        caller can omit the summary line entirely.
+        """
+        lines: list[str] = []
+        for turn in turns:
+            lines.append(f"- T{turn.turn_index}: {turn.question[:120]} -> {(turn.answer or '')[:200]}")
+        if not lines:
+            return None
+        return "\n".join(lines[-max_lines:])
 
 
 def _turn_to_dto(row: ConversationTurnRow) -> ConversationTurn:
