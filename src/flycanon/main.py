@@ -21,6 +21,7 @@ from pyfly.web.adapters.fastapi.app import create_app
 from flycanon import __version__
 from flycanon.app import CanonApplication
 from flycanon.web.openapi_override import install_openapi
+from flycanon.web.problem_handlers import register_problem_handlers
 
 _TITLE = "flycanon"
 _DESCRIPTION = (
@@ -81,6 +82,13 @@ app = create_app(
     actuator_enabled=True,
     lifespan=_lifespan,
 )
+# pyfly's FastAPI adapter only walks controller-LOCAL exception
+# handlers, so the @controller_advice surface never fires. Register
+# the same handler table directly with FastAPI; this also unwraps
+# CommandProcessingException / QueryProcessingException so the typed
+# domain exception raised by the service layer keeps its HTTP status
+# + RFC 7807 code instead of being flattened to 400 COMMAND_PROCESSING_ERROR.
+register_problem_handlers(app)
 # The W3C correlation surface (X-Correlation-Id / X-Request-Id /
 # X-Tenant-Id / traceparent / tracestate) is wired into pyfly's default
 # WebFilter chain via
