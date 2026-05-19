@@ -95,6 +95,8 @@ class ImageNormalizer:
             png_bytes = cairosvg.svg2png(bytestring=data, output_width=2000)
         except Exception as exc:
             raise ImageConversionError(f"SVG rasterisation failed: {exc}", filename=filename) from exc
+        if png_bytes is None:
+            raise ImageConversionError("SVG rasterisation produced no output", filename=filename)
         return NormalisedImage(bytes=png_bytes, media_type="image/png", page_count=1)
 
     @staticmethod

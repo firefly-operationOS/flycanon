@@ -22,7 +22,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-import importlib
+import importlib.util
 import logging
 import os
 import sys

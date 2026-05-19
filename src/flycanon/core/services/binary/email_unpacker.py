@@ -13,6 +13,7 @@ uses ``extract-msg`` which is already a project dependency.
 from __future__ import annotations
 
 import email
+import email.parser
 import email.policy
 import logging
 from collections.abc import Iterator
@@ -67,7 +68,8 @@ class EmailUnpacker:
                 continue
             disposition = (part.get_content_disposition() or "").lower()
             content_type = part.get_content_type()
-            payload = part.get_payload(decode=True) or b""
+            raw_payload = part.get_payload(decode=True) or b""
+            payload: bytes = raw_payload if isinstance(raw_payload, bytes) else b""
             if disposition == "attachment" or part.get_filename():
                 name = part.get_filename() or _default_name(content_type)
                 if payload:

@@ -216,10 +216,15 @@ class MetadataExtractor:
         description: str | None = None
         language: str | None = None
         for tag in soup.find_all("meta"):
-            name = (tag.get("name") or tag.get("property") or "").lower()
-            content = tag.get("content")
-            if not (name and content):
+            get = getattr(tag, "get", None)
+            if not callable(get):
                 continue
+            name_attr = get("name") or get("property") or ""
+            name = str(name_attr).lower() if name_attr else ""
+            content_attr = get("content")
+            if not (name and content_attr):
+                continue
+            content = str(content_attr)
             if name in {"author"}:
                 author = content
             elif name in {"description", "og:description"}:

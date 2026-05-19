@@ -302,7 +302,6 @@ class KnowledgeService:
         item.status = KnowledgeStatus.retired.value
         item.retired_at = datetime.now(UTC)
         item.retired_reason = request.reason
-        item.updated_at = item.retired_at
         stored = await self._repository.upsert_item(item)
 
         await self._audit.record(
