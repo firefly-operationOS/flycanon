@@ -16,12 +16,11 @@ human-readable catalogue.
 
 | Method | Path | Description |
 |--------|------|-------------|
-| `POST` | `/api/v1/sources` | Submit a source (JSON body with base64 bytes **or** `url` to fetch). Returns 201 + SourceRecord. |
+| `POST` | `/api/v1/sources` | Submit a source. Body: `SubmitSourceJsonPayload` (base64 bytes via `content_base64` **or** `uri` to fetch). Default sync 201 returns `SourceRecord`; add `?mode=async` for the queued path (returns `IngestJob`, see `/api/v1/jobs/{id}`). Optional `?callback_url=…` fires a webhook on terminal state. Same-content submissions dedup on `content_sha256`. |
 | `POST` | `/api/v1/sources:bulk` | Bulk-submit an array of sources. Returns per-item `BulkSourceResult`s. |
-| `POST` | `/api/v1/sources:async` | Enqueue an async ingest job; returns the job id. Stream progress on `/api/v1/jobs/{id}/stream`. |
-| `PUT`  | `/api/v1/sources/{id}` | Replace an existing source's content in place. Body: `SubmitSourceRequest` (with new bytes / URL). |
+| `PUT`  | `/api/v1/sources/{id}` | Replace an existing source's content in place. Body: `SubmitSourceJsonPayload`. |
 | `GET`  | `/api/v1/sources` | Paginated list. Query: `status`, `kind` (csv), `limit`, `offset`. |
-| `GET`  | `/api/v1/sources/{id}` | Fetch a single source. 404 -> `source_not_found`. |
+| `GET`  | `/api/v1/sources/{id}` | Fetch a single source. 404 → `resource_not_found` (RFC 7807). |
 
 ## Knowledge
 
@@ -38,7 +37,7 @@ human-readable catalogue.
 | `GET`  | `/api/v1/knowledge/{id}/provenance` | Citation graph for the current version. Query: `version` (optional explicit). |
 | `GET`  | `/api/v1/knowledge/{id}/relations` | List `(outgoing, incoming)` typed edges for the item. |
 | `POST` | `/api/v1/knowledge/{id}/relations` | Add a typed edge. Body: `CreateRelationRequest`. |
-| `DELETE` | `/api/v1/knowledge/relations/{relation_id}` | Remove an edge. |
+| `DELETE` | `/api/v1/knowledge/{id}/relations/{relation_id}` | Remove an edge. |
 | `GET`  | `/api/v1/knowledge:graph` | Whole-canon graph view (JSON or `accept: text/vnd.mermaid` for Mermaid). Query: `domain`, `kind`, `include_sources`. |
 | `GET`  | `/api/v1/knowledge:stale` | Per-item staleness scores. Compares published items against fresh sources via cosine. |
 | `POST` | `/api/v1/knowledge:detect-conflicts` | Pairwise conflict scan. Returns confirmed conflict pairs as `CandidateRow`s + auto-creates `conflicts_with` edges. |
@@ -59,25 +58,24 @@ human-readable catalogue.
 |--------|------|-------------|
 | `POST` | `/api/v1/search` | Hybrid retrieval (BM25 + vector + RRF + optional rerank + optional query expansion). Body: `SearchRequest`. |
 | `POST` | `/api/v1/query`  | RAG answer with citations. Body: `AnswerRequest`. |
-| `POST` | `/api/v1/query:stream` | Same as `/query` but streams tokens as Server-Sent Events. |
+| `POST` | `/api/v1/query/stream` | Same as `/query` but streams tokens as Server-Sent Events. |
+| `POST` | `/api/v1/query/suggest` | Suggest follow-up questions for an existing answer. Body: `AnswerRequest`. |
 
 ## Conversations
 
 | Method | Path | Description |
 |--------|------|-------------|
-| `POST` | `/api/v1/conversations` | Start a new conversation. Returns the conversation id. |
-| `GET`  | `/api/v1/conversations/{id}` | Fetch conversation header + rolling summary + last N turns. |
-| `POST` | `/api/v1/conversations/{id}/turns` | Submit a user turn; returns the assistant answer with citations. |
-| `GET`  | `/api/v1/conversations/{id}/turns` | Paginated turn history. |
-| `POST` | `/api/v1/conversations/{id}/suggest` | LLM-suggested follow-up questions based on the turn history. |
+| `POST` | `/api/v1/conversations` | Start a new conversation. Body: `CreateConversationRequest`. Returns the conversation id. |
+| `GET`  | `/api/v1/conversations/{id}` | Fetch conversation header + last N turns. The `summary` field is derived from the turn rows on demand (race-free across concurrent turn appends). |
+| `POST` | `/api/v1/conversations/{id}/turn` | Submit a user turn; returns the assistant answer with citations. Body: `CreateTurnRequest`. Two parallel POSTs serialise via `UNIQUE(conversation_id, turn_index)` with a bounded retry loop. |
 
 ## Async ingest jobs
 
 | Method | Path | Description |
 |--------|------|-------------|
-| `GET`  | `/api/v1/jobs/{id}` | Job header (status, progress, counters). |
-| `GET`  | `/api/v1/jobs/{id}/stream` | Server-Sent Events feed of job events (cursor-based). |
-| `POST` | `/api/v1/jobs/{id}:cancel` | Co-operative cancellation request. |
+| `GET`  | `/api/v1/jobs` | Paginated list. Query: `status` (csv), `limit`, `offset`. |
+| `GET`  | `/api/v1/jobs/{id}` | Job header — `status`, `attempts`, `source_id` once succeeded, `error_code`/`error_message` on failure. |
+| `GET`  | `/api/v1/jobs/{id}/stream` | Server-Sent Events feed of job events (cursor-based; resume with `?after_id=N`). |
 
 ## Billing
 
@@ -122,3 +120,48 @@ human-readable catalogue.
 | `GET`  | `/docs` | Swagger UI. |
 | `GET`  | `/redoc` | ReDoc UI. |
 | `GET`  | `/admin/` | pyfly admin dashboard (read-only by default). |
+
+## Error responses
+
+Every 4xx / 5xx response is an RFC 7807
+`application/problem+json` document. The shape:
+
+```json
+{
+  "type": "https://flycanon.dev/problems/<slug>",
+  "title": "Human-readable summary",
+  "status": 409,
+  "code": "knowledge_item_already_retired",
+  "detail": "knowledge item 'add55fda-…' is already retired",
+  "extensions": { "item_id": "add55fda-…" }
+}
+```
+
+Programmatic clients dispatch on `code` (stable slug); the human-readable
+`title` and `detail` are translation-friendly but not API contract.
+Domain-specific extensions land under `extensions` — e.g. `item_id` for
+knowledge errors, `candidate_id` for candidate errors, `attempted_version`
+for version conflicts.
+
+### Status-code catalogue
+
+| Status | Code slug | When |
+|--------|-----------|------|
+| 400 | `invalid_request` | Pydantic validation, missing-field `ValueError` raised inside a controller helper. |
+| 404 | `resource_not_found` | Generic missing resource (knowledge item, source, conversation, candidate, job). |
+| 404 | `knowledge_item_not_found` / `knowledge_version_not_found` / `candidate_not_found` | Typed not-found variants for callers that prefer the specific slug. |
+| 409 | `knowledge_item_already_retired` | `:retire` against a retired item, or losing the atomic claim against a concurrent retire. |
+| 409 | `knowledge_version_conflict` | Concurrent `PUT /knowledge/{id}` updates collided on `UNIQUE(item_id, version)`. Extensions: `attempted_version`. |
+| 409 | `invalid_supersede_target` | `:supersede` against a non-existent / retired target, OR losing the atomic claim against a concurrent supersede. |
+| 409 | `candidate_already_decided` | Two operators accepted / rejected the same candidate; the loser sees this. |
+| 409 | `relation_already_exists` | `(from, to, kind)` UNIQUE collision on `POST /knowledge/{id}/relations`. |
+| 415 | `unsupported_source_kind` | Binary normaliser doesn't recognise the bytes. |
+| 422 | `empty_source` / `corrupt_source` | Loader produced no text / pre-flight rejected the file. |
+| 422 | `invalid_relation` | Self-relation or unknown target on a relation add. |
+
+### Concurrent-operation conflicts
+
+These 409s are the surface contract for the atomic-claim plumbing in
+[concurrency.md](concurrency.md). Two operators clicking the same
+`:retire` / `:supersede` / `:accept` simultaneously produce exactly one
+success and one typed 409 — never two writes, never a generic 500.

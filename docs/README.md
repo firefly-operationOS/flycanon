@@ -82,6 +82,7 @@ Pick the entry point that matches what you're trying to do:
 | [pii.md](pii.md)                                  | You need to understand the PII guardrail (scanner, policy, redaction, findings, RFC 7807 violation shape).                     |
 | [billing.md](billing.md)                          | You're tracking LLM cost / latency -- the six `/api/v1/billing/*` endpoints, the recorded fields, when to use each.            |
 | [stats.md](stats.md)                              | You're rendering a corpus dashboard -- the one-shot `/api/v1/stats` snapshot.                                                  |
+| [concurrency.md](concurrency.md)                  | You're running multiple replicas / workers and need the defence-in-depth picture (atomic claims, lease recovery, poison-job + lease-poaching guards, RFC 7807 conflict semantics). |
 | [deployment.md](deployment.md)                    | You're running this in production -- env vars, topologies, OCR engines, embedding providers, auth, observability, sizing.       |
 | [cicd.md](cicd.md)                                | You're cutting a release or wiring CI/CD -- PR gate, Docker publish, SDK publish, secrets.                                      |
 | [troubleshooting.md](troubleshooting.md)          | The service / ingest / search / answer surface is misbehaving -- symptom → root cause → fix.                                    |
@@ -112,7 +113,8 @@ Where to read about each topic that spans multiple documents:
 | EDA / typed event envelopes            | [eda-events.md](eda-events.md)                                                                | [architecture.md § DI wiring](architecture.md#di-wiring)                            |
 | Append-only audit log                  | [api-reference.md § /audit](api-reference.md#audit)                                            | [architecture.md § Data model](architecture.md#data-model)                         |
 | W3C trace context                      | [architecture.md § Cross-cutting concerns](architecture.md#cross-cutting-concerns)            | [api-reference.md](api-reference.md)                                               |
-| RFC 7807 error envelope                | [payload-reference.md § ProblemDetails](payload-reference.md)                                 | [api-reference.md](api-reference.md)                                               |
+| RFC 7807 error envelope                | [payload-reference.md § ProblemDetails](payload-reference.md)                                 | [api-reference.md § Error responses](api-reference.md#error-responses)              |
+| Multi-replica concurrency safety       | [concurrency.md](concurrency.md)                                                              | [async-ingest.md § Concurrency safety](async-ingest.md#concurrency-safety)          |
 
 ---
 

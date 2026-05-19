@@ -59,8 +59,12 @@ default 600s) has expired. That handles the worker-crash-mid-run
 case: without recovery a row sitting at `running` would be
 unreachable forever because the next worker's claim would never
 match. `IngestJobRepository.reclaim_stuck` is the matching bulk
-sweep for rows whose EDA delivery was also lost. A poison-job guard
-in `AsyncIngestService.process` aborts after
+sweep for rows whose EDA delivery was also lost — wired into pyfly's
+scheduler via `AsyncIngestService.sweep_stuck_jobs` (a
+`@scheduled(fixed_rate=60s)` method). Each sweep demotes stale
+`running` rows to `queued` and republishes `IngestSourceRequested`
+so subscribed workers pick them up via the atomic claim. A poison-job
+guard in `AsyncIngestService.process` aborts after
 `FLYCANON_INGEST_MAX_ATTEMPTS` reclaims so a broken payload can't
 eat replica budget forever.
 
