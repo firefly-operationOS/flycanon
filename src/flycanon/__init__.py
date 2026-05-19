@@ -8,6 +8,6 @@ top-level package does not boot the application; that is the job of
 
 from __future__ import annotations
 
-__version__ = "26.5.4"
+__version__ = "26.5.6"
 
 __all__ = ["__version__"]

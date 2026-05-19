@@ -14,7 +14,7 @@ with citations — all behind a single HTTP service.
 [![agentic](https://img.shields.io/badge/genai-fireflyframework--agentic-purple)](https://github.com/fireflyframework/fireflyframework-agentic)
 [![OpenAPI](https://img.shields.io/badge/api-openapi%203.1-green)](docs/api-reference.md)
 [![pgvector](https://img.shields.io/badge/default--vector--store-pgvector-336791)](docs/architecture.md#pluggable-retrieval-backends)
-[![Version](https://img.shields.io/badge/version-26.5.5-green.svg)](#)
+[![Version](https://img.shields.io/badge/version-26.5.6-green.svg)](#)
 [![License](https://img.shields.io/badge/license-Proprietary-lightgrey.svg)](LICENSE)
 
 </div>
@@ -245,7 +245,7 @@ task openapi             # /openapi.json
 
 ## SDKs
 
-Both SDKs pin their version to the service's CalVer (`26.5.4`), so
+Both SDKs pin their version to the service's CalVer (`26.5.6`), so
 the client and server upgrade in lockstep.
 
 | SDK | Highlights |

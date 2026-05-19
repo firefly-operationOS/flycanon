@@ -22,11 +22,12 @@ from __future__ import annotations
 import base64
 import logging
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from pyfly.container import service
 from pyfly.eda import EventPublisher
+from pyfly.scheduling import scheduled
 
 from flycanon.config import CanonSettings
 from flycanon.core.services.audit import AuditService
@@ -317,6 +318,47 @@ class AsyncIngestService:
             logger.warning("ingest job failed id=%s code=%s error=%s", job_id, code, exc)
             if job.callback_url:
                 await self._fire_webhook(job, status="failed", error_code=str(code), error_message=str(exc))
+
+    # ------------------------------------------------------------------
+    # Periodic stuck-job sweep
+    # ------------------------------------------------------------------
+
+    @scheduled(fixed_rate=timedelta(seconds=60))
+    async def sweep_stuck_jobs(self) -> None:
+        """Demote stale ``running`` rows back to ``queued`` + republish.
+
+        ``mark_running`` already re-claims stale rows opportunistically
+        when a worker receives a duplicate ``IngestSourceRequested``
+        event. This sweep covers the case where the original event
+        delivery has been lost (worker crashed before completing AND
+        the broker dropped the message): without it, a row sitting at
+        ``running`` past its lease has no path back into a worker's
+        dispatch loop.
+
+        The sweep is opportunistic, idempotent, and self-rate-limited:
+
+        * ``reclaim_stuck`` uses the same lease threshold
+          (``ingest_timeout_s``) as the in-band claim. Rows that have
+          legitimate live owners stay at ``running``.
+        * Each reclaimed id triggers an ``IngestSourceRequested``
+          republish. ``mark_running``'s atomic claim handles the case
+          where multiple workers see the republish.
+        * The default ``fixed_rate`` of 60s is well below any sensible
+          lease budget; a stuck job is observable within one sweep
+          interval rather than waiting for an inbound delivery.
+        """
+        try:
+            reclaimed = await self._repository.reclaim_stuck(
+                lease_seconds=self._settings.ingest_timeout_s,
+            )
+        except Exception as exc:  # noqa: BLE001 -- swallow so the scheduler loop survives
+            logger.warning("stuck-job sweep failed: %s", exc)
+            return
+        if not reclaimed:
+            return
+        logger.info("stuck-job sweep reclaimed %d job(s): %s", len(reclaimed), reclaimed)
+        for job_id in reclaimed:
+            await self._publish_requested(job_id, correlation_id=None)
 
     async def _publish_finish(self, *, event_type: str, job_id: str, payload: dict[str, Any]) -> None:
         if self._publisher is None:

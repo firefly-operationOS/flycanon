@@ -109,7 +109,7 @@ public final class ReactiveCanonClient {
                 .clientConnector(new org.springframework.http.client.reactive.ReactorClientHttpConnector(httpClient))
                 .exchangeStrategies(strategies)
                 .defaultHeader(HttpHeaders.ACCEPT, MediaType.APPLICATION_JSON_VALUE)
-                .defaultHeader(HttpHeaders.USER_AGENT, "flycanon-sdk-java/26.5.5");
+                .defaultHeader(HttpHeaders.USER_AGENT, "flycanon-sdk-java/26.5.6");
         Optional.ofNullable(builder.apiKey)
                 .filter(k -> !k.isBlank())
                 .ifPresent(k -> wcb.defaultHeader(HttpHeaders.AUTHORIZATION, "Bearer " + k));
