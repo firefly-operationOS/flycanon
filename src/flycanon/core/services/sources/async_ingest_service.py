@@ -180,6 +180,11 @@ class AsyncIngestService:
             )
             return
         job = running
+        # ``attempts`` from this claim is our lease identity: subsequent
+        # mark_succeeded / mark_failed UPDATEs are guarded by it so a
+        # poached lease (worker took too long, another replica
+        # re-claimed) can't silently overwrite the new owner's state.
+        lease_attempts = job.attempts
         # Poison-job guard: once a job has been reclaimed past the
         # attempts ceiling, give up and mark it failed rather than
         # looping forever. A worker that keeps crashing on the same
@@ -195,6 +200,7 @@ class AsyncIngestService:
                 job_id,
                 code="attempts_exhausted",
                 message=f"job aborted after {job.attempts} attempts",
+                expected_attempts=lease_attempts,
             )
             return
 
@@ -233,11 +239,22 @@ class AsyncIngestService:
                     "content_sha256": source.content_sha256,
                 },
             )
-            await self._repository.mark_succeeded(
+            finalised = await self._repository.mark_succeeded(
                 job_id,
                 source_id=source.id,
                 content_sha256=source.content_sha256,
+                expected_attempts=lease_attempts,
             )
+            if finalised is None:
+                # Lease was poached mid-run. The new owner is the source
+                # of truth -- don't publish a second IngestSourceFinished
+                # or fire the webhook from this stale path.
+                logger.warning(
+                    "ingest job %s lease lost mid-run (attempts moved past %d) -- skipping success publish",
+                    job_id,
+                    lease_attempts,
+                )
+                return
             await self._audit.record(
                 event_type="ingest.succeeded",
                 subject_kind="ingest_job",
@@ -268,7 +285,22 @@ class AsyncIngestService:
                 message=str(exc),
                 payload={"code": code},
             )
-            await self._repository.mark_failed(job_id, code=str(code), message=str(exc))
+            failed = await self._repository.mark_failed(
+                job_id,
+                code=str(code),
+                message=str(exc),
+                expected_attempts=lease_attempts,
+            )
+            if failed is None:
+                # Same lease-poaching guard as the success path: another
+                # worker took over while we were running; let them be
+                # the canonical source of the failure narrative.
+                logger.warning(
+                    "ingest job %s lease lost mid-run (attempts moved past %d) -- skipping failure publish",
+                    job_id,
+                    lease_attempts,
+                )
+                return
             await self._audit.record(
                 event_type="ingest.failed",
                 subject_kind="ingest_job",
