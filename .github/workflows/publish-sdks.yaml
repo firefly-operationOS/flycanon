@@ -175,14 +175,22 @@ jobs:
           echo "TAG_VERSION=$TAG_VERSION"
           echo "WHEEL_VERSION=$WHEEL_VERSION"
           echo "wheel_url=https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG}/flycanon_sdk-${WHEEL_VERSION}-py3-none-any.whl" >> "$GITHUB_OUTPUT"
+          # Also expose the bare CalVer (no ``v`` prefix) so the
+          # release-notes template can render the Maven coordinate
+          # the way Maven actually wants it.
+          echo "tag_version=$TAG_VERSION" >> "$GITHUB_OUTPUT"
 
       - name: Attach build artifacts to the GitHub Release
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
           # Users install directly from these URLs with ``uv add``;
-          # no PyPI publish step -- by design.
-          files: sdks/python/dist/*
+          # no PyPI publish step -- by design. The explicit globs keep
+          # ``uv build``'s side-effect ``dist/.gitignore`` (single
+          # asterisk, 1 byte) out of the release.
+          files: |
+            sdks/python/dist/*.whl
+            sdks/python/dist/*.tar.gz
           generate_release_notes: true
           append_body: true
           body: |
@@ -211,7 +219,7 @@ jobs:
             <dependency>
               <groupId>com.firefly</groupId>
               <artifactId>flycanon-sdk</artifactId>
-              <version>${{ github.ref_name }}</version>
+              <version>${{ steps.install_url.outputs.tag_version }}</version>
             </dependency>
             ```
 

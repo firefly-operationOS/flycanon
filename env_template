@@ -96,6 +96,27 @@ FLYCANON_QUERY_EXPANSION_ENABLED=false
 FLYCANON_QUERY_EXPANSION_N=3
 
 # ----------------------------------------------------------------------------
+# PII guardrail
+# ----------------------------------------------------------------------------
+# The intake pipeline scans every payload (and re-ingest payload) for
+# personal data before chunking + embedding. See docs/pii.md.
+#   scanner:
+#     regex     -- default, no dependencies. Email / US SSN / phone /
+#                  credit card / IBAN patterns.
+#     presidio  -- planned, falls back to regex in this build.
+#     disabled  -- skip the scan entirely (dev / fixture replay).
+#   policy:
+#     warn      -- default; index as-is and record findings on the
+#                  source row's metadata.pii_findings.
+#     redact    -- rewrite each hit as [REDACTED:<KIND>] before
+#                  chunking + indexing; metadata still records the
+#                  original spans.
+#     reject    -- fail the intake with RFC 7807 ``pii_violation``
+#                  (HTTP 422) and findings[].
+FLYCANON_PII_SCANNER=regex
+FLYCANON_PII_POLICY=warn
+
+# ----------------------------------------------------------------------------
 # Vector store
 # ----------------------------------------------------------------------------
 # Backend selector. Every option implements the agentic

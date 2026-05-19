@@ -1,6 +1,6 @@
 [project]
 name = "flycanon-sdk"
-version = "26.5.4"
+version = "26.5.5"
 description = "Async-first Python client for the flycanon Operational Knowledge Repository service."
 readme = "README.md"
 requires-python = ">=3.11"
