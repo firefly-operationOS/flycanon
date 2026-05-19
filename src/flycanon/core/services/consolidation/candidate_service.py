@@ -16,7 +16,6 @@ The :class:`CandidateService` materialises LLM proposals as
 from __future__ import annotations
 
 import logging
-from datetime import UTC, datetime
 from typing import Any
 
 from pyfly.container import service
@@ -147,11 +146,23 @@ class CandidateService:
         *,
         correlation_id: str | None = None,
     ) -> CandidateRow:
-        candidate = await self._candidates.get(candidate_id)
-        if candidate is None:
+        # Atomic claim BEFORE the LLM-heavy / knowledge-item write so
+        # two operators clicking accept in the inbox can't both
+        # materialise the same proposal twice. The previous
+        # check-then-act pattern would let both threads pass
+        # ``status == 'proposed'`` and both write a knowledge item.
+        existing = await self._candidates.get(candidate_id)
+        if existing is None:
             raise CandidateNotFound(candidate_id)
-        if candidate.status != CandidateStatus.proposed.value:
-            raise CandidateAlreadyDecided(candidate_id, candidate.status)
+        candidate = await self._candidates.claim_decision(
+            candidate_id,
+            new_status=CandidateStatus.accepted.value,
+            actor=request.actor,
+        )
+        if candidate is None:
+            # The row exists but is no longer ``proposed`` -- another
+            # operator already accepted / rejected it.
+            raise CandidateAlreadyDecided(candidate_id, existing.status)
 
         citations = await self._citations_from_candidate(candidate)
         domain = Domain(candidate.domain)
@@ -197,12 +208,13 @@ class CandidateService:
             target_item_id = stored_version.knowledge_item_id
             new_version = stored_version.version
 
-        candidate.status = CandidateStatus.accepted.value
-        candidate.decided_at = datetime.now(UTC)
-        candidate.decided_by = request.actor
-        candidate.materialised_knowledge_item_id = target_item_id
-        candidate.materialised_version = new_version
-        stored = await self._candidates.update(candidate)
+        stored = await self._candidates.finalise(
+            candidate_id,
+            materialised_knowledge_item_id=target_item_id,
+            materialised_version=new_version,
+        )
+        if stored is None:  # defensive -- the claim above already pinned the row
+            stored = candidate
 
         await self._audit.record(
             event_type="candidate.accepted",
@@ -232,19 +244,23 @@ class CandidateService:
         *,
         correlation_id: str | None = None,
     ) -> CandidateRow:
-        candidate = await self._candidates.get(candidate_id)
-        if candidate is None:
+        existing = await self._candidates.get(candidate_id)
+        if existing is None:
             raise CandidateNotFound(candidate_id)
-        if candidate.status != CandidateStatus.proposed.value:
-            raise CandidateAlreadyDecided(candidate_id, candidate.status)
+        candidate = await self._candidates.claim_decision(
+            candidate_id,
+            new_status=CandidateStatus.rejected.value,
+            actor=request.actor,
+        )
+        if candidate is None:
+            raise CandidateAlreadyDecided(candidate_id, existing.status)
 
-        candidate.status = CandidateStatus.rejected.value
-        candidate.decided_at = datetime.now(UTC)
-        candidate.decided_by = request.actor
-        meta = dict(candidate.metadata_json or {})
-        meta["rejection_reason"] = request.reason
-        candidate.metadata_json = meta
-        stored = await self._candidates.update(candidate)
+        stored = await self._candidates.finalise(
+            candidate_id,
+            metadata_patch={"rejection_reason": request.reason},
+        )
+        if stored is None:
+            stored = candidate
 
         await self._audit.record(
             event_type="candidate.rejected",

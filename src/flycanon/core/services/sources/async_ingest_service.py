@@ -165,20 +165,38 @@ class AsyncIngestService:
             )
             return
 
-        running = await self._repository.mark_running(job_id)
+        running = await self._repository.mark_running(
+            job_id,
+            lease_seconds=self._settings.ingest_timeout_s,
+        )
         if running is None:
-            # Another worker already claimed (or finished) this job --
-            # the atomic ``UPDATE ... WHERE status = 'queued'``
-            # returns nothing when the row has left ``queued``. The
-            # original delivery was lost OR another replica beat us;
-            # either way, idempotent skip is the right answer.
+            # Another worker holds an active lease OR the job is already
+            # terminal. The atomic claim returns nothing in either case
+            # and we treat it as an idempotent skip.
             logger.info(
-                "ingest job %s could not be claimed (already running or terminal) "
+                "ingest job %s could not be claimed (live lease held or terminal) "
                 "-- skipping duplicate delivery",
                 job_id,
             )
             return
         job = running
+        # Poison-job guard: once a job has been reclaimed past the
+        # attempts ceiling, give up and mark it failed rather than
+        # looping forever. A worker that keeps crashing on the same
+        # payload would otherwise eat replica budget indefinitely.
+        if job.attempts > self._settings.ingest_max_attempts:
+            logger.warning(
+                "ingest job %s exhausted attempts (%d > %d) -- marking failed",
+                job_id,
+                job.attempts,
+                self._settings.ingest_max_attempts,
+            )
+            await self._repository.mark_failed(
+                job_id,
+                code="attempts_exhausted",
+                message=f"job aborted after {job.attempts} attempts",
+            )
+            return
 
         payload = job.metadata_json or {}
         try:

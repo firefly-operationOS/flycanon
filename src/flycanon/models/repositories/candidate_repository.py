@@ -5,9 +5,10 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from contextlib import asynccontextmanager
+from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 from flycanon.models.entities.candidate import CandidateRow
@@ -126,3 +127,84 @@ class CandidateRepository:
             merged = await session.merge(row)
             await session.flush()
             return merged
+
+    async def claim_decision(
+        self,
+        candidate_id: str,
+        *,
+        new_status: str,
+        actor: str | None,
+    ) -> CandidateRow | None:
+        """Atomically flip ``proposed -> new_status`` for one candidate.
+
+        Used by :class:`CandidateService.accept` / ``reject`` to gate
+        the decision against concurrent operators. Returns the claimed
+        row when the caller wins the race; ``None`` when the candidate
+        is no longer ``proposed`` (already accepted, rejected, or
+        unknown id). The caller maps ``None`` to ``CandidateAlreadyDecided``
+        / ``CandidateNotFound`` per the typed 4xx contract.
+
+        Lower-cost than dropping a SELECT FOR UPDATE here because the
+        check-then-act path lets two operators both pass the gate and
+        both write a knowledge item before the second discovers the
+        loss; the atomic flip catches it upfront.
+        """
+        async with self.session() as session:
+            result = await session.execute(
+                update(CandidateRow)
+                .where(
+                    CandidateRow.id == candidate_id,
+                    CandidateRow.status == "proposed",
+                )
+                .values(
+                    status=new_status,
+                    decided_at=datetime.now(UTC),
+                    decided_by=actor,
+                )
+                .returning(CandidateRow)
+            )
+            row = result.scalar_one_or_none()
+            if row is not None:
+                await session.refresh(row)
+            return row
+
+    async def finalise(
+        self,
+        candidate_id: str,
+        *,
+        materialised_knowledge_item_id: str | None = None,
+        materialised_version: int | None = None,
+        metadata_patch: dict[str, Any] | None = None,
+    ) -> CandidateRow | None:
+        """Attach the materialised pointer to an already-claimed candidate.
+
+        Companion to :meth:`claim_decision`. ``accept`` first claims
+        the candidate (which atomically pins ``status`` away from
+        ``proposed``), runs the knowledge-item write, then calls this
+        helper to record where the materialised content landed.
+        """
+        async with self.session() as session:
+            values: dict[str, Any] = {}
+            if materialised_knowledge_item_id is not None:
+                values["materialised_knowledge_item_id"] = materialised_knowledge_item_id
+            if materialised_version is not None:
+                values["materialised_version"] = materialised_version
+            if metadata_patch:
+                row = await session.get(CandidateRow, candidate_id)
+                if row is None:
+                    return None
+                merged_metadata = dict(row.metadata_json or {})
+                merged_metadata.update(metadata_patch)
+                values["metadata_json"] = merged_metadata
+            if not values:
+                return await session.get(CandidateRow, candidate_id)
+            result = await session.execute(
+                update(CandidateRow)
+                .where(CandidateRow.id == candidate_id)
+                .values(**values)
+                .returning(CandidateRow)
+            )
+            row = result.scalar_one_or_none()
+            if row is not None:
+                await session.refresh(row)
+            return row

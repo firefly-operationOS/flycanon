@@ -183,8 +183,20 @@ class ConversationService:
         # turns. Beyond that the earliest turn drops out. For
         # production deployments that want a semantic summary, a
         # follow-up can plug an LLM-driven summarisation step here.
-        conversation.summary = self._next_summary(conversation, turn_stored)
-        await self._repository.update(conversation)
+        #
+        # Re-read the conversation row before computing the next
+        # summary so a concurrent turn append's summary line isn't
+        # lost. Two turns on the same conversation correctly serialise
+        # the turn rows (UNIQUE(conversation_id, turn_index) +
+        # retry), but the rolling summary used to read from a
+        # function-local ``conversation`` captured before either
+        # write; whoever called ``update`` second would clobber the
+        # other's line.
+        fresh = await self._repository.get(conversation_id)
+        if fresh is not None:
+            fresh.summary = self._next_summary(fresh, turn_stored)
+            await self._repository.update(fresh)
+            conversation = fresh
 
         await self._audit.record(
             event_type="conversation.turn_appended",

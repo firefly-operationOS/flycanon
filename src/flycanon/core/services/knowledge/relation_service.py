@@ -14,6 +14,7 @@ import logging
 
 from pyfly.container import service
 from pyfly.eda import EventPublisher
+from sqlalchemy.exc import IntegrityError
 
 from flycanon.config import CanonSettings
 from flycanon.core.services.audit import AuditService
@@ -97,13 +98,11 @@ class KnowledgeRelationService:
         )
         try:
             stored = await self._relations.add(row)
-        except Exception as exc:
-            # Unique-constraint violation on (from, to, kind) -- the
-            # generic SQLAlchemy IntegrityError covers it on every
-            # dialect we ship against (Postgres + SQLite).
-            if "unique" in str(exc).lower() or "UNIQUE" in str(exc):
-                raise RelationConflictError(from_item_id, request.to_item_id, request.kind.value) from exc
-            raise
+        except IntegrityError as exc:
+            # Unique-constraint violation on (from, to, kind). Both
+            # Postgres + SQLite raise IntegrityError for this; we no
+            # longer have to substring-match the engine's text.
+            raise RelationConflictError(from_item_id, request.to_item_id, request.kind.value) from exc
 
         await self._audit.record(
             event_type="knowledge.relation_added",

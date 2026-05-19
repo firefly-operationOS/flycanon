@@ -16,10 +16,10 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from contextlib import asynccontextmanager
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from sqlalchemy import func, select, update
+from sqlalchemy import and_, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 from flycanon.models.entities.ingest_job import IngestJobEventRow, IngestJobRow
@@ -72,28 +72,50 @@ class IngestJobRepository:
             await session.flush()
             return merged
 
-    async def mark_running(self, job_id: str) -> IngestJobRow | None:
-        """Atomic ``queued -> running`` claim.
+    async def mark_running(
+        self,
+        job_id: str,
+        *,
+        lease_seconds: int | None = None,
+    ) -> IngestJobRow | None:
+        """Atomic claim that also recovers stale ``running`` rows.
 
-        Returns the claimed row on success, ``None`` if another worker
-        beat us to it (the row already left ``queued``) or the id is
-        unknown. The single ``UPDATE ... WHERE status = 'queued'
-        RETURNING`` lets the database enforce mutual exclusion -- the
-        previous read-modify-write pattern would let two replicas both
-        succeed and double-ingest under duplicate EDA delivery.
+        Returns the claimed row on success, ``None`` when the job is
+        already terminal, actively held by a live worker, or unknown.
+        The single ``UPDATE ... WHERE ... RETURNING`` lets the database
+        enforce mutual exclusion -- the previous read-modify-write
+        pattern would let two replicas both succeed and double-ingest
+        under duplicate EDA delivery.
+
+        Stuck-job recovery: a row whose ``status='running'`` and whose
+        ``started_at`` is older than ``lease_seconds`` is re-claimable.
+        That handles the worker-crashed-mid-run case: without recovery
+        a row sitting at ``running`` would be unreachable forever
+        because the next worker's ``WHERE status='queued'`` would
+        always miss it.
 
         Increments the ``attempts`` counter so a retry-on-failure loop
         has the correct count when classifying terminal vs retryable
         failures.
         """
         async with self.session() as session:
+            conditions: list[Any] = [IngestJobRow.status == "queued"]
+            if lease_seconds is not None and lease_seconds > 0:
+                stale_cutoff = datetime.now(UTC) - timedelta(seconds=lease_seconds)
+                conditions.append(
+                    and_(
+                        IngestJobRow.status == "running",
+                        IngestJobRow.started_at.isnot(None),
+                        IngestJobRow.started_at < stale_cutoff,
+                    )
+                )
             result = await session.execute(
                 update(IngestJobRow)
-                .where(IngestJobRow.id == job_id, IngestJobRow.status == "queued")
+                .where(IngestJobRow.id == job_id, or_(*conditions))
                 .values(
                     status="running",
                     attempts=IngestJobRow.attempts + 1,
-                    started_at=func.coalesce(IngestJobRow.started_at, func.now()),
+                    started_at=func.now(),
                     error_code=None,
                     error_message=None,
                 )
@@ -103,6 +125,44 @@ class IngestJobRepository:
             if row is not None:
                 await session.refresh(row)
             return row
+
+    async def reclaim_stuck(
+        self,
+        *,
+        lease_seconds: int,
+        limit: int = 100,
+    ) -> list[str]:
+        """Bulk reset ``running`` rows whose lease has expired.
+
+        Belt-and-braces companion to per-job lease recovery in
+        :meth:`mark_running`. A long-stuck job whose EDA delivery has
+        also been lost would never be re-claimed without an explicit
+        sweep -- this method finds those rows, demotes them back to
+        ``queued``, and returns the ids so the caller can republish
+        the ``IngestSourceRequested`` event.
+        """
+        if lease_seconds <= 0:
+            return []
+        cutoff = datetime.now(UTC) - timedelta(seconds=lease_seconds)
+        async with self.session() as session:
+            stmt = (
+                select(IngestJobRow.id)
+                .where(
+                    IngestJobRow.status == "running",
+                    IngestJobRow.started_at.isnot(None),
+                    IngestJobRow.started_at < cutoff,
+                )
+                .limit(limit)
+            )
+            ids = list((await session.execute(stmt)).scalars().all())
+            if not ids:
+                return []
+            await session.execute(
+                update(IngestJobRow)
+                .where(IngestJobRow.id.in_(ids))
+                .values(status="queued", error_code=None, error_message=None)
+            )
+            return ids
 
     async def mark_succeeded(
         self,
