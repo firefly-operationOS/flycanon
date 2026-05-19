@@ -167,6 +167,16 @@ class AsyncIngestService:
 
         running = await self._repository.mark_running(job_id)
         if running is None:
+            # Another worker already claimed (or finished) this job --
+            # the atomic ``UPDATE ... WHERE status = 'queued'``
+            # returns nothing when the row has left ``queued``. The
+            # original delivery was lost OR another replica beat us;
+            # either way, idempotent skip is the right answer.
+            logger.info(
+                "ingest job %s could not be claimed (already running or terminal) "
+                "-- skipping duplicate delivery",
+                job_id,
+            )
             return
         job = running
 

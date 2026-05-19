@@ -19,7 +19,7 @@ from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 from flycanon.models.entities.ingest_job import IngestJobEventRow, IngestJobRow
@@ -73,22 +73,35 @@ class IngestJobRepository:
             return merged
 
     async def mark_running(self, job_id: str) -> IngestJobRow | None:
-        """Atomic ``queued -> running`` transition.
+        """Atomic ``queued -> running`` claim.
 
-        Increments the ``attempts`` counter so a retry-on-failure
-        loop has the correct count when classifying terminal vs
-        retryable failures.
+        Returns the claimed row on success, ``None`` if another worker
+        beat us to it (the row already left ``queued``) or the id is
+        unknown. The single ``UPDATE ... WHERE status = 'queued'
+        RETURNING`` lets the database enforce mutual exclusion -- the
+        previous read-modify-write pattern would let two replicas both
+        succeed and double-ingest under duplicate EDA delivery.
+
+        Increments the ``attempts`` counter so a retry-on-failure loop
+        has the correct count when classifying terminal vs retryable
+        failures.
         """
         async with self.session() as session:
-            row = await session.get(IngestJobRow, job_id)
-            if row is None:
-                return None
-            row.status = "running"
-            row.attempts = (row.attempts or 0) + 1
-            row.started_at = row.started_at or datetime.now(UTC)
-            row.error_code = None
-            row.error_message = None
-            await session.flush()
+            result = await session.execute(
+                update(IngestJobRow)
+                .where(IngestJobRow.id == job_id, IngestJobRow.status == "queued")
+                .values(
+                    status="running",
+                    attempts=IngestJobRow.attempts + 1,
+                    started_at=func.coalesce(IngestJobRow.started_at, func.now()),
+                    error_code=None,
+                    error_message=None,
+                )
+                .returning(IngestJobRow)
+            )
+            row = result.scalar_one_or_none()
+            if row is not None:
+                await session.refresh(row)
             return row
 
     async def mark_succeeded(
