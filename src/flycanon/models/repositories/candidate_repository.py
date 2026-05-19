@@ -83,6 +83,44 @@ class CandidateRepository:
                 await session.refresh(row)
             return rows
 
+    async def find_conflict_candidate(
+        self,
+        *,
+        from_item_id: str,
+        to_item_id: str,
+    ) -> CandidateRow | None:
+        """Look up an already-queued conflict-detection candidate for the
+        ordered pair ``(from_item_id, to_item_id)``.
+
+        Used by :class:`ConflictDetector` to make the
+        ``POST /api/v1/knowledge:detect-conflicts`` pass idempotent --
+        re-running it shouldn't fill the inbox with duplicate
+        proposals for the same pair. We anchor the SQL by
+        ``source_id`` (the detector stores ``from_item.id`` there)
+        and filter on the metadata.kind + to_item_id breadcrumb in
+        Python so the helper stays portable across Postgres + SQLite
+        without dialect-specific JSON operators.
+        """
+        async with self._session_factory() as session:
+            stmt = (
+                select(CandidateRow)
+                .where(
+                    CandidateRow.status == "proposed",
+                    CandidateRow.source_id == from_item_id,
+                )
+                .order_by(CandidateRow.created_at.desc())
+                .limit(50)
+            )
+            result = await session.execute(stmt)
+            for row in result.scalars():
+                meta = row.metadata_json or {}
+                if meta.get("kind") != "conflict_detection":
+                    continue
+                if meta.get("to_item_id") != to_item_id:
+                    continue
+                return row
+            return None
+
     async def update(self, row: CandidateRow) -> CandidateRow:
         async with self.session() as session:
             merged = await session.merge(row)
