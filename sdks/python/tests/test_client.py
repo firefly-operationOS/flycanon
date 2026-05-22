@@ -525,13 +525,16 @@ def test_canon_workspaces_topic_constant() -> None:
 @pytest.mark.asyncio
 async def test_constructor_headers_attached_on_every_request() -> None:
     """Every outbound request carries the four canonical headers."""
-    async with respx.mock(base_url="http://canon") as mock, CanonClient(
-        base_url="http://canon",
-        tenant_id="tenant-acme",
-        workspace_id="ws-1",
-        correlation_id="corr-42",
-        agent_token="canon_abc123",
-    ) as client:
+    async with (
+        respx.mock(base_url="http://canon") as mock,
+        CanonClient(
+            base_url="http://canon",
+            tenant_id="tenant-acme",
+            workspace_id="ws-1",
+            correlation_id="corr-42",
+            agent_token="canon_abc123",
+        ) as client,
+    ):
         route = mock.get("/api/v1/version").respond(
             json={
                 "service": "flycanon",
@@ -830,11 +833,14 @@ async def test_unknown_code_falls_back_to_canon_api_error() -> None:
 
 @pytest.mark.asyncio
 async def test_create_workspace_posts_to_workspaces_path() -> None:
-    async with respx.mock(base_url="http://canon") as mock, CanonClient(
-        base_url="http://canon",
-        tenant_id="acme",
-        workspace_id="ws-1",
-    ) as client:
+    async with (
+        respx.mock(base_url="http://canon") as mock,
+        CanonClient(
+            base_url="http://canon",
+            tenant_id="acme",
+            workspace_id="ws-1",
+        ) as client,
+    ):
         route = mock.post("/api/v1/workspaces").respond(
             201,
             json={
@@ -862,9 +868,10 @@ async def test_create_workspace_posts_to_workspaces_path() -> None:
 
 @pytest.mark.asyncio
 async def test_list_workspaces_returns_summaries() -> None:
-    async with respx.mock(base_url="http://canon") as mock, CanonClient(
-        base_url="http://canon", tenant_id="acme", workspace_id="ws-1"
-    ) as client:
+    async with (
+        respx.mock(base_url="http://canon") as mock,
+        CanonClient(base_url="http://canon", tenant_id="acme", workspace_id="ws-1") as client,
+    ):
         mock.get("/api/v1/workspaces").respond(
             json=[
                 {
@@ -885,9 +892,10 @@ async def test_list_workspaces_returns_summaries() -> None:
 
 @pytest.mark.asyncio
 async def test_get_workspace_returns_spec() -> None:
-    async with respx.mock(base_url="http://canon") as mock, CanonClient(
-        base_url="http://canon", tenant_id="acme", workspace_id="ws-1"
-    ) as client:
+    async with (
+        respx.mock(base_url="http://canon") as mock,
+        CanonClient(base_url="http://canon", tenant_id="acme", workspace_id="ws-1") as client,
+    ):
         mock.get("/api/v1/workspaces/ws-1").respond(
             json={
                 "id": "ws-1",
@@ -911,9 +919,10 @@ async def test_get_workspace_returns_spec() -> None:
 
 @pytest.mark.asyncio
 async def test_update_workspace_patches_sparse_fields() -> None:
-    async with respx.mock(base_url="http://canon") as mock, CanonClient(
-        base_url="http://canon", tenant_id="acme", workspace_id="ws-1"
-    ) as client:
+    async with (
+        respx.mock(base_url="http://canon") as mock,
+        CanonClient(base_url="http://canon", tenant_id="acme", workspace_id="ws-1") as client,
+    ):
         route = mock.patch("/api/v1/workspaces/ws-1").respond(
             json={
                 "id": "ws-1",
@@ -939,9 +948,10 @@ async def test_update_workspace_patches_sparse_fields() -> None:
 
 @pytest.mark.asyncio
 async def test_close_workspace_uses_close_action_path() -> None:
-    async with respx.mock(base_url="http://canon") as mock, CanonClient(
-        base_url="http://canon", tenant_id="acme", workspace_id="ws-1"
-    ) as client:
+    async with (
+        respx.mock(base_url="http://canon") as mock,
+        CanonClient(base_url="http://canon", tenant_id="acme", workspace_id="ws-1") as client,
+    ):
         route = mock.post("/api/v1/workspaces/ws-1:close").respond(
             json={
                 "id": "ws-1",
@@ -970,9 +980,10 @@ async def test_close_workspace_uses_close_action_path() -> None:
 
 @pytest.mark.asyncio
 async def test_mint_agent_token_returns_token_once() -> None:
-    async with respx.mock(base_url="http://canon") as mock, CanonClient(
-        base_url="http://canon", tenant_id="acme", workspace_id="ws-1"
-    ) as client:
+    async with (
+        respx.mock(base_url="http://canon") as mock,
+        CanonClient(base_url="http://canon", tenant_id="acme", workspace_id="ws-1") as client,
+    ):
         mock.post("/api/v1/agent-tokens").respond(
             201,
             json={
@@ -1005,9 +1016,10 @@ async def test_mint_agent_token_returns_token_once() -> None:
 
 @pytest.mark.asyncio
 async def test_list_agent_tokens_returns_summaries() -> None:
-    async with respx.mock(base_url="http://canon") as mock, CanonClient(
-        base_url="http://canon", tenant_id="acme", workspace_id="ws-1"
-    ) as client:
+    async with (
+        respx.mock(base_url="http://canon") as mock,
+        CanonClient(base_url="http://canon", tenant_id="acme", workspace_id="ws-1") as client,
+    ):
         mock.get("/api/v1/agent-tokens").respond(
             json=[
                 {
@@ -1034,9 +1046,10 @@ async def test_list_agent_tokens_returns_summaries() -> None:
 
 @pytest.mark.asyncio
 async def test_revoke_agent_token_returns_none() -> None:
-    async with respx.mock(base_url="http://canon") as mock, CanonClient(
-        base_url="http://canon", tenant_id="acme", workspace_id="ws-1"
-    ) as client:
+    async with (
+        respx.mock(base_url="http://canon") as mock,
+        CanonClient(base_url="http://canon", tenant_id="acme", workspace_id="ws-1") as client,
+    ):
         route = mock.delete("/api/v1/agent-tokens/tok-1").respond(204)
         result = await client.revoke_agent_token("tok-1")
         assert result is None
@@ -1050,12 +1063,15 @@ async def test_revoke_agent_token_returns_none() -> None:
 
 @pytest.mark.asyncio
 async def test_agent_ingest_source_sends_idempotency_key() -> None:
-    async with respx.mock(base_url="http://canon") as mock, CanonClient(
-        base_url="http://canon",
-        tenant_id="acme",
-        workspace_id="ws-1",
-        agent_token="canon_abc",
-    ) as client:
+    async with (
+        respx.mock(base_url="http://canon") as mock,
+        CanonClient(
+            base_url="http://canon",
+            tenant_id="acme",
+            workspace_id="ws-1",
+            agent_token="canon_abc",
+        ) as client,
+    ):
         route = mock.post("/api/v1/agent/sources").respond(
             201,
             json={
@@ -1097,9 +1113,10 @@ async def test_agent_ingest_source_rejects_empty_idempotency_key() -> None:
 
 @pytest.mark.asyncio
 async def test_agent_get_source_does_not_require_idempotency_key() -> None:
-    async with respx.mock(base_url="http://canon") as mock, CanonClient(
-        base_url="http://canon", agent_token="canon_abc"
-    ) as client:
+    async with (
+        respx.mock(base_url="http://canon") as mock,
+        CanonClient(base_url="http://canon", agent_token="canon_abc") as client,
+    ):
         route = mock.get("/api/v1/agent/sources/src-1").respond(
             json={
                 "id": "src-1",
@@ -1121,9 +1138,10 @@ async def test_agent_get_source_does_not_require_idempotency_key() -> None:
 
 @pytest.mark.asyncio
 async def test_agent_query_sends_idempotency_key() -> None:
-    async with respx.mock(base_url="http://canon") as mock, CanonClient(
-        base_url="http://canon", agent_token="canon_abc"
-    ) as client:
+    async with (
+        respx.mock(base_url="http://canon") as mock,
+        CanonClient(base_url="http://canon", agent_token="canon_abc") as client,
+    ):
         route = mock.post("/api/v1/agent/query").respond(
             json={
                 "answer": "Yes.",
@@ -1153,12 +1171,11 @@ async def test_agent_query_rejects_empty_idempotency_key() -> None:
 
 @pytest.mark.asyncio
 async def test_agent_search_sends_idempotency_key() -> None:
-    async with respx.mock(base_url="http://canon") as mock, CanonClient(
-        base_url="http://canon", agent_token="canon_abc"
-    ) as client:
-        route = mock.post("/api/v1/agent/search").respond(
-            json={"hits": [], "elapsed_ms": 32}
-        )
+    async with (
+        respx.mock(base_url="http://canon") as mock,
+        CanonClient(base_url="http://canon", agent_token="canon_abc") as client,
+    ):
+        route = mock.post("/api/v1/agent/search").respond(json={"hits": [], "elapsed_ms": 32})
         response = await client.agent.search(
             SearchRequest(query="topic", top_k=5),
             idempotency_key="op-1",
@@ -1169,9 +1186,10 @@ async def test_agent_search_sends_idempotency_key() -> None:
 
 @pytest.mark.asyncio
 async def test_agent_get_knowledge_returns_item() -> None:
-    async with respx.mock(base_url="http://canon") as mock, CanonClient(
-        base_url="http://canon", agent_token="canon_abc"
-    ) as client:
+    async with (
+        respx.mock(base_url="http://canon") as mock,
+        CanonClient(base_url="http://canon", agent_token="canon_abc") as client,
+    ):
         mock.get("/api/v1/agent/knowledge/ki-1").respond(
             json={
                 "id": "ki-1",
@@ -1191,9 +1209,10 @@ async def test_agent_get_knowledge_returns_item() -> None:
 
 @pytest.mark.asyncio
 async def test_agent_get_provenance_returns_provenance() -> None:
-    async with respx.mock(base_url="http://canon") as mock, CanonClient(
-        base_url="http://canon", agent_token="canon_abc"
-    ) as client:
+    async with (
+        respx.mock(base_url="http://canon") as mock,
+        CanonClient(base_url="http://canon", agent_token="canon_abc") as client,
+    ):
         mock.get("/api/v1/agent/knowledge/ki-1/provenance").respond(
             json={
                 "knowledge_item_id": "ki-1",
@@ -1210,9 +1229,10 @@ async def test_agent_get_provenance_returns_provenance() -> None:
 
 @pytest.mark.asyncio
 async def test_agent_propose_candidates_sends_idempotency_key() -> None:
-    async with respx.mock(base_url="http://canon") as mock, CanonClient(
-        base_url="http://canon", agent_token="canon_abc"
-    ) as client:
+    async with (
+        respx.mock(base_url="http://canon") as mock,
+        CanonClient(base_url="http://canon", agent_token="canon_abc") as client,
+    ):
         route = mock.post("/api/v1/agent/candidates:propose").respond(
             201,
             json=[
