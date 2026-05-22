@@ -95,9 +95,7 @@ async def is_partitioned(engine: AsyncEngine) -> bool:
         return result.scalar() is not None
 
 
-async def promote_tenant_to_partition(
-    engine: AsyncEngine, tenant_id: str
-) -> None:
+async def promote_tenant_to_partition(engine: AsyncEngine, tenant_id: str) -> None:
     """Carve out a dedicated partition + HNSW index for ``tenant_id``.
 
     Pre-conditions:
@@ -148,9 +146,7 @@ async def promote_tenant_to_partition(
         )
 
 
-async def demote_tenant_from_partition(
-    engine: AsyncEngine, tenant_id: str
-) -> None:
+async def demote_tenant_from_partition(engine: AsyncEngine, tenant_id: str) -> None:
     """Detach + drop the per-tenant partition, returning rows to the
     default partition.
 
@@ -171,16 +167,6 @@ async def demote_tenant_from_partition(
         # standalone table; rows are reattached to the default by
         # the partition routing on subsequent INSERTs. To merge in
         # one step we INSERT-then-DROP.
-        await conn.execute(
-            text(
-                f"ALTER TABLE canon_chunk_vectors "
-                f"DETACH PARTITION {partition}"
-            )
-        )
-        await conn.execute(
-            text(
-                f"INSERT INTO canon_chunk_vectors "
-                f"SELECT * FROM {partition}"
-            )
-        )
+        await conn.execute(text(f"ALTER TABLE canon_chunk_vectors DETACH PARTITION {partition}"))
+        await conn.execute(text(f"INSERT INTO canon_chunk_vectors SELECT * FROM {partition}"))
         await conn.execute(text(f"DROP TABLE {partition}"))

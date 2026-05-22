@@ -231,21 +231,15 @@ async def test_bm25_search_isolates_workspace(postgres_url: str) -> None:
     corpus = PostgresCorpus(database_url=postgres_url)
     try:
         # Query ws-a -- only chunk-a should come back.
-        hits_a = await corpus.bm25_search(
-            "alpha", top_k=10, tenant_id="acme", workspace_id="ws-a"
-        )
+        hits_a = await corpus.bm25_search("alpha", top_k=10, tenant_id="acme", workspace_id="ws-a")
         assert {h.chunk_id for h in hits_a} == {chunk_a}
 
         # Query ws-b -- only chunk-b.
-        hits_b = await corpus.bm25_search(
-            "alpha", top_k=10, tenant_id="acme", workspace_id="ws-b"
-        )
+        hits_b = await corpus.bm25_search("alpha", top_k=10, tenant_id="acme", workspace_id="ws-b")
         assert {h.chunk_id for h in hits_b} == {chunk_b}
 
         # Query a workspace with no rows -- empty.
-        hits_c = await corpus.bm25_search(
-            "alpha", top_k=10, tenant_id="acme", workspace_id="ws-c"
-        )
+        hits_c = await corpus.bm25_search("alpha", top_k=10, tenant_id="acme", workspace_id="ws-c")
         assert hits_c == []
     finally:
         await corpus.close()
@@ -273,9 +267,7 @@ async def test_bm25_search_isolates_tenant(postgres_url: str) -> None:
     corpus = PostgresCorpus(database_url=postgres_url)
     try:
         # Foreign tenant + same workspace_id slug -> empty.
-        hits = await corpus.bm25_search(
-            "alpha", top_k=10, tenant_id="bcorp", workspace_id="ws-a"
-        )
+        hits = await corpus.bm25_search("alpha", top_k=10, tenant_id="bcorp", workspace_id="ws-a")
         assert hits == []
     finally:
         await corpus.close()
@@ -318,15 +310,11 @@ async def test_get_chunks_respects_scope(postgres_url: str) -> None:
     corpus = PostgresCorpus(database_url=postgres_url)
     try:
         # Ask for BOTH ids from ws-a's scope -- only chunk_a comes back.
-        rows = await corpus.get_chunks(
-            [chunk_a, chunk_b], tenant_id="acme", workspace_id="ws-a"
-        )
+        rows = await corpus.get_chunks([chunk_a, chunk_b], tenant_id="acme", workspace_id="ws-a")
         assert {r.chunk_id for r in rows} == {chunk_a}
 
         # Foreign tenant -- empty even for an id that exists.
-        rows_foreign = await corpus.get_chunks(
-            [chunk_a], tenant_id="bcorp", workspace_id="ws-a"
-        )
+        rows_foreign = await corpus.get_chunks([chunk_a], tenant_id="bcorp", workspace_id="ws-a")
         assert rows_foreign == []
     finally:
         await corpus.close()
