@@ -3,6 +3,11 @@
 
 from __future__ import annotations
 
+from flycanon.interfaces.dtos.agent_token import (
+    AgentTokenCreated,
+    AgentTokenMintRequest,
+    AgentTokenSummaryDto,
+)
 from flycanon.interfaces.dtos.audit import AuditEvent, AuditPage
 from flycanon.interfaces.dtos.candidate import (
     AcceptCandidateRequest,
@@ -50,6 +55,9 @@ from flycanon.interfaces.dtos.workspace import (
 
 __all__ = [
     "AcceptCandidateRequest",
+    "AgentTokenCreated",
+    "AgentTokenMintRequest",
+    "AgentTokenSummaryDto",
     "AnswerRequest",
     "AnswerResponse",
     "AuditEvent",
