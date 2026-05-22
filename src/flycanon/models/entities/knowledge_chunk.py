@@ -85,4 +85,17 @@ class KnowledgeChunkRow(Base):
     __table_args__ = (
         Index("ix_canon_chunks_source_idx", "source_id", "index_in_source"),
         Index("ix_canon_chunks_tenant_workspace", "tenant_id", "workspace_id"),
+        Index(
+            "ix_canon_chunks_tenant_workspace_model",
+            "tenant_id",
+            "workspace_id",
+            "embedding_model",
+        ),
+        Index(
+            "ix_canon_chunks_scope_source",
+            "tenant_id",
+            "workspace_id",
+            "source_id",
+            "index_in_source",
+        ),
     )
