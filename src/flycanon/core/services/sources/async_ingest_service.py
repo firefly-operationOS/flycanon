@@ -169,6 +169,21 @@ class AsyncIngestService:
         helper to learn the scope. Every subsequent repo call --
         including any that follow on the request path -- is keyed
         by the row's own ``tenant_id`` / ``workspace_id``.
+
+        RLS bypass
+        ----------
+        Plan 6 Task 3 enables row-level security on every tenant-scoped
+        table. The request flow sets ``app.tenant_id`` /
+        ``app.workspace_id`` via :func:`install_tenant_guc_hook`, but
+        worker invocations have no :class:`TenantContext` bound -- so
+        the GUCs stay empty and RLS would reject the first read.
+
+        Deployment must therefore connect the worker process as a
+        Postgres role with ``BYPASSRLS`` (planned: ``flycanon_admin``).
+        The application code stays unchanged; only the database role
+        differs from the API server (which connects as the unprivileged
+        ``flycanon_app`` role). The first cross-workspace query --
+        ``get_across_workspaces`` above -- relies on this bypass.
         """
         job = await self._repository.get_across_workspaces(job_id)
         if job is None:
