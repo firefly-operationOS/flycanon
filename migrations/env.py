@@ -46,9 +46,22 @@ def _resolve_metadata() -> MetaData | None:
 
 config = context.config
 
-# Override sqlalchemy.url from the env var when present (and translate
-# the async driver name back to a sync one Alembic can use).
-url = os.environ.get("FLYCANON_DATABASE_URL") or config.get_main_option("sqlalchemy.url")
+# Resolve the connection URL. Precedence:
+#   1. ``sqlalchemy.url`` already set on the alembic.Config object --
+#      callers that build the config in-process (tests / programmatic
+#      runs) set this explicitly and MUST win.
+#   2. ``FLYCANON_DATABASE_URL`` env var -- the production deploy path
+#      (the ``migrate`` container command + the API on startup) passes
+#      the URL through the env.
+#
+# The previous ordering (env > config) caused test-isolation bleed when
+# another test (e.g. test_openapi_snapshot) called
+# ``os.environ.setdefault("FLYCANON_DATABASE_URL", ...)`` to a tempfile-
+# backed SQLite at module-import time; subsequent migration smoke
+# tests that built their own alembic.Config with
+# ``cfg.set_main_option("sqlalchemy.url", ...)`` were silently
+# retargeted at the openapi test's database and saw stale tables.
+url = config.get_main_option("sqlalchemy.url") or os.environ.get("FLYCANON_DATABASE_URL")
 if url:
     sync_url = url.replace("+asyncpg", "+psycopg").replace("+aiosqlite", "")
     config.set_main_option("sqlalchemy.url", sync_url)
