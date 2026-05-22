@@ -2,9 +2,15 @@
 """PyFly application entry point for flycanon.
 
 ``scan_packages`` declares every package containing ``@configuration``,
-``@rest_controller``, ``@controller_advice``, ``@service``,
-``@command_handler``, ``@query_handler``, or ``@repository`` beans so
-pyfly's DI container can discover them at boot.
+``@rest_controller``, ``@service``, ``@command_handler``,
+``@query_handler``, or ``@repository`` beans so pyfly's DI container
+can discover them at boot.
+
+Exception handlers are registered explicitly via
+``flycanon.web.conventions.register_exception_handlers(app)`` in
+``flycanon.main`` -- pyfly's FastAPI adapter does not scan
+``@controller_advice`` beans, so the conventions handler table is
+hand-wired against the FastAPI app.
 """
 
 from __future__ import annotations
@@ -27,7 +33,6 @@ from pyfly.starters.core import enable_core_stack
         "flycanon.core",  # @configuration class
         "flycanon.core.services",  # CQRS handlers + @service beans
         "flycanon.web.controllers",  # REST controllers
-        "flycanon.web.advice",  # exception advice
     ],
 )
 class CanonApplication:

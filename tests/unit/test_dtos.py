@@ -9,25 +9,9 @@ from pydantic import ValidationError
 from flycanon.interfaces.dtos import (
     AnswerRequest,
     CreateKnowledgeRequest,
-    ProblemDetails,
     SearchRequest,
 )
 from flycanon.interfaces.enums import Domain, Jurisdiction, KnowledgeStatus
-
-
-def test_problem_details_round_trip():
-    pd = ProblemDetails(
-        type="https://flycanon.dev/problems/source-not-found",
-        title="Source not found",
-        status=404,
-        code="source_not_found",
-        detail="source 'abc' not found",
-        extensions={"source_id": "abc"},
-    )
-    dumped = pd.model_dump(exclude_none=True)
-    again = ProblemDetails.model_validate(dumped)
-    assert again.code == "source_not_found"
-    assert again.extensions == {"source_id": "abc"}
 
 
 def test_create_knowledge_request_rejects_empty_title():

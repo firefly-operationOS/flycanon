@@ -1,10 +1,10 @@
 # Copyright 2026 Firefly Software Solutions Inc
 """Typed exceptions raised by the binary-normalisation stage.
 
-Each subclass carries a stable ``code`` (mapped to ``ProblemDetails.code``
-by the controller advice) and a default ``http_status`` -- the
-adapter throws with the right HTTP status without the controller having
-to translate.
+Each subclass carries a stable ``code`` (mapped to ``ProblemDetail.code``
+by the conventions exception handler) and a default ``http_status`` --
+the adapter throws with the right HTTP status without the controller
+having to translate.
 """
 
 from __future__ import annotations

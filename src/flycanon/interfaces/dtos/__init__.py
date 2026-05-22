@@ -11,7 +11,6 @@ from flycanon.interfaces.dtos.candidate import (
     ProposeCandidateRequest,
     RejectCandidateRequest,
 )
-from flycanon.interfaces.dtos.error import ProblemDetails
 from flycanon.interfaces.dtos.knowledge import (
     Citation,
     CreateKnowledgeRequest,
@@ -64,7 +63,6 @@ __all__ = [
     "KnowledgeItem",
     "KnowledgeItemsPage",
     "KnowledgeVersion",
-    "ProblemDetails",
     "ProposeCandidateRequest",
     "Provenance",
     "RejectCandidateRequest",

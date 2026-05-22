@@ -3,11 +3,8 @@
 
 We hand-register handlers via :meth:`fastapi.FastAPI.add_exception_handler`
 because pyfly's ``@controller_advice`` scanner does not pick up
-beans in FastAPI mode. The legacy ``flycanon.web.problem_handlers``
-module predates this conventions package and is the existing
-workaround; Plan 4 retires it in favor of
-``register_exception_handlers(app)``. One day pyfly will fix the
-scanner; until then this module is authoritative.
+beans in FastAPI mode. One day pyfly will fix the scanner; until
+then this module is authoritative.
 
 In addition to the in-house :class:`FireflyHTTPException` hierarchy we
 bridge the pyfly kernel + CQRS exception classes raised across

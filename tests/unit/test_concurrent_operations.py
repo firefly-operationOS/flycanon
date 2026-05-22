@@ -705,24 +705,13 @@ class TestRelationServiceTypedConflict:
 #     never exercised at the service level).
 #   * Conversation summary preservation across concurrent turns
 #     (now derived from turn rows, not the cached column).
-#   * CommandProcessingException / QueryProcessingException
-#     unwrapping in problem_handlers.
 # ---------------------------------------------------------------------------
 
-
-from unittest.mock import AsyncMock  # noqa: E402
-
-from pyfly.cqrs.exceptions import (  # noqa: E402
-    CommandProcessingException,
-    QueryProcessingException,
-)
-from pyfly.kernel import ResourceNotFoundException  # noqa: E402
 
 from flycanon.core.services.knowledge.errors import (  # noqa: E402
     KnowledgeVersionConflict,
 )
 from flycanon.interfaces.dtos.knowledge import UpdateKnowledgeRequest  # noqa: E402
-from flycanon.web.problem_handlers import _dispatch_typed  # noqa: E402
 
 
 class TestLeasePoachingGuard:
@@ -948,152 +937,3 @@ class TestConversationSummaryRaceFree:
         assert ConversationService._summary_from_turns([]) is None
 
 
-class TestProblemHandlersUnwrap:
-    """The RFC 7807 round-3 fix unwraps CommandProcessingException /
-    QueryProcessingException causes so the typed handler fires
-    instead of the generic 400 COMMAND_PROCESSING_ERROR. The actual
-    dispatch happens inside FastAPI handlers; here we exercise the
-    pure ``_dispatch_typed`` helper plus build a synthetic wrap and
-    verify the body shape."""
-
-    def test_dispatch_typed_picks_specific_handler(self):
-        exc = KnowledgeItemAlreadyRetired("ki-1")
-        response = _dispatch_typed(exc)
-        assert response is not None
-        assert response.status_code == 409
-        import json
-
-        body = json.loads(response.body.decode())
-        assert body["code"] == "knowledge_item_already_retired"
-        assert body["extensions"]["item_id"] == "ki-1"
-
-    def test_dispatch_typed_handles_subclass_via_parent(self):
-        from flycanon.core.services.consolidation.errors import ConsolidationError
-
-        # A bare ConsolidationError (not one of the specific subclasses)
-        # falls through to the parent handler.
-        exc = ConsolidationError("bad consolidation")
-        response = _dispatch_typed(exc)
-        assert response is not None
-        assert response.status_code == 422
-        import json
-
-        body = json.loads(response.body.decode())
-        assert body["title"] == "Consolidation failed"
-
-    def test_dispatch_typed_returns_none_for_unrelated(self):
-        # Plain RuntimeError isn't in our table.
-        assert _dispatch_typed(RuntimeError("nope")) is None
-
-    @pytest.mark.asyncio
-    async def test_command_processing_unwraps_typed_cause(self):
-        """Build a CommandProcessingException wrapping a typed cause
-        and exercise the unwrap+dispatch through the handler we
-        register on the FastAPI app."""
-        from fastapi import FastAPI
-
-        from flycanon.web.problem_handlers import register_problem_handlers
-
-        app = FastAPI()
-        register_problem_handlers(app)
-        # Find the registered CommandProcessingException handler.
-        handler = app.exception_handlers.get(CommandProcessingException)
-        assert handler is not None, "command-processing handler not registered"
-
-        cause = KnowledgeItemAlreadyRetired("ki-9")
-        wrapped = CommandProcessingException(
-            message=f"wrapped: {cause}",
-            command_type=type(self),
-            cause=cause,
-        )
-        # FastAPI's exception_handler signature is (Request, Exception).
-        # Pass a dummy request mock that the handler only reads minimally
-        # (problem builder doesn't actually use it).
-        request = AsyncMock()
-        response = await handler(request, wrapped)
-        assert response.status_code == 409
-        import json
-
-        body = json.loads(response.body.decode())
-        assert body["code"] == "knowledge_item_already_retired"
-        assert body["extensions"]["item_id"] == "ki-9"
-
-    @pytest.mark.asyncio
-    async def test_command_processing_unwraps_value_error_cause(self):
-        from fastapi import FastAPI
-
-        from flycanon.web.problem_handlers import register_problem_handlers
-
-        app = FastAPI()
-        register_problem_handlers(app)
-        handler = app.exception_handlers.get(CommandProcessingException)
-        assert handler is not None
-
-        wrapped = CommandProcessingException(
-            message="wrapped value error",
-            command_type=type(self),
-            cause=ValueError("bad input"),
-        )
-        response = await handler(AsyncMock(), wrapped)
-        assert response.status_code == 400
-        import json
-
-        body = json.loads(response.body.decode())
-        assert body["code"] == "invalid_request"
-
-    @pytest.mark.asyncio
-    async def test_command_processing_unwraps_resource_not_found(self):
-        from fastapi import FastAPI
-
-        from flycanon.web.problem_handlers import register_problem_handlers
-
-        app = FastAPI()
-        register_problem_handlers(app)
-        handler = app.exception_handlers.get(CommandProcessingException)
-        assert handler is not None
-
-        wrapped = CommandProcessingException(
-            message="wrapped not found",
-            command_type=type(self),
-            cause=ResourceNotFoundException("missing"),
-        )
-        response = await handler(AsyncMock(), wrapped)
-        assert response.status_code == 404
-
-    @pytest.mark.asyncio
-    async def test_query_processing_unwraps_typed_cause(self):
-        from fastapi import FastAPI
-
-        from flycanon.web.problem_handlers import register_problem_handlers
-
-        app = FastAPI()
-        register_problem_handlers(app)
-        handler = app.exception_handlers.get(QueryProcessingException)
-        assert handler is not None
-
-        wrapped = QueryProcessingException(
-            message="wrapped",
-            query_type=type(self),
-            cause=ResourceNotFoundException("missing knowledge"),
-        )
-        response = await handler(AsyncMock(), wrapped)
-        assert response.status_code == 404
-
-    @pytest.mark.asyncio
-    async def test_command_processing_falls_back_to_400_for_unknown(self):
-        from fastapi import FastAPI
-
-        from flycanon.web.problem_handlers import register_problem_handlers
-
-        app = FastAPI()
-        register_problem_handlers(app)
-        handler = app.exception_handlers.get(CommandProcessingException)
-        assert handler is not None
-
-        wrapped = CommandProcessingException(
-            message="raw failure",
-            command_type=type(self),
-            cause=RuntimeError("unrecognised"),
-        )
-        response = await handler(AsyncMock(), wrapped)
-        assert response.status_code == 400
