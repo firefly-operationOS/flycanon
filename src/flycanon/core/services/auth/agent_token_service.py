@@ -146,6 +146,21 @@ def _hash(token: str) -> str:
     return hashlib.sha256(token.encode("utf-8")).hexdigest()
 
 
+def _as_aware_utc(value: datetime | None) -> datetime | None:
+    """Coerce a datetime to tz-aware UTC, treating naive values as UTC.
+
+    Postgres ``DateTime(timezone=True)`` columns round-trip tz-aware,
+    but SQLite (used by the integration suite) strips tz info on
+    read and hands back naive ``datetime``s. Comparing those against
+    ``datetime.now(UTC)`` raises ``TypeError: can't subtract offset-
+    naive and offset-aware datetimes``, so we normalise at every
+    comparison site that mixes a stored timestamp with ``now(UTC)``.
+    """
+    if value is None:
+        return None
+    return value if value.tzinfo is not None else value.replace(tzinfo=UTC)
+
+
 class AgentTokenService:
     """Mint / verify / list / revoke long-lived agent bearer tokens.
 
@@ -208,7 +223,7 @@ class AgentTokenService:
             raise InvalidAgentToken("Token does not match the tenant header.")
         if not secrets.compare_digest(row["secret_hash"], _hash(token)):
             raise InvalidAgentToken("Token signature mismatch.")
-        expires = row.get("expires_at")
+        expires = _as_aware_utc(row.get("expires_at"))
         if expires is not None and expires <= datetime.now(UTC):
             raise AgentTokenExpired(f"Token expired at {expires.isoformat()}.")
         allowlist = row.get("workspace_allowlist_json")
@@ -218,7 +233,7 @@ class AgentTokenService:
         if "*" not in scopes and scope not in scopes:
             raise AgentScopeDenied(f"Token scope does not permit {scope!r}.")
         now = datetime.now(UTC)
-        last_used = row.get("last_used_at")
+        last_used = _as_aware_utc(row.get("last_used_at"))
         if last_used is None or (now - last_used).total_seconds() > 60:
             await self._repo.mark_used(row["id"], tenant_id=tenant_id, at=now)
         return VerifiedAgentToken(token_id=row["id"], actor=f"agent:{prefix}", prefix=prefix)
