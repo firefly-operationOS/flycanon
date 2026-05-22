@@ -97,7 +97,14 @@ class PostgresCorpus:
     # Reads -- the surface the HybridRetriever consumes
     # ------------------------------------------------------------------
 
-    async def bm25_search(self, query: str, *, top_k: int = 30) -> list[ChunkHit]:
+    async def bm25_search(
+        self,
+        query: str,
+        *,
+        top_k: int = 30,
+        tenant_id: str = "default",
+        workspace_id: str = "default",
+    ) -> list[ChunkHit]:
         """Return the top-``top_k`` chunks ranked by Postgres BM25.
 
         Uses ``plainto_tsquery`` for the user query (safe vs. raw
@@ -105,6 +112,16 @@ class PostgresCorpus:
         boosts term density better than ``ts_rank`` -- closer to
         traditional BM25 semantics. Hits with empty/whitespace
         queries return ``[]`` rather than scanning the whole table.
+
+        ``tenant_id`` / ``workspace_id`` are the authoritative scope
+        -- the BM25 query filters the chunk projection on the
+        ``(tenant_id, workspace_id)`` composite BEFORE the
+        ``tsvector @@ plainto_tsquery`` match so a foreign-scope
+        chunk can never bleed into another workspace's hit list.
+        Defaults to ``'default'`` so legacy single-tenant callers
+        keep working until Plan 4 wires ``TenantContext`` through.
+        The composite is selective enough (post migration 0009) that
+        the GIN-on-tsv index still gets picked for the match.
         """
         q = (query or "").strip()
         if not q:
@@ -123,13 +140,24 @@ class PostgresCorpus:
                 ts_rank_cd(c.tsv, plainto_tsquery(:cfg, :q)) AS score
             FROM canon_chunks AS c
             JOIN canon_sources AS s ON s.id = c.source_id
-            WHERE c.tsv @@ plainto_tsquery(:cfg, :q)
+            WHERE c.tenant_id = :tenant_id
+              AND c.workspace_id = :workspace_id
+              AND c.tsv @@ plainto_tsquery(:cfg, :q)
             ORDER BY score DESC, c.created_at DESC
             LIMIT :k
             """
         )
         async with engine.connect() as conn:
-            result = await conn.execute(sql, {"cfg": self._search_config, "q": q, "k": int(top_k)})
+            result = await conn.execute(
+                sql,
+                {
+                    "cfg": self._search_config,
+                    "q": q,
+                    "k": int(top_k),
+                    "tenant_id": tenant_id,
+                    "workspace_id": workspace_id,
+                },
+            )
             rows = result.mappings().all()
 
         hits: list[ChunkHit] = []
@@ -155,13 +183,25 @@ class PostgresCorpus:
             )
         return hits
 
-    async def get_chunks(self, chunk_ids: list[str]) -> list[StoredChunk]:
+    async def get_chunks(
+        self,
+        chunk_ids: list[str],
+        *,
+        tenant_id: str = "default",
+        workspace_id: str = "default",
+    ) -> list[StoredChunk]:
         """Hydrate a list of chunk ids into ``StoredChunk`` rows.
 
         The retriever uses this after RRF fusion to fetch the body
         text + provenance for the chosen ids. Order is preserved to
         match the input list so the fusion ranks line up with the
         hydrated rows.
+
+        ``tenant_id`` / ``workspace_id`` are filtered on the SQL side
+        so a caller that presents a foreign chunk id (whether by bug
+        or by malice) cannot read content from a workspace they don't
+        own. Defaults to ``'default'`` to match the BM25 surface and
+        let single-tenant callers stay un-modified until Plan 4.
         """
         if not chunk_ids:
             return []
@@ -179,11 +219,20 @@ class PostgresCorpus:
                 COALESCE(s.filename, s.uri, s.id) AS source_path
             FROM canon_chunks AS c
             JOIN canon_sources AS s ON s.id = c.source_id
-            WHERE c.id = ANY(:ids)
+            WHERE c.tenant_id = :tenant_id
+              AND c.workspace_id = :workspace_id
+              AND c.id = ANY(:ids)
             """
         )
         async with engine.connect() as conn:
-            result = await conn.execute(sql, {"ids": list(chunk_ids)})
+            result = await conn.execute(
+                sql,
+                {
+                    "ids": list(chunk_ids),
+                    "tenant_id": tenant_id,
+                    "workspace_id": workspace_id,
+                },
+            )
             rows = {row["chunk_id"]: row for row in result.mappings().all()}
 
         ordered: list[StoredChunk] = []
