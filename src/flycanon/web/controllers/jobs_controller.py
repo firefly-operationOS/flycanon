@@ -1,12 +1,12 @@
 # Copyright 2026 Firefly Software Solutions Inc
-"""Async-ingest job read endpoints under ``/api/v1/jobs``.
+"""Async-ingest job read endpoints under ``/api/v1/ingest-jobs``.
 
 Three endpoints:
 
-* ``GET /api/v1/jobs/{id}`` -- one-shot job lookup.
-* ``GET /api/v1/jobs`` -- paginated listing, optionally filtered
+* ``GET /api/v1/ingest-jobs/{id}`` -- one-shot job lookup.
+* ``GET /api/v1/ingest-jobs`` -- paginated listing, optionally filtered
   by status.
-* ``GET /api/v1/jobs/{id}/stream`` -- Server-Sent Events stream of
+* ``GET /api/v1/ingest-jobs/{id}/stream`` -- Server-Sent Events stream of
   per-stage progress events. Each frame is ``data:`` + a JSON
   blob carrying ``{id, stage, message, payload, occurred_at}``.
   The stream closes when the job hits a terminal status
@@ -39,7 +39,7 @@ logger = logging.getLogger(__name__)
 
 
 @rest_controller
-@request_mapping("/api/v1/jobs")
+@request_mapping("/api/v1/ingest-jobs")
 class JobsController:
     """Read surface for ``canon_ingest_jobs``."""
 
