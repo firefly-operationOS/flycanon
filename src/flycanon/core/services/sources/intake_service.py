@@ -222,6 +222,8 @@ class IntakeService:
                 chunks=result.chunks,
                 embeddings=embeddings,
                 embedding_model=self._embeddings.model,
+                tenant_id=tenant_id,
+                workspace_id=workspace_id,
             )
         else:
             await self._chunks.replace_for_source(result.source.id, [])
@@ -384,6 +386,8 @@ class IntakeService:
                 chunks=result.chunks,
                 embeddings=embeddings,
                 embedding_model=self._embeddings.model,
+                tenant_id=tenant_id,
+                workspace_id=workspace_id,
             )
         else:
             await self._chunks.replace_for_source(updated_row.id, [])

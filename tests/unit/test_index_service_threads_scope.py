@@ -1,13 +1,15 @@
 # Copyright 2026 Firefly Software Solutions Inc
 """Scope threading coverage for :class:`IndexService`.
 
-The write surface uses a SOFT default: ``tenant_id`` /
-``workspace_id`` are optional kwargs that fall back to ``'default'``
-so existing ingestion callers keep working until Plan 4 wires real
-scope through the intake handlers. The column-level server defaults
-(Plan 2) catch forgotten writes at the database layer.
+The write surface is FAIL-CLOSED: ``tenant_id`` / ``workspace_id``
+are REQUIRED kwargs. The previous soft default to ``'default'``
+silently landed every forgotten-scope vector in the
+``('default', 'default')`` RLS bucket -- invisible to the real
+tenant/workspace under migration 0013 policies. Forgetting the
+scope on the write path now raises ``TypeError`` at the call site
+instead of corrupting the index.
 
-Once a caller does pass real values, the kwargs MUST land on the
+When callers DO pass real values, the kwargs MUST land on the
 underlying ``vector_store.upsert`` (only the flycanon
 ``PgVectorVectorStore`` accepts scope kwargs today; agentic backends
 ignore the extras and rely on the canon_chunks scope filter on
@@ -104,41 +106,39 @@ def _make_index_service(*, corpus, vector_store) -> IndexService:
 
 
 class TestReplaceForSourceSignature:
-    def test_accepts_optional_scope(self):
-        # Soft default: the kwargs MUST be optional so existing
-        # callers can call replace_for_source without them.
+    def test_requires_explicit_scope(self):
+        # Fail-closed: the kwargs MUST be required so any caller that
+        # forgets the scope fails loud with a TypeError instead of
+        # silently writing into the ('default','default') RLS bucket.
         import inspect
 
         sig = inspect.signature(IndexService.replace_for_source)
         params = sig.parameters
         assert "tenant_id" in params
         assert "workspace_id" in params
-        assert params["tenant_id"].default == "default"
-        assert params["workspace_id"].default == "default"
+        assert params["tenant_id"].default is inspect.Parameter.empty
+        assert params["workspace_id"].default is inspect.Parameter.empty
 
 
-class TestReplaceForSourceWritePathSoftDefault:
+class TestReplaceForSourceWritePathFailsClosed:
     @pytest.mark.asyncio
-    async def test_defaults_to_default_scope_when_not_passed(self):
-        # The existing ingestion handlers haven't been migrated to
-        # Plan 4 yet -- they call replace_for_source without scope.
-        # The service MUST keep working, falling back to 'default'
-        # so the column-level server default catches the write.
+    async def test_raises_when_scope_missing(self):
+        # Belt-and-braces: forgetting scope kwargs must NOT silently
+        # fall back to 'default'. Catching it at the call site is
+        # what stops a regression from re-undermining the RLS write
+        # path.
         corpus = _FakeCorpus()
         vector_store = _FakeScopeAwareVectorStore()
         svc = _make_index_service(corpus=corpus, vector_store=vector_store)
 
         chunk = _chunk("ch-1")
-        await svc.replace_for_source(
-            source=_source(),
-            chunks=[chunk],
-            embeddings=[[0.1, 0.2, 0.3]],
-            embedding_model="fake",
-        )
-        # Vector-store upsert saw the default scope.
-        assert len(vector_store.upsert_calls) == 1
-        assert vector_store.upsert_calls[0]["tenant_id"] == "default"
-        assert vector_store.upsert_calls[0]["workspace_id"] == "default"
+        with pytest.raises(TypeError):
+            await svc.replace_for_source(  # type: ignore[call-arg]
+                source=_source(),
+                chunks=[chunk],
+                embeddings=[[0.1, 0.2, 0.3]],
+                embedding_model="fake",
+            )
 
     @pytest.mark.asyncio
     async def test_passes_explicit_scope_to_vector_store(self):

@@ -42,20 +42,20 @@ class IndexService:
         chunks: Sequence[KnowledgeChunkRow],
         embeddings: Sequence[Sequence[float]],
         embedding_model: str,
-        tenant_id: str = "default",
-        workspace_id: str = "default",
+        tenant_id: str,
+        workspace_id: str,
     ) -> int:
         """Replace every indexed chunk for ``source.id`` atomically.
 
         Returns the number of chunks ingested into the index.
 
-        ``tenant_id`` / ``workspace_id`` default to ``'default'`` --
-        the WRITE-path soft default lets existing ingestion callers
-        keep working while Plan 4 wires real scope through. The
-        column-level server defaults (Plan 2) catch forgotten writes
-        at the database layer; this signature lets adopting callers
-        pass real values without breaking the existing flow. Plan 4
-        will tighten the write path to fail-closed too.
+        ``tenant_id`` / ``workspace_id`` are REQUIRED kwargs. The
+        previous soft default to ``'default'`` was a write-path hole
+        that landed every silently-scoped vector in the
+        ``('default','default')`` RLS bucket -- invisible to the real
+        caller under migration 0013 policies. Forgetting the scope
+        now fails loud with a ``TypeError`` at the call site instead
+        of silently corrupting the index.
         """
         if len(chunks) != len(embeddings):
             raise ValueError(
@@ -158,18 +158,21 @@ class IndexService:
         self,
         source_id: str,
         *,
-        tenant_id: str = "default",  # noqa: ARG002 -- reserved for symmetry with replace_for_source
-        workspace_id: str = "default",  # noqa: ARG002
+        tenant_id: str,  # noqa: ARG002 -- reserved for signature symmetry with replace_for_source
+        workspace_id: str,  # noqa: ARG002
     ) -> int:
         """Wipe every projection for ``source_id``. Idempotent.
 
-        ``tenant_id`` / ``workspace_id`` are accepted for signature
+        ``tenant_id`` / ``workspace_id`` are REQUIRED for signature
         symmetry with :meth:`replace_for_source` -- the BM25 wipe
         already runs through the source's FK cascade (canonical
         store enforces the scope at delete time) and the vector
         cleanup happens lazily via id-overwrite at next ingest.
         Callers that need an immediate vector-store purge should
         also call ``vector_store.delete([...])`` with the chunk ids.
+        Making the kwargs required matches the write-path tightening
+        on :meth:`replace_for_source` so forgotten scope on either
+        surface fails loud at the call site.
         """
         deleted = await self._context.corpus.delete_by_doc_id(source_id)  # type: ignore[attr-defined]
         return int(deleted or 0)
