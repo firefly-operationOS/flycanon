@@ -32,7 +32,8 @@ from pyfly.starters.core import enable_core_stack
     scan_packages=[
         "flycanon.core",  # @configuration class
         "flycanon.core.services",  # CQRS handlers + @service beans
-        "flycanon.web.controllers",  # REST controllers
+        "flycanon.web.controllers",  # REST controllers (user-tier)
+        "flycanon.web.controllers.agent",  # REST controllers (agent-tier)
     ],
 )
 class CanonApplication:
