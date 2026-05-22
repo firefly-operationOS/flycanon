@@ -93,6 +93,60 @@ hierarchy that maps to RFC 7807, idempotency primitives, and a
 tenant-safe outbound HTTP client. It is in-tree and unit-tested
 today; controllers start consuming it in Plan 4.
 
+## Embeddings: tenant + workspace isolation
+
+flycanon's retrieval path is tenant-isolated end-to-end (Plan 3).
+The two corpora -- BM25 over `canon_chunks` and dense vectors
+over `canon_chunk_vectors` -- both filter `(tenant_id,
+workspace_id)` before computing relevance.
+
+### BM25 (PostgresCorpus)
+
+The `tsvector` GIN index stays global. Queries add a
+`WHERE tenant_id = ? AND workspace_id = ?` predicate; Postgres
+intersects with the composite btree `ix_canon_chunks_scope_source`
+cheaply. The composite index name + columns are pinned by
+migration `0009_embeddings_scope`.
+
+### Dense vectors (PgVectorVectorStore)
+
+The HNSW index stays global; queries:
+
+1. `SET LOCAL hnsw.ef_search = 200` (bumped from 40) so the
+   candidate set is wide enough to filter without losing top-k.
+2. `WHERE tenant_id = ? AND workspace_id = ?`.
+3. `LIMIT k * widening_factor` (typically 5x), then trim to `k`
+   client-side after re-rank.
+
+For tenants that outgrow the global HNSW (~500k+ chunks), the
+Tier-B partition-by-tenant escape valve exists in
+`flycanon.core.services.retrieval.partition_admin`. DORMANT BY
+DEFAULT; see the module docstring for the admin-triggered
+roll-out (one-time partitioning migration + per-tenant
+`promote_tenant_to_partition()`).
+
+### RetrievalService scope threading
+
+`RetrievalService.search()` requires `tenant_id` + `workspace_id`
+kwargs and **fails closed** (raises `MissingTenantContext`) when
+either is missing. Internally, the service wraps the two corpora
+in scope-bound proxies (`_ScopedCorpus`, `_ScopedVectorStore`)
+that inject the scope before delegating to the agentic
+`HybridRetriever`. The framework's RRF math and OpenTelemetry
+spans are untouched.
+
+The write path (`IndexService.replace_for_source()`) accepts
+optional scope kwargs with `'default'` fallback (column-level
+defaults in Plan 2's migration catch forgotten writes). Plan 4
+tightens both paths.
+
+### Re-embed drift detection
+
+The `ix_canon_chunks_tenant_workspace_model` index lets the
+re-embed job detect `(tenant, workspace) x embedding_model`
+drift -- the right composite when a model upgrade rolls out
+per-workspace.
+
 ## The seven workshop features
 
 flycanon owns the data plane for the canonical knowledge fabric the
