@@ -261,7 +261,36 @@ curl -fsS http://localhost:8500/api/v1/billing/latency | jq .
 curl -fsS http://localhost:8500/api/v1/stats | jq .
 ```
 
-## 6. Tear down
+## 6. Agent surface (mint -> use)
+
+The `/api/v1/agent/*` routes are gated by an `X-Agent-Token` header
+instead of an operator JWT. Mint one (user-tier), capture the secret
+ONCE, then call the agent endpoints:
+
+```bash
+# 1. Mint a token (user-tier).
+curl -fsS -X POST http://localhost:8500/api/v1/agent-tokens \
+  -H "X-Tenant-Id: default" -H "X-Workspace-Id: default" \
+  -H "Content-Type: application/json" \
+  -d '{"name":"ci-runner","scopes":["agent.sources:ingest","agent.query:run"]}'
+# Response includes "token": "agt_<8hex>_<32hex>" ONCE -- store it.
+
+# 2. Use it on the agent surface.
+AGENT_TOKEN="agt_..."
+curl -fsS -X POST http://localhost:8500/api/v1/agent/query \
+  -H "X-Tenant-Id: default" -H "X-Workspace-Id: default" \
+  -H "X-Agent-Token: $AGENT_TOKEN" \
+  -H "Idempotency-Key: $(uuidgen)" \
+  -H "Content-Type: application/json" \
+  -d '{"question":"Summarise the scope section in three sentences."}'
+```
+
+`Idempotency-Key` is mandatory on agent POSTs (missing key returns
+`400 missing_idempotency_key`). See
+[docs/api-reference.md](docs/api-reference.md#agent-surface) for the
+full scope list, error codes, and all eight agent endpoints.
+
+## 7. Tear down
 
 ```bash
 task docker:down:test

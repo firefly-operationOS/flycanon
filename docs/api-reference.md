@@ -144,6 +144,84 @@ forensics, but it no longer partitions queries.
 |--------|------|-------------|
 | `GET`  | `/api/v1/audit` | Paginated audit-log view. Query: `subject_id`, `subject_kind`, `event_type`, `limit`, `offset`. |
 
+## Agent surface
+
+Curated subset of the user surface, protected by `X-Agent-Token`.
+Tokens are tenant-scoped, minted via `POST /api/v1/agent-tokens`
+(user tier, JWT-protected), and verified per-request against the
+`canon_agent_tokens` table.
+
+### Token management
+
+These three routes are mounted under `/api/v1/agent-tokens` and are
+themselves user-tier (operator JWT or anonymous in dev). Agent-tier
+callers (whose actor begins with `agent:`) are refused with
+`403 agent_cannot_mint`.
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `POST` | `/api/v1/agent-tokens` | Mint. Returns 201 + [`AgentTokenCreated`](payload-reference.md#agenttokencreated). The **raw secret** is returned in the `token` field exactly ONCE. Capture it on the response; there is no recovery path. Subsequent reads expose only the public 12-char `prefix`. Body: [`AgentTokenMintRequest`](payload-reference.md#agenttokenmintrequest). |
+| `GET`  | `/api/v1/agent-tokens` | List tokens for the current tenant (newest first). Returns `AgentTokenSummaryDto[]` -- the raw `token` is never round-tripped on this endpoint, only the `prefix` + metadata. |
+| `DELETE` | `/api/v1/agent-tokens/{token_id}` | Revoke. Idempotent: revoking an already-revoked token is a no-op (still 204). Unknown `token_id` returns `404 resource_not_found`. |
+
+### Agent endpoints
+
+Every agent route requires three headers together: `X-Tenant-Id`,
+`X-Workspace-Id`, and `X-Agent-Token: <secret>` (the raw token as
+returned by the mint endpoint, shape: `agt_<8hex>_<32hex>`). The
+`X-Agent-Token` header is mutually exclusive with `Authorization` --
+presenting both is rejected at the conventions layer.
+
+`Idempotency-Key` is **mandatory** on every agent-tier POST.
+Missing -> `400 missing_idempotency_key`. (The user-tier POSTs
+accept the header optionally; the agent surface is stricter so
+duplicate machine calls can never silently create extra sources,
+candidates, or queries.)
+
+| Method | Path | Scope | Description |
+|--------|------|-------|-------------|
+| `POST` | `/api/v1/agent/sources` | `agent.sources:ingest` | Ingest a Source (sync default; `?mode=async` allowed). Body: `SubmitSourceJsonPayload`. **`Idempotency-Key` mandatory.** Reuses the same handler as the user-tier `POST /api/v1/sources`. |
+| `GET`  | `/api/v1/agent/sources/{id}` | `agent.sources:read` | Retrieve a Source row. 404 -> `resource_not_found`. |
+| `POST` | `/api/v1/agent/query` | `agent.query:run` | RAG answer with citations. Body: `AnswerRequest`. **`Idempotency-Key` mandatory.** Reuses the user-tier `POST /api/v1/query` handler. |
+| `POST` | `/api/v1/agent/query/stream` | `agent.query:run` | Streaming RAG answer (Server-Sent Events). Body: `AnswerRequest`. **`Idempotency-Key` mandatory.** Same wire format as the user-tier `POST /api/v1/query/stream`. |
+| `POST` | `/api/v1/agent/search` | `agent.query:run` | Hybrid retrieval (BM25 + vector + RRF), no LLM. Body: `SearchRequest`. **`Idempotency-Key` mandatory.** Reuses the user-tier `POST /api/v1/search` handler. |
+| `GET`  | `/api/v1/agent/knowledge/{id}` | `agent.knowledge:read` | Fetch a KnowledgeItem (pointer view). 404 -> `knowledge_item_not_found`. |
+| `GET`  | `/api/v1/agent/knowledge/{id}/provenance` | `agent.knowledge:read` | Fetch citation provenance for the current version. Query: `version` (optional explicit). |
+| `POST` | `/api/v1/agent/candidates:propose` | `agent.candidates:propose` | Propose Candidate rows from a source. Body: `ProposeCandidateRequest`. **`Idempotency-Key` mandatory.** Does **not** auto-accept -- candidates land in `proposed` and must be reviewed via the user-tier `POST /api/v1/candidates/{id}:accept` route. |
+
+### Scope strings
+
+The per-route `scope` argument the verifier matches against the
+token's `scopes` list:
+
+| Scope | Endpoints it unlocks |
+|-------|----------------------|
+| `agent.sources:ingest` | `POST /api/v1/agent/sources` |
+| `agent.sources:read` | `GET /api/v1/agent/sources/{id}` |
+| `agent.query:run` | `POST /api/v1/agent/query`, `/api/v1/agent/query/stream`, `/api/v1/agent/search` |
+| `agent.knowledge:read` | `GET /api/v1/agent/knowledge/{id}`, `/api/v1/agent/knowledge/{id}/provenance` |
+| `agent.candidates:propose` | `POST /api/v1/agent/candidates:propose` |
+| `*` | Wildcard -- matches every scope above. |
+
+A token with `scopes: ["*"]` (the mint default) can call every agent
+route; a token minted with a narrower list is restricted to those
+routes exactly. Cross-scope calls return `403 agent_scope_denied`.
+
+### Agent-tier error codes
+
+In addition to the standard error envelope, the agent surface
+raises:
+
+| Status | Code slug | Raised when |
+|--------|-----------|-------------|
+| 401 | `missing_agent_token` | `X-Agent-Token` header is absent on an `/api/v1/agent/*` route. |
+| 403 | `invalid_agent_token` | Token shape is malformed, prefix is unknown, tenant doesn't match, or the hash comparison fails. |
+| 403 | `agent_token_expired` | The token's `expires_at` is in the past. |
+| 403 | `agent_workspace_not_in_allowlist` | `X-Workspace-Id` is not in the token's `workspace_allowlist`. |
+| 403 | `agent_scope_denied` | The per-route scope is not in the token's `scopes` list (and `*` is absent). |
+| 403 | `agent_cannot_mint` | An agent-tier caller (actor begins with `agent:`) hit a user-tier `/api/v1/agent-tokens` route. |
+| 400 | `missing_idempotency_key` | An agent POST was made without the mandatory `Idempotency-Key` header. |
+
 ## Service
 
 | Method | Path | Description |

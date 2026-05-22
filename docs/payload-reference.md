@@ -607,3 +607,85 @@ When `FLYCANON_PII_POLICY=reject`, the intake controller returns:
 ```
 
 See [pii.md](pii.md) for the full policy matrix.
+
+## Agent tokens
+
+The three DTOs below back the `/api/v1/agent-tokens` user-tier
+CRUD. Source: `src/flycanon/interfaces/dtos/agent_token.py`.
+
+> **Security note.** The full secret `token` field appears on the
+> wire in `AgentTokenCreated` **exactly once** -- the response of
+> `POST /api/v1/agent-tokens`. Subsequent reads (`GET /api/v1/agent-tokens`,
+> per-id lookups, audit trails) only ever expose the 12-char public
+> `prefix`. The server persists the SHA-256 hash of the full token,
+> not the token itself, so there is no recovery path: capture the
+> secret at mint time or revoke + remint.
+
+### `AgentTokenMintRequest`
+
+Request body for `POST /api/v1/agent-tokens`.
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `name` | string (1-128 chars) | yes | Human-readable label, surfaced in the list view. |
+| `workspace_allowlist` | `string[]` \| null | no | When set, restricts the token to those workspace ids under the tenant. `null` (the default) means any workspace. |
+| `scopes` | `string[]` | no | Per-route scopes the token can satisfy. Defaults to `["*"]` (wildcard). See [api-reference.md -> Scope strings](api-reference.md#scope-strings). |
+| `rate_limit_rpm` | int (1-10 000) \| null | no | Advisory metadata. Persisted but **not yet enforced** by the verify path -- reserved for the per-token rate limiter we add later. |
+| `expires_at` | datetime \| null | no | When set, the verify path raises `agent_token_expired` once the wall clock passes it. |
+
+```jsonc
+{
+  "name": "ci-runner",
+  "workspace_allowlist": ["ws-prod", "ws-staging"],
+  "scopes": ["agent.sources:ingest", "agent.query:run"],
+  "rate_limit_rpm": 60,
+  "expires_at": "2026-12-31T23:59:59Z"
+}
+```
+
+### `AgentTokenSummaryDto`
+
+Response shape returned from `GET /api/v1/agent-tokens` (one per
+row) and used as the base for `AgentTokenCreated`. The secret is
+deliberately omitted; only the public 12-char `prefix` is exposed.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `id` | string | Internal token id (hex). |
+| `name` | string | Display name from mint. |
+| `prefix` | string | Public 12-char prefix (`agt_<8hex>`). Lookup key for the verify path. |
+| `workspace_allowlist` | `string[]` \| null | Echo of the mint payload. `null` = any workspace under the tenant. |
+| `scopes` | `string[]` | Echo of the mint payload. `["*"]` matches every per-route scope. |
+| `rate_limit_rpm` | int \| null | Echo of the mint payload. Advisory; not enforced today. |
+| `expires_at` | datetime \| null | Echo of the mint payload. Verified at use time. |
+| `created_at` | datetime | When the token was minted. |
+| `created_by` | string | Actor that minted the token (operator JWT subject; `"anonymous"` in unauthenticated dev contexts). |
+| `revoked_at` | datetime \| null | Set by `DELETE /api/v1/agent-tokens/{id}`. Revoked tokens fail verify with `invalid_agent_token`. |
+| `last_used_at` | datetime \| null | Touched by every successful verify -- useful for finding stale credentials. |
+
+### `AgentTokenCreated`
+
+Response shape for `POST /api/v1/agent-tokens` -- extends
+`AgentTokenSummaryDto` with the raw secret:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| *(every field on `AgentTokenSummaryDto`)* | | |
+| `token` | string | **Raw secret, returned ONCE.** Shape: `agt_<8hex>_<32hex>`. Persisted server-side only as a SHA-256 hash; never round-tripped through any other endpoint. Capture this on the response and store it the way you would any other long-lived credential. |
+
+```jsonc
+{
+  "id": "9f4...",
+  "name": "ci-runner",
+  "prefix": "agt_a1b2c3d4",
+  "workspace_allowlist": ["ws-prod"],
+  "scopes": ["agent.sources:ingest"],
+  "rate_limit_rpm": null,
+  "expires_at": null,
+  "created_at": "2026-05-22T18:00:00Z",
+  "created_by": "user-42",
+  "revoked_at": null,
+  "last_used_at": null,
+  "token": "agt_a1b2c3d4_e5f6...32hex"
+}
+```

@@ -82,6 +82,30 @@ All notable changes to **flycanon** are documented here.
   returning 400 because their callers didn't pass scope. Plan 4
   wires the threading.
 
+### Added -- Plan 5 (Phase 5) agent surface
+
+- **Agent tokens**: new `canon_agent_tokens` table (migration
+  `0012_agent_tokens`). Tokens are tenant-scoped, hashed at rest,
+  carry optional `workspace_allowlist`, `scopes` list,
+  `rate_limit_rpm`, and `expires_at`.
+- **User-tier CRUD**: `POST /api/v1/agent-tokens` (mint -- returns
+  the full secret ONCE), `GET /api/v1/agent-tokens` (list -- secrets
+  redacted), `DELETE /api/v1/agent-tokens/{id}` (revoke).
+- **Agent surface (X-Agent-Token-protected, 8 endpoints):**
+  - `POST /api/v1/agent/sources` (scope `agent.sources:ingest`)
+  - `GET /api/v1/agent/sources/{id}` (scope `agent.sources:read`)
+  - `POST /api/v1/agent/query` (scope `agent.query:run`)
+  - `POST /api/v1/agent/query/stream` (SSE; scope `agent.query:run`)
+  - `POST /api/v1/agent/search` (scope `agent.query:run`)
+  - `GET /api/v1/agent/knowledge/{id}` (scope `agent.knowledge:read`)
+  - `GET /api/v1/agent/knowledge/{id}/provenance` (scope `agent.knowledge:read`)
+  - `POST /api/v1/agent/candidates:propose` (scope `agent.candidates:propose`)
+- **Mandatory `Idempotency-Key`** on agent-tier POSTs.
+- **New error codes**: `missing_agent_token` (401),
+  `invalid_agent_token` (403), `agent_token_expired` (403),
+  `agent_workspace_not_in_allowlist` (403), `agent_scope_denied` (403),
+  `agent_cannot_mint` (403).
+
 ### Removed
 
 - **Legacy `flycanon.web.problem_handlers`** -- superseded by
@@ -100,5 +124,12 @@ All notable changes to **flycanon** are documented here.
   Postgres + partitioned `canon_chunk_vectors`.
 - **Workspace cache client + EDA publisher** for flyradar --
   Plan 6.
-- **Agent surface `/api/v1/agent/*`** + canon handoff -- Plan 5.
 - **RLS** -- Plan 6.
+- **Rate limiting**: `rate_limit_rpm` on agent tokens is stored
+  but not enforced.
+- **Knowledge create/update via agent**: deliberately excluded per
+  spec section 5.2 -- agent callers must use
+  `POST /api/v1/agent/candidates:propose` and let a user-tier
+  reviewer accept.
+- **Taxonomy / billing / stats agent endpoints**: out of scope per
+  spec section 5.2.

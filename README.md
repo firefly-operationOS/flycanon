@@ -174,6 +174,8 @@ Rank Fusion over the two channels.
 | Corpus + queue + cost inventory snapshot                         | `GET /api/v1/stats`                        |
 | Append-only audit log                                            | `GET /api/v1/audit`                        |
 | Taxonomy (domain + jurisdiction)                                 | `/api/v1/taxonomy/...`                     |
+| Agent-token CRUD (user-tier; mint returns secret ONCE)           | `/api/v1/agent-tokens`                     |
+| Agent surface (`X-Agent-Token`-protected, 8 endpoints)           | `/api/v1/agent/sources`, `.../query`, `.../query/stream`, `.../search`, `.../knowledge/{id}`, `.../knowledge/{id}/provenance`, `.../candidates:propose` |
 | Identity / model info                                            | `GET /api/v1/version`                      |
 | Health / readiness / liveness                                    | `/actuator/health/...`                     |
 | OpenAPI 3.1                                                      | `/openapi.json`, `/docs`, `/redoc`         |
