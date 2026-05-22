@@ -3435,7 +3435,8 @@
           "email",
           "transcript",
           "url",
-          "unknown"
+          "unknown",
+          "discovery"
         ],
         "title": "SourceKind",
         "type": "string"

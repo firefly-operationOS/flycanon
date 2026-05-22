@@ -141,6 +141,53 @@ jobs:
           AWS_DEFAULT_REGION: eu-west-1
         run: uv run pytest -q tests/unit
 
+  integration:
+    name: Integration tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    continue-on-error: false
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: Check out sibling firefly framework repos
+        run: |
+          git clone --depth=1 --branch "$PYFLY_REF" \
+            https://github.com/fireflyframework/fireflyframework-pyfly.git \
+            ./vendor/pyfly
+          git clone --depth=1 --branch "$AGENTIC_REF" \
+            https://github.com/fireflyframework/fireflyframework-agentic.git \
+            ./vendor/fireflyframework-agentic
+      - name: Repoint uv path sources at ./vendor
+        run: |
+          sed -i \
+            -e 's|path = "\.\./\.\./fireflyframework/fireflyframework-pyfly"|path = "./vendor/pyfly"|' \
+            -e 's|path = "\.\./\.\./fireflyframework/fireflyframework-agentic"|path = "./vendor/fireflyframework-agentic"|' \
+            pyproject.toml
+      - name: uv sync (dev)
+        run: uv sync --extra dev
+      - name: pytest tests/integration
+        env:
+          # Integration tests boot a real pgvector container via
+          # testcontainers; GitHub Actions Ubuntu runners ship with
+          # the Docker engine + ``/var/run/docker.sock`` already wired
+          # up, so the ``skipif(not docker)`` guards inside each test
+          # module evaluate to False and the suite actually runs.
+          # Provider keys are dummies (same rationale as the unit job).
+          OPENAI_API_KEY: sk-dummy-key
+          ANTHROPIC_API_KEY: sk-dummy-key
+          AWS_DEFAULT_REGION: eu-west-1
+        # NOTE: ``-m integration`` is intentionally omitted. The tests
+        # under ``tests/integration/`` rely on a ``skipif(not docker)``
+        # ``pytestmark`` to opt out when Docker isn't available rather
+        # than on the ``integration`` marker; filtering by marker here
+        # would deselect every test and silently green-light the job.
+        run: uv run pytest tests/integration -q --timeout=120
+
   docker-build:
     name: Docker build smoke (single-arch)
     runs-on: ubuntu-latest

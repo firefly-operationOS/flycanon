@@ -50,3 +50,11 @@ class SourceKind(StrEnum):
     # --- Operator hints ----------------------------------------------
     url = "url"
     unknown = "unknown"
+
+    # --- Cross-service handoffs --------------------------------------
+    # Used by flyradar's ``POST /api/v1/agent/canon/handoff`` to label
+    # the resulting Source as originating from a completed discovery.
+    # The content rides on ``content_base64`` (the discovery summary
+    # serialised as JSON); the originating job is preserved on
+    # ``metadata.extra.flyradar_job_id`` for provenance trails.
+    discovery = "discovery"
