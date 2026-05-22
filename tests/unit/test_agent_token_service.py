@@ -16,6 +16,7 @@ from flycanon.core.services.auth.agent_token_service import (
     AgentWorkspaceNotInAllowlist,
     InvalidAgentToken,
     MintRequest,
+    RateLimitExceeded,
     VerifiedAgentToken,
 )
 
@@ -433,3 +434,202 @@ async def test_mark_used_called_when_never_used(
         scope="agent.discoveries:validate",
     )
     mark_used_mock.assert_called_once()
+
+
+# -- Rate limit enforcement -----------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_rate_limit_allows_first_n_requests_within_window(
+    service: AgentTokenService,
+) -> None:
+    """The first N verifies within the rolling 60s window must succeed.
+
+    With ``rate_limit_rpm=3`` the bucket admits exactly 3 calls before
+    the next one trips. This pins the inclusive lower edge of the
+    sliding-window counter (``len < limit_per_minute``).
+    """
+    minted = await service.mint(
+        MintRequest(
+            tenant_id="acme",
+            name="ci-runner",
+            workspace_allowlist=None,
+            scopes=["agent.discoveries:validate"],
+            rate_limit_rpm=3,
+            expires_at=None,
+        ),
+        actor="user:alice",
+    )
+    for _ in range(3):
+        verified = await service.verify(
+            minted.token,
+            tenant_id="acme",
+            workspace_id="ws-x",
+            scope="agent.discoveries:validate",
+        )
+        assert verified.token_id == minted.id
+
+
+@pytest.mark.asyncio
+async def test_rate_limit_rejects_request_over_budget(
+    service: AgentTokenService,
+) -> None:
+    """The (N+1)th verify within the window must raise ``RateLimitExceeded`` (429)."""
+    minted = await service.mint(
+        MintRequest(
+            tenant_id="acme",
+            name="ci-runner",
+            workspace_allowlist=None,
+            scopes=["agent.discoveries:validate"],
+            rate_limit_rpm=2,
+            expires_at=None,
+        ),
+        actor="user:alice",
+    )
+    for _ in range(2):
+        await service.verify(
+            minted.token,
+            tenant_id="acme",
+            workspace_id="ws-x",
+            scope="agent.discoveries:validate",
+        )
+    with pytest.raises(RateLimitExceeded) as excinfo:
+        await service.verify(
+            minted.token,
+            tenant_id="acme",
+            workspace_id="ws-x",
+            scope="agent.discoveries:validate",
+        )
+    assert excinfo.value.status == 429
+    assert excinfo.value.code == "rate_limit_exceeded"
+
+
+@pytest.mark.asyncio
+async def test_rate_limit_window_slides_after_60s(
+    service: AgentTokenService,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """After the 60s window passes, the bucket refills and admits new requests.
+
+    We patch ``time.monotonic`` inside the service module to fast-
+    forward past the window without sleeping; this exercises the
+    ``while self._timestamps[0] < cutoff: popleft()`` path on the
+    bucket.
+    """
+    minted = await service.mint(
+        MintRequest(
+            tenant_id="acme",
+            name="ci-runner",
+            workspace_allowlist=None,
+            scopes=["agent.discoveries:validate"],
+            rate_limit_rpm=1,
+            expires_at=None,
+        ),
+        actor="user:alice",
+    )
+    fake_now = 1000.0
+
+    def _now() -> float:
+        return fake_now
+
+    monkeypatch.setattr(ats_module.time, "monotonic", _now)
+
+    # First request consumes the only slot.
+    await service.verify(
+        minted.token,
+        tenant_id="acme",
+        workspace_id="ws-x",
+        scope="agent.discoveries:validate",
+    )
+    # Second request at the same instant is over budget.
+    with pytest.raises(RateLimitExceeded):
+        await service.verify(
+            minted.token,
+            tenant_id="acme",
+            workspace_id="ws-x",
+            scope="agent.discoveries:validate",
+        )
+
+    # Fast-forward past the 60s window.
+    fake_now = 1061.0
+    # Now the bucket has slid and admits a fresh request.
+    verified = await service.verify(
+        minted.token,
+        tenant_id="acme",
+        workspace_id="ws-x",
+        scope="agent.discoveries:validate",
+    )
+    assert verified.token_id == minted.id
+
+
+@pytest.mark.asyncio
+async def test_rate_limit_none_means_unlimited(
+    service: AgentTokenService,
+) -> None:
+    """``rate_limit_rpm=None`` MUST bypass the bucket check entirely.
+
+    Pins the contract that legacy tokens (minted before this feature
+    landed) keep working with no enforcement. We loop more than any
+    reasonable per-minute cap to make the absence of enforcement
+    obvious.
+    """
+    minted = await service.mint(
+        MintRequest(
+            tenant_id="acme",
+            name="ci-runner",
+            workspace_allowlist=None,
+            scopes=["agent.discoveries:validate"],
+            rate_limit_rpm=None,
+            expires_at=None,
+        ),
+        actor="user:alice",
+    )
+    for _ in range(50):
+        await service.verify(
+            minted.token,
+            tenant_id="acme",
+            workspace_id="ws-x",
+            scope="agent.discoveries:validate",
+        )
+
+
+@pytest.mark.asyncio
+async def test_revoke_clears_rate_limit_bucket(
+    service: AgentTokenService,
+) -> None:
+    """``revoke`` MUST drop the in-memory bucket for the token.
+
+    Edge case: if the same ``token_id`` is later reused (deterministic
+    test fixtures, manual seeding) the new lifecycle should start with
+    a fresh window rather than inherit the revoked token's exhausted
+    state.
+    """
+    minted = await service.mint(
+        MintRequest(
+            tenant_id="acme",
+            name="ci-runner",
+            workspace_allowlist=None,
+            scopes=["agent.discoveries:validate"],
+            rate_limit_rpm=2,
+            expires_at=None,
+        ),
+        actor="user:alice",
+    )
+    # Burn through the budget so the bucket is on file.
+    await service.verify(
+        minted.token,
+        tenant_id="acme",
+        workspace_id="ws-x",
+        scope="agent.discoveries:validate",
+    )
+    await service.verify(
+        minted.token,
+        tenant_id="acme",
+        workspace_id="ws-x",
+        scope="agent.discoveries:validate",
+    )
+    assert minted.id in service._rate_limiter._buckets  # type: ignore[attr-defined]
+
+    revoked = await service.revoke(minted.id, tenant_id="acme")
+    assert revoked is True
+    assert minted.id not in service._rate_limiter._buckets  # type: ignore[attr-defined]

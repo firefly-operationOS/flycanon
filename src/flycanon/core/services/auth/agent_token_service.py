@@ -11,8 +11,11 @@ from __future__ import annotations
 
 import hashlib
 import secrets
+import time
+from collections import deque
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from threading import Lock
 from typing import Protocol
 from uuid import uuid4
 
@@ -57,6 +60,21 @@ class AgentCannotMint(FireflyHTTPException):
     status = 403
     code = "agent_cannot_mint"
     title = "Agent cannot mint"
+
+
+class RateLimitExceeded(FireflyHTTPException):
+    """Raised when a token has exhausted its per-minute request budget.
+
+    The token's ``rate_limit_rpm`` value is enforced inside
+    :meth:`AgentTokenService.verify` via a per-token sliding 60s
+    window counter. ``rate_limit_rpm = None`` (or 0) disables the
+    check. The current implementation is in-memory and process-local;
+    a Redis-backed counter is a planned follow-up.
+    """
+
+    status = 429
+    code = "rate_limit_exceeded"
+    title = "Too many requests"
 
 
 # -- Domain types ---------------------------------------------------
@@ -161,6 +179,56 @@ def _as_aware_utc(value: datetime | None) -> datetime | None:
     return value if value.tzinfo is not None else value.replace(tzinfo=UTC)
 
 
+class _TokenBucket:
+    """Sliding-window counter per ``(token_id)``.
+
+    Stores monotonic timestamps for each accepted request inside a
+    rolling 60s window; a request is accepted iff the window holds
+    fewer than ``limit_per_minute`` entries. Process-local; not
+    durable across restarts and not shared across replicas (Redis
+    backing is a planned follow-up).
+    """
+
+    def __init__(self) -> None:
+        self._timestamps: deque[float] = deque(maxlen=10000)
+
+    def try_take(self, *, limit_per_minute: int, now: float) -> bool:
+        """Return True if a slot was available; record the timestamp."""
+        cutoff = now - 60.0
+        while self._timestamps and self._timestamps[0] < cutoff:
+            self._timestamps.popleft()
+        if len(self._timestamps) >= limit_per_minute:
+            return False
+        self._timestamps.append(now)
+        return True
+
+
+class _RateLimiter:
+    """Tracks per-token sliding-window counters. Process-local.
+
+    Keyed by ``token_id`` so a single token's budget applies across
+    all routes / workspaces; this matches the semantics documented on
+    the ``rate_limit_rpm`` column. A ``threading.Lock`` guards the
+    bucket dict so concurrent requests from the same token never race
+    on bucket creation / mutation.
+    """
+
+    def __init__(self) -> None:
+        self._buckets: dict[str, _TokenBucket] = {}
+        self._lock = Lock()
+
+    def consume(self, *, token_id: str, limit_per_minute: int | None, now: float) -> bool:
+        if limit_per_minute is None or limit_per_minute <= 0:
+            return True
+        with self._lock:
+            bucket = self._buckets.setdefault(token_id, _TokenBucket())
+            return bucket.try_take(limit_per_minute=limit_per_minute, now=now)
+
+    def drop(self, token_id: str) -> None:
+        with self._lock:
+            self._buckets.pop(token_id, None)
+
+
 class AgentTokenService:
     """Mint / verify / list / revoke long-lived agent bearer tokens.
 
@@ -169,12 +237,13 @@ class AgentTokenService:
     persisted. ``verify`` is the hot path used by the
     ``require_agent_token`` FastAPI dependency: it looks the row up by
     prefix, constant-equality compares the full-token hash, then
-    enforces tenant / expiry / workspace-allowlist / scope in that
-    order.
+    enforces tenant / expiry / workspace-allowlist / scope / rate
+    limit in that order.
     """
 
     def __init__(self, repo: AgentTokenRepository) -> None:
         self._repo = repo
+        self._rate_limiter = _RateLimiter()
 
     async def mint(self, request: MintRequest, *, actor: str) -> MintedAgentToken:
         token, prefix = _generate_token()
@@ -232,6 +301,15 @@ class AgentTokenService:
         scopes = row.get("scopes_json") or []
         if "*" not in scopes and scope not in scopes:
             raise AgentScopeDenied(f"Token scope does not permit {scope!r}.")
+        rate_limit = row.get("rate_limit_rpm")
+        if rate_limit is not None and not self._rate_limiter.consume(
+            token_id=row["id"],
+            limit_per_minute=rate_limit,
+            now=time.monotonic(),
+        ):
+            raise RateLimitExceeded(
+                f"Token has exhausted its budget of {rate_limit} requests per minute.",
+            )
         now = datetime.now(UTC)
         last_used = _as_aware_utc(row.get("last_used_at"))
         if last_used is None or (now - last_used).total_seconds() > 60:
@@ -266,5 +344,13 @@ class AgentTokenService:
         token belonging to tenant B even if they hand-craft the
         ``token_id``. Defense-in-depth alongside the
         ``tenant_isolation`` RLS policy on ``canon_agent_tokens``.
+
+        On success the in-memory rate-limit bucket for the revoked
+        ``token_id`` is dropped so a subsequent re-mint that happens
+        to collide on ``token_id`` (e.g. tests, deterministic UUIDs)
+        starts with a fresh window.
         """
-        return await self._repo.revoke(token_id, tenant_id=tenant_id, at=datetime.now(UTC))
+        revoked = await self._repo.revoke(token_id, tenant_id=tenant_id, at=datetime.now(UTC))
+        if revoked:
+            self._rate_limiter.drop(token_id)
+        return revoked

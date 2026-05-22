@@ -4,6 +4,23 @@ All notable changes to **flycanon** are documented here.
 
 ## [Unreleased] -- Multitenancy backbone
 
+### Added -- agent-token rate limiting
+
+- **`rate_limit_rpm` enforcement** -- `AgentTokenService.verify`
+  now consults a per-token sliding-window counter (60s, keyed by
+  `token_id`). Tokens that exceed their `rate_limit_rpm` budget get
+  `429 rate_limit_exceeded` (new `RateLimitExceeded` exception);
+  `rate_limit_rpm = None` (or `<= 0`) skips the check entirely so
+  legacy tokens are unaffected. `revoke` drops the in-memory bucket
+  so a re-mint that reuses the `token_id` starts fresh.
+- **In-memory only / process-local** -- the bucket dict lives in
+  the `AgentTokenService` instance behind a `threading.Lock`. This
+  is intentional MVP posture, matching the rest of the service.
+  A Redis-backed counter shared across replicas is a planned
+  follow-up (and will keep this exception class / status code
+  unchanged on the wire).
+- **New error code**: `rate_limit_exceeded` (429).
+
 ### Added -- Plan 2 (Phase 2) workspace + multitenancy schema
 
 - **`canon_workspaces` table** -- canonical store for workspace
