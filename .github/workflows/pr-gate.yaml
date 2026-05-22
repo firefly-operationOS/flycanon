@@ -37,7 +37,7 @@ env:
   # Pin pyfly + agentic to a matching git ref. When the framework
   # repos publish releases we'll switch to ``pip install ...`` here.
   PYFLY_REF: v26.05.05
-  AGENTIC_REF: v26.05.11
+  AGENTIC_REF: v26.05.21
 
 jobs:
   lint:
