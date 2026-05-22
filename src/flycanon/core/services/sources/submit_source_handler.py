@@ -23,9 +23,16 @@ class SubmitSourceCommand(Command[SourceRecord]):
     by the controller). ``metadata`` is the caller-supplied
     SourceMetadata; the rest of the fields are optional hints used
     when the controller can't fingerprint the source on its own.
+
+    ``tenant_id`` and ``workspace_id`` are required -- callers must
+    propagate the request-bound :class:`TenantContext` rather than
+    relying on a silent ``"default"`` fallback. A missing scope is a
+    controller bug and surfaces as a TypeError on construction.
     """
 
     content: bytes
+    tenant_id: str
+    workspace_id: str
     metadata: SourceMetadata = field(default_factory=SourceMetadata)
     filename: str | None = None
     content_type: str | None = None
@@ -33,8 +40,6 @@ class SubmitSourceCommand(Command[SourceRecord]):
     uri: str | None = None
     actor: str | None = None
     correlation_id: str | None = None
-    tenant_id: str | None = None
-    workspace_id: str | None = None
     extra: dict[str, Any] = field(default_factory=dict)
 
 
@@ -54,8 +59,8 @@ class SubmitSourceHandler(CommandHandler[SubmitSourceCommand, SourceRecord]):
         source = await self._intake.submit(
             request=request,
             content=command.content,
-            tenant_id=command.tenant_id or "default",
-            workspace_id=command.workspace_id or "default",
+            tenant_id=command.tenant_id,
+            workspace_id=command.workspace_id,
             filename=command.filename,
             content_type=command.content_type,
             actor=command.actor,

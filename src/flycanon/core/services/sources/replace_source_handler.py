@@ -24,10 +24,17 @@ class ReplaceSourceCommand(Command[SourceRecord]):
     referencing chunks that disappear under the new emission are
     not deleted (v1) -- they surface as ``dangling_citation`` audit
     warnings.
+
+    ``tenant_id`` and ``workspace_id`` are required -- callers must
+    propagate the request-bound :class:`TenantContext` rather than
+    relying on a silent ``"default"`` fallback. A missing scope is a
+    controller bug and surfaces as a TypeError on construction.
     """
 
     source_id: str
     content: bytes
+    tenant_id: str
+    workspace_id: str
     metadata: SourceMetadata = field(default_factory=SourceMetadata)
     filename: str | None = None
     content_type: str | None = None
@@ -35,8 +42,6 @@ class ReplaceSourceCommand(Command[SourceRecord]):
     uri: str | None = None
     actor: str | None = None
     correlation_id: str | None = None
-    tenant_id: str | None = None
-    workspace_id: str | None = None
     extra: dict[str, Any] = field(default_factory=dict)
 
 
@@ -57,8 +62,8 @@ class ReplaceSourceHandler(CommandHandler[ReplaceSourceCommand, SourceRecord]):
             source_id=command.source_id,
             request=request,
             content=command.content,
-            tenant_id=command.tenant_id or "default",
-            workspace_id=command.workspace_id or "default",
+            tenant_id=command.tenant_id,
+            workspace_id=command.workspace_id,
             filename=command.filename,
             content_type=command.content_type,
             actor=command.actor,

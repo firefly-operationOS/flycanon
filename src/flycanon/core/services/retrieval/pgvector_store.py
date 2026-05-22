@@ -201,16 +201,17 @@ class PgVectorVectorStore:
         documents: list[Any],
         namespace: str = "default",
         *,
-        tenant_id: str = "default",
-        workspace_id: str = "default",
+        tenant_id: str,
+        workspace_id: str,
     ) -> None:
         """Persist documents with scope columns + canonical namespace.
 
-        ``tenant_id`` / ``workspace_id`` are the authoritative scope --
-        the legacy ``namespace`` argument is preserved for callers that
-        haven't been migrated to the scoped API yet but is overridden
-        whenever the canonical ``t/<tenant>/w/<workspace>`` template
-        applies.
+        ``tenant_id`` / ``workspace_id`` are the authoritative scope and
+        required: callers must propagate the request-bound scope rather
+        than rely on a silent ``"default"`` fallback. The legacy
+        ``namespace`` argument is preserved for callers that haven't been
+        migrated to the scoped API yet but is overridden whenever the
+        canonical ``t/<tenant>/w/<workspace>`` template applies.
         """
         factory = await self._ensure_engine()
         scope_namespace = _scope_namespace(tenant_id, workspace_id)
@@ -257,8 +258,8 @@ class PgVectorVectorStore:
         namespace: str = "default",
         filters: list[Any] | None = None,
         *,
-        tenant_id: str = "default",
-        workspace_id: str = "default",
+        tenant_id: str,
+        workspace_id: str,
         widening_factor: int = _DEFAULT_WIDENING_FACTOR,
     ) -> list[Any]:
         """ANN search filtered to ``(tenant_id, workspace_id)`` scope.
@@ -331,8 +332,8 @@ class PgVectorVectorStore:
         namespace: str = "default",
         filters: list[Any] | None = None,
         *,
-        tenant_id: str = "default",
-        workspace_id: str = "default",
+        tenant_id: str,
+        workspace_id: str,
     ) -> list[Any]:
         raise NotImplementedError(
             "pgvector adapter requires a precomputed embedding; use search(query_embedding=...) instead."
@@ -343,8 +344,8 @@ class PgVectorVectorStore:
         ids: list[str],
         namespace: str = "default",
         *,
-        tenant_id: str = "default",
-        workspace_id: str = "default",
+        tenant_id: str,
+        workspace_id: str,
     ) -> None:
         if not ids:
             return

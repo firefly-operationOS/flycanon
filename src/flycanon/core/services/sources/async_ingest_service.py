@@ -75,14 +75,19 @@ class AsyncIngestService:
         content_type: str | None,
         actor: str | None,
         correlation_id: str | None,
+        tenant_id: str,
+        workspace_id: str,
         callback_url: str | None = None,
-        tenant_id: str | None = None,
-        workspace_id: str | None = None,
     ) -> IngestJobRow:
-        """Persist a job row + broadcast the IngestSourceRequested event."""
+        """Persist a job row + broadcast the IngestSourceRequested event.
+
+        ``tenant_id`` and ``workspace_id`` are required -- callers must
+        propagate the request-bound :class:`TenantContext`. A missing
+        scope is a controller bug, not a silent ``"default"`` fallback.
+        """
         job_id = str(uuid.uuid4())
-        scope_tenant = tenant_id or "default"
-        scope_workspace = workspace_id or "default"
+        scope_tenant = tenant_id
+        scope_workspace = workspace_id
         # Bytes ride on the row as base64 inside ``metadata_json``.
         # That keeps the worker decoupled from a separate blob store
         # for v1; production deploys that need 100-MB intakes should
