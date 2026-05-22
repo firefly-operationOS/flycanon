@@ -27,6 +27,22 @@ Missing or malformed headers -> `400 missing_tenant_context`
 `X-Correlation-Id` / `X-Request-Id` propagation headers from pyfly
 are unchanged.
 
+## Workspace scope enforcement
+
+**Workspace scope is enforced on every read-by-id route.** A caller who
+presents a resource id from a different workspace (same tenant or
+different tenant) receives `404 resource_not_found`. Applies to both
+the user surface and the agent surface (`/api/v1/agent/*`). This is
+true for knowledge, sources, candidates, conversations, ingest-jobs,
+and any sub-routes that take an id (e.g., `/{id}/history`,
+`/{id}/provenance`, `/{id}/relations`).
+
+The 404 is the wire surface of two cooperating gates: the handler /
+repository filter on `(tenant_id, workspace_id)` and, on Postgres,
+row-level security (see [architecture.md -> Row-level security](architecture.md#row-level-security)).
+Either alone would return 404; defence-in-depth keeps the surface
+consistent even when a future repository forgets the WHERE clause.
+
 ## Sources
 
 | Method | Path | Description |

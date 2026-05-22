@@ -398,3 +398,136 @@ drops those defaults and widens the
 `canon_sources.content_sha256` unique constraint to
 `(tenant_id, workspace_id, content_sha256)` -- the same content
 can now coexist in multiple workspaces and dedup is workspace-local.
+
+## Row-level security
+
+Migration `0013_rls_policies` enables Postgres row-level security on
+every `canon_*` table -- 16 tables in total. The policy matches each
+row by:
+
+- `tenant_id = current_setting('app.tenant_id', true)`
+- `workspace_id = current_setting('app.workspace_id', true)`
+
+Even if a repository forgets a `WHERE` clause, Postgres returns zero
+rows for the wrong scope. The migration is Postgres-only -- SQLite
+(used by unit tests) is a no-op, so the application code path stays
+identical.
+
+### Special-case tables
+
+| Table | Policy | Why |
+|-------|--------|-----|
+| `canon_workspaces` | `tenant_id = app.tenant_id` AND `id = app.workspace_id` | The `id` column **is** the workspace identity, so the policy joins through it. The workspace controller's `LIST` path runs with `BYPASSRLS` (per-tenant listing). |
+| `canon_agent_tokens` | `tenant_id = app.tenant_id` (no workspace clause) | Tokens span workspaces via their `workspace_allowlist`, so a workspace-scoped policy would hide legitimate rows. |
+| `canon_chunk_vectors` | Standard `(tenant_id, workspace_id)` policy installed via a runtime `DO` block guarded by `IF EXISTS` | The pgvector table is created at boot by `PgvectorStore`, not by Alembic. |
+| 14 other tables (`canon_audit_events`, `canon_candidates`, `canon_chunks`, `canon_citations`, `canon_conversations`, `canon_conversation_turns`, `canon_cost_events`, `canon_ingest_jobs`, `canon_ingest_job_events`, `canon_knowledge_items`, `canon_knowledge_relations`, `canon_knowledge_versions`, `canon_sources`, `canon_taxonomy_nodes`) | Standard `(tenant_id, workspace_id)` policy | -- |
+
+### Session GUCs
+
+Every Postgres transaction the service opens needs the two GUCs set
+or RLS returns zero rows. The plumbing lives in
+[`flycanon.web.conventions.db`](../src/flycanon/web/conventions/db.py):
+
+- `set_tenant_guc(session, ctx)` -- coroutine that issues
+  `SET LOCAL app.tenant_id = '...'` + `SET LOCAL app.workspace_id = '...'`
+  on an open `AsyncSession`. Postgres-only; SQLite is a no-op.
+  Used directly by tests and by anyone applying GUCs outside the
+  standard request flow.
+- `install_tenant_guc_hook()` -- registers a SQLAlchemy `after_begin`
+  listener on the synchronous `Session` underneath every
+  `AsyncSession`. The listener reads the request-scoped
+  `TenantContext` from the ContextVar and applies `SET LOCAL` on
+  every transaction. Idempotent; called once during the first
+  `build_engine()` in `models/repositories/_engine.py`. When no
+  `TenantContext` is bound (workers, retention sweeps, the boot-time
+  migration runner) the listener is a no-op and the transaction
+  proceeds without GUCs.
+
+### Write-path enforcement
+
+The `USING`-only policies the migration creates auto-derive
+`WITH CHECK` from the same expression (Postgres docs: "If a
+`WITH CHECK` expression is not specified, then it is the same as
+`USING` expression."). That means cross-scope **INSERTs** are also
+blocked -- psycopg raises `InsufficientPrivilege` ("new row violates
+row-level security policy") if an application connection tries to
+smuggle a row into a foreign workspace. This is stronger than
+read-only filtering; the integration suite pins it
+(`test_insert_with_mismatched_scope_is_rejected`).
+
+### Deployment requirement
+
+The migration emits `ALTER TABLE ... FORCE ROW LEVEL SECURITY`, which
+subjects even the table OWNER to the policy unless the role has
+`BYPASSRLS`. Two deployment consequences follow:
+
+1. **Provision a `flycanon_admin` role with `BYPASSRLS`** for
+   migrations and for cross-workspace workers (the consolidation
+   re-embed sweep, the retention cleanup reaper, the EDA ingest
+   worker). These paths legitimately read across workspaces; the
+   GUC listener no-ops outside a request context, so without
+   `BYPASSRLS` they would see zero rows.
+2. **Application connections must NOT run as a Postgres superuser.**
+   `FORCE ROW LEVEL SECURITY` does not apply to superusers (a
+   Postgres rule, not an Alembic choice), so a superuser-connected
+   service would silently bypass the policy. Provision a dedicated
+   `flycanon_app` role without superuser + without `BYPASSRLS` for
+   the request-path engine.
+
+### Follow-up: `canon_chunk_vectors` deploy ordering
+
+The migration's `IF EXISTS` guard handles the steady-state case where
+`canon_chunk_vectors` already exists. On a **first deploy** -- empty
+database, then `alembic upgrade head`, then the service boots and
+`PgvectorStore` creates the table -- the table arrives without an
+RLS policy. The current mitigation is operational: ensure either
+
+- The table exists before `0013` runs (e.g., explicitly create it in
+  a pre-deploy step that calls `PgvectorStore.ensure_schema()`), OR
+- A follow-up patch installs the RLS policy at `PgvectorStore` boot
+  time, alongside the table DDL.
+
+Tracked as a deferred follow-up in `CHANGELOG.md`.
+
+## Workspace lifecycle events
+
+flycanon publishes workspace lifecycle events on a dedicated topic
+`canon.workspaces.v1`. Consumers (e.g., flyradar's workspace cache
+client) subscribe to keep a local read-through cache fresh without
+polling `GET /api/v1/workspaces/{id}` on every discovery.
+
+| Event | Emitted from | Payload fields beyond `(tenant_id, workspace_id, occurred_at)` |
+|-------|--------------|----------------------------------------------------------------|
+| `WorkspaceCreated` | `POST /api/v1/workspaces` | `name`, `scope`, `sme_roster`, `retention_days`, `jurisdiction` |
+| `WorkspaceUpdated` | `PATCH /api/v1/workspaces/{id}` | `name`, `scope`, `sme_roster`, `retention_days`, `jurisdiction` (post-update row state) |
+| `WorkspaceDeleted` | `POST /api/v1/workspaces/{id}:close` | -- |
+
+`WorkspaceDeleted` is emitted on `close` because flycanon has no
+hard-delete route -- closing a workspace is the terminal lifecycle
+transition and the row is preserved for audit. The event name matches
+the canonical lifecycle vocabulary so downstream consumers don't have
+to special-case flycanon's soft-delete semantics.
+
+The DTOs live in
+[`flycanon.interfaces.dtos.workspace_event`](../src/flycanon/interfaces/dtos/workspace_event.py)
+and are documented in
+[payload-reference.md -> Workspace lifecycle events](payload-reference.md#workspace-lifecycle-events).
+
+### Consistency + ordering
+
+- **Best-effort publish.** A repository write succeeds first; only
+  then does the controller call the publisher. If the EDA publish
+  itself fails the failure is logged and swallowed -- no transactional
+  outbox. The durable truth is the workspace row in Postgres
+  (plus the parallel `canon_audit_events` row). Consumers behind on
+  their projection can rebuild from those tables.
+- **Out-of-order arrivals.** Concurrent mutations may emit events out
+  of order (a `WorkspaceUpdated` that started later can land before
+  an earlier `WorkspaceUpdated`). Consumers should reconcile via the
+  workspace row's `updated_at` -- last-write-wins on the projection.
+- **Transport.** Routed through the same pyfly `EventPublisher` bean
+  as the existing `flycanon.audit` / `flycanon.knowledge` /
+  `flycanon.ingest` topics. The in-process Postgres outbox is the
+  default; flip `FLYCANON_EDA_ADAPTER` to `memory` / `redis` /
+  `kafka` to swap brokers (production transport tuning is a separate
+  concern).

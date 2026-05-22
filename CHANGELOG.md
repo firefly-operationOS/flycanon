@@ -106,6 +106,77 @@ All notable changes to **flycanon** are documented here.
   `agent_workspace_not_in_allowlist` (403), `agent_scope_denied` (403),
   `agent_cannot_mint` (403).
 
+### Security -- Plan 6 (Phase 6) tenant lockdown
+
+- **Workspace-scope enforcement on every read-by-id route.** Previously,
+  a caller who guessed a resource UUID from another workspace in the
+  same tenant could read knowledge / sources / candidates / etc. Now
+  all such lookups return `404 resource_not_found`. Affects both the
+  user tier and the agent tier (the Plan 5 `/api/v1/agent/*`
+  surface). Repositories, handlers, controllers, and CQRS queries
+  now thread `workspace_id` alongside `tenant_id`.
+- **Postgres RLS on every `canon_*` table** (16 tables) -- migration
+  `0013_rls_policies`. Defence-in-depth: even if a repository forgets
+  a WHERE clause, RLS returns zero rows for the wrong scope. The
+  migration is Postgres-only; SQLite is a no-op so unit tests stay
+  green. The USING-only policies auto-derive `WITH CHECK`, so
+  cross-scope **INSERTs** are also blocked (psycopg raises
+  `InsufficientPrivilege` -- stronger than read-only filtering).
+  Special-case tables: `canon_workspaces` matches `tenant_id` + `id`,
+  `canon_agent_tokens` matches `tenant_id` only (tokens span
+  workspaces), and `canon_chunk_vectors` is guarded by a runtime
+  `DO`-block `IF EXISTS` check because it's created by `PgvectorStore`
+  at boot rather than by Alembic.
+- **Session GUC plumbing.** `flycanon.web.conventions.db` exposes
+  `set_tenant_guc(session, ctx)` for explicit use, plus
+  `install_tenant_guc_hook()` which registers a SQLAlchemy
+  `after_begin` listener on the synchronous Session underneath every
+  AsyncSession. The hook fires on every `build_engine()` in
+  `models/repositories/_engine.py` (idempotent). Transactions opened
+  outside a request context (workers, retention sweeps, migration
+  runner) skip the GUCs cleanly so cross-workspace access keeps
+  working under `BYPASSRLS`.
+- **Deployment requirement.** Ops must provision (a) a `flycanon_admin`
+  Postgres role with `BYPASSRLS` for migrations and cross-workspace
+  workers (consolidation re-embed sweep, retention reaper, EDA
+  ingest worker), and (b) a separate `flycanon_app` role **without
+  superuser** for the request-path engine. `FORCE ROW LEVEL SECURITY`
+  applies to the table OWNER but NOT to Postgres superusers, so a
+  superuser-connected service would silently bypass the policy.
+  Documented in `docs/architecture.md -> Row-level security`.
+- **RLS integration coverage.** New
+  `tests/integration/test_rls_isolation.py` boots a real Postgres +
+  pgvector via testcontainers, runs migrations as a `BYPASSRLS`
+  admin role, then exercises 11 scenarios as a non-bypass `app_user`:
+  cross-workspace + cross-tenant reads, unset-GUC zero-rows, the
+  `canon_workspaces` / `canon_agent_tokens` special cases, the
+  runtime `canon_chunk_vectors` table, write-path INSERT rejection,
+  multi-table GUC coherence, `SET LOCAL` transaction scoping, and
+  the FORCE-vs-owner contract. Cleanly skipped when Docker is
+  unavailable.
+
+### Added -- Plan 6 workspace lifecycle events
+
+- **`canon.workspaces.v1` topic** carries `WorkspaceCreated`,
+  `WorkspaceUpdated`, `WorkspaceDeleted` events emitted by
+  `workspaces_controller`. Lifecycle mapping: `POST /workspaces` ->
+  `WorkspaceCreated`, `PATCH /workspaces/{id}` -> `WorkspaceUpdated`,
+  `POST /workspaces/{id}:close` -> `WorkspaceDeleted` (semantic:
+  workspace closed, not row deleted -- the row is preserved with
+  `status=closed`).
+- **`WorkspaceEventPublisher`** routes through the existing pyfly
+  `EventPublisher` bean (same transport as the
+  `flycanon.audit` / `flycanon.knowledge` / `flycanon.ingest` topics).
+  Default backend is the Postgres outbox; flip
+  `FLYCANON_EDA_ADAPTER` to `memory` / `redis` / `kafka` to swap.
+- **Best-effort consistency.** A failed publish is logged and
+  swallowed -- it does NOT roll back the mutation (durable truth is
+  the workspace row in Postgres + the parallel
+  `canon_audit_events` row). Concurrent mutations may emit events
+  out of order; consumers reconcile via the workspace row's
+  `updated_at` (last-write-wins). Schema docs:
+  [docs/payload-reference.md -> Workspace lifecycle events](docs/payload-reference.md#workspace-lifecycle-events).
+
 ### Removed
 
 - **Legacy `flycanon.web.problem_handlers`** -- superseded by
@@ -122,9 +193,28 @@ All notable changes to **flycanon** are documented here.
 - **Live testcontainer tests for `partition_admin`** -- pure
   Python helpers are unit-tested; promote/demote require a real
   Postgres + partitioned `canon_chunk_vectors`.
-- **Workspace cache client + EDA publisher** for flyradar --
-  Plan 6.
-- **RLS** -- Plan 6.
+- **`canon_chunk_vectors` RLS auto-install in `PgvectorStore`
+  bootstrap.** Migration `0013` guards the policy with `IF EXISTS`
+  because the table is created at boot, not by Alembic. On a
+  first-deploy where `0013` runs before `PgvectorStore` creates the
+  table, the table arrives without RLS. Operational workaround:
+  either pre-create the table before running migrations, or wait for
+  the follow-up patch that installs the policy alongside the table
+  DDL inside `PgvectorStore`.
+- **flyradar workspace cache client** -- consumes
+  `canon.workspaces.v1` events; lives in flyradar.
+- **`POST /api/v1/agent/canon/handoff`** -- flyradar-side endpoint
+  that calls flycanon's `POST /api/v1/agent/sources`.
+- **Workspace event transport tuning** -- the publisher rides on
+  the existing pyfly Postgres outbox by default; production Kafka /
+  RabbitMQ tuning is a follow-up cross-cutting plan.
+- **SDK propagation** -- Python + Java SDKs are now 9 plans behind.
+- **Load + pen-test** -- the unification spec's Phase 4 validation
+  pass ("5k/50k/500k chunks across 10/100/1000 tenants" +
+  pen-test RLS gates).
+- **Constant-time hash compare on agent token verify** +
+  **`last_used_at` write deduplication** -- both flagged in Plan 5
+  review; must be back-ported to flyradar in lock-step.
 - **Rate limiting**: `rate_limit_rpm` on agent tokens is stored
   but not enforced.
 - **Knowledge create/update via agent**: deliberately excluded per

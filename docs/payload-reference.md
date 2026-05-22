@@ -689,3 +689,101 @@ Response shape for `POST /api/v1/agent-tokens` -- extends
   "token": "agt_a1b2c3d4_e5f6...32hex"
 }
 ```
+
+## Workspace lifecycle events
+
+The three DTOs below are the on-wire payloads for the
+`canon.workspaces.v1` topic introduced in Plan 6. Source:
+`src/flycanon/interfaces/dtos/workspace_event.py`. Consumers dispatch
+on `event_type`; the lifecycle mapping to flycanon routes lives in
+[architecture.md -> Workspace lifecycle events](architecture.md#workspace-lifecycle-events).
+
+All three events share the base fields:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `tenant_id` | string (1-64 chars) | Canonical tenant slug. |
+| `workspace_id` | string (1-64 chars) | Canonical workspace slug. |
+| `occurred_at` | datetime (timezone-aware UTC) | Publisher clock at emit time. |
+| `event_type` | string literal | Dispatch key: `workspace.created` / `workspace.updated` / `workspace.deleted`. |
+
+### `WorkspaceCreated`
+
+Emitted from `POST /api/v1/workspaces`. The payload mirrors the on-wire
+`WorkspaceSpec` so a consumer can rebuild its cache row directly.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `event_type` | `"workspace.created"` | Discriminator literal. |
+| `name` | string (1-255 chars) | Workspace display name. |
+| `scope` | `list[Any]` \| null | Scope bullets as stored in `scope_json`. |
+| `sme_roster` | `list[Any]` \| null | SME roster as stored in `sme_roster_json`. |
+| `retention_days` | int \| null | Audit-retention window for the workspace. |
+| `jurisdiction` | string \| null | Workspace jurisdiction tag. |
+
+```jsonc
+{
+  "event_type": "workspace.created",
+  "tenant_id": "acme",
+  "workspace_id": "ws-prod",
+  "occurred_at": "2026-05-22T18:00:00Z",
+  "name": "Production",
+  "scope": ["compliance", "process"],
+  "sme_roster": [{"role": "owner", "actor": "u-1"}],
+  "retention_days": 365,
+  "jurisdiction": "ES"
+}
+```
+
+### `WorkspaceUpdated`
+
+Emitted from `PATCH /api/v1/workspaces/{id}`. Carries the
+**post-update** row state (not just the patched fields) so consumers
+can replace their cached row wholesale -- same payload shape as
+`WorkspaceCreated`.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `event_type` | `"workspace.updated"` | Discriminator literal. |
+| `name` | string (1-255 chars) | Post-update workspace name. |
+| `scope` | `list[Any]` \| null | Post-update scope. |
+| `sme_roster` | `list[Any]` \| null | Post-update SME roster. |
+| `retention_days` | int \| null | Post-update retention window. |
+| `jurisdiction` | string \| null | Post-update jurisdiction. |
+
+```jsonc
+{
+  "event_type": "workspace.updated",
+  "tenant_id": "acme",
+  "workspace_id": "ws-prod",
+  "occurred_at": "2026-05-22T18:05:00Z",
+  "name": "Production EU",
+  "scope": ["compliance", "process", "security"],
+  "sme_roster": [{"role": "owner", "actor": "u-1"}],
+  "retention_days": 730,
+  "jurisdiction": "EU"
+}
+```
+
+### `WorkspaceDeleted`
+
+Emitted from `POST /api/v1/workspaces/{id}:close`. flycanon has no
+hard-delete route; closing a workspace is the terminal lifecycle
+state, and the row is preserved (`status=closed`) for audit. The
+event name matches the canonical lifecycle vocabulary so downstream
+consumers don't have to special-case the soft-delete semantics. No
+payload fields beyond the base -- the `(tenant_id, workspace_id)`
+pair is enough for the consumer to drop or tombstone its cached row.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `event_type` | `"workspace.deleted"` | Discriminator literal. |
+
+```jsonc
+{
+  "event_type": "workspace.deleted",
+  "tenant_id": "acme",
+  "workspace_id": "ws-prod",
+  "occurred_at": "2026-05-22T19:00:00Z"
+}
+```
