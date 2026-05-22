@@ -430,7 +430,9 @@ same envelope shape regardless of broker.
 ## 10. Caching strategy
 
 flycanon has **two** in-process caches today; both are
-process-local and a Redis-backed shared variant is a follow-up.
+process-local. A Redis-backed shared variant is available as a
+pluggable adapter (the `IdempotencyStore` + `_RateLimiter`
+Protocols are the integration seams; operators opt in via env var).
 
 ### Idempotency store
 
@@ -464,9 +466,10 @@ keeps a 60s sliding window per `token_id`:
 * **Process-local**. Multiple replicas multiply the **effective**
   rate -- a `rate_limit_rpm=60` token, when called against three
   replicas, can do up to 180 RPM end-to-end. Set
-  `rate_limit_rpm` conservatively for multi-replica deployments
-  until the Redis-backed counter lands (called out in the
-  changelog).
+  `rate_limit_rpm` conservatively for multi-replica deployments,
+  or opt into the Redis-backed adapter for a shared counter
+  across replicas (the `_RateLimiter` Protocol is the integration
+  seam; exception class + status code are wire-stable).
 
 ---
 

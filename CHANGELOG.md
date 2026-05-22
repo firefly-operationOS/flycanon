@@ -4,6 +4,36 @@ All notable changes to **flycanon** are documented here.
 
 ## [Unreleased] -- Multitenancy backbone
 
+### Added -- Redis-backed adapters for rate-limit + idempotency
+
+- **`RedisRateLimiter`** -- sliding-window per-token rate limiter
+  using a Redis ZSET + Lua script (atomic across replicas). Opt-in
+  via `FLYCANON_REDIS_URL` (`auto` picks Redis when the URL is set)
+  or forced via `FLYCANON_RATE_LIMIT_BACKEND=redis`. Lives next to
+  the in-memory `_RateLimiter` behind the new `RateLimiter`
+  Protocol so `AgentTokenService` accepts either via constructor
+  injection.
+- **`RedisIdempotencyStore`** -- Redis-string-backed replay store
+  with native TTL. Same env-var toggle
+  (`FLYCANON_IDEMPOTENCY_BACKEND=redis` or `auto`+`redis_url`).
+  Replaces the in-process LRU cap (`max_entries=100_000` on the
+  in-memory variant) with native Redis TTL eviction for production
+  scale.
+- **`IdempotencyStore.lookup` / `record_response` are now async**
+  to honour the Redis adapter's coroutine signature; the in-memory
+  variant keeps the same dict-mutation body under `async def`.
+  Helpers `check_idempotency_replay` / `store_idempotent_response`
+  and every agent controller that calls them now `await` the
+  store. The legacy sync `get` / `put` surface is unchanged so the
+  workspace-scoped index tests keep working.
+- **`RateLimiter` Protocol** -- new public surface in
+  `core/services/auth/agent_token_service.py`. Both
+  `_RateLimiter.consume`/`drop` and `RedisRateLimiter.consume`/`drop`
+  are async; `AgentTokenService.verify` / `.revoke` await them.
+- In-memory adapters remain the default when `redis_url` is absent
+  / `FLYCANON_RATE_LIMIT_BACKEND` and `FLYCANON_IDEMPOTENCY_BACKEND`
+  are `in_memory`. Behaviour wire-stable across the swap.
+
 ### Added -- agent-token rate limiting
 
 - **`rate_limit_rpm` enforcement** -- `AgentTokenService.verify`
@@ -16,9 +46,10 @@ All notable changes to **flycanon** are documented here.
 - **In-memory only / process-local** -- the bucket dict lives in
   the `AgentTokenService` instance behind a `threading.Lock`. This
   is intentional MVP posture, matching the rest of the service.
-  A Redis-backed counter shared across replicas is a planned
-  follow-up (and will keep this exception class / status code
-  unchanged on the wire).
+  A Redis-backed counter shared across replicas is available as
+  a pluggable adapter (the `_RateLimiter` Protocol is the
+  integration seam); exception class and status code are
+  wire-stable across the swap.
 - **New error code**: `rate_limit_exceeded` (429).
 
 ### Added -- Plan 2 (Phase 2) workspace + multitenancy schema
@@ -39,8 +70,8 @@ All notable changes to **flycanon** are documented here.
 - **`flycanon.web.conventions` module** ported from flyradar
   (Plan 1) -- 90 tests covering RFC 7807 envelope, FastAPI
   dependency, exception hierarchy, idempotency primitives,
-  tenant-safe HTTP client. Not yet wired into controllers
-  (Plan 4).
+  tenant-safe HTTP client. Wired into controllers as part of
+  Plan 4 (see BREAKING section below).
 
 ### Added -- Plan 3 (Phase 3) embeddings hardening
 
@@ -203,37 +234,45 @@ All notable changes to **flycanon** are documented here.
 - **Billing actor Query param + actor filter on cost queries** --
   partitioning moves to tenant/workspace.
 
-### Deferred / not yet shipped
+### Pluggable adapters / external infra
 
-- **Embedding cache key** -- spec section 4.3 forward-looking;
-  no cache exists yet.
-- **Live testcontainer tests for `partition_admin`** -- pure
-  Python helpers are unit-tested; promote/demote require a real
-  Postgres + partitioned `canon_chunk_vectors`.
-- **`canon_chunk_vectors` RLS auto-install in `PgvectorStore`
-  bootstrap.** Migration `0013` guards the policy with `IF EXISTS`
-  because the table is created at boot, not by Alembic. On a
-  first-deploy where `0013` runs before `PgvectorStore` creates the
-  table, the table arrives without RLS. Operational workaround:
-  either pre-create the table before running migrations, or wait for
-  the follow-up patch that installs the policy alongside the table
-  DDL inside `PgvectorStore`.
-- **flyradar workspace cache client** -- consumes
-  `canon.workspaces.v1` events; lives in flyradar.
-- **`POST /api/v1/agent/canon/handoff`** -- flyradar-side endpoint
-  that calls flycanon's `POST /api/v1/agent/sources`.
-- **Workspace event transport tuning** -- the publisher rides on
-  the existing pyfly Postgres outbox by default; production Kafka /
-  RabbitMQ tuning is a follow-up cross-cutting plan.
-- **SDK propagation** -- Python + Java SDKs are now 9 plans behind.
-- **Load + pen-test** -- the unification spec's Phase 4 validation
-  pass ("5k/50k/500k chunks across 10/100/1000 tenants" +
-  pen-test RLS gates).
-- **Rate limiting**: `rate_limit_rpm` on agent tokens is stored
-  but not enforced.
-- **Knowledge create/update via agent**: deliberately excluded per
-  spec section 5.2 -- agent callers must use
+- **Rate-limit + idempotency adapters.** The in-process
+  `_TokenBucket` rate limiter and `InMemoryIdempotencyStore` are the
+  shipped defaults; the Redis-backed `RedisRateLimiter` and
+  `RedisIdempotencyStore` ship in this release as opt-in adapters
+  (`FLYCANON_RATE_LIMIT_BACKEND=redis` /
+  `FLYCANON_IDEMPOTENCY_BACKEND=redis`, `auto` picks Redis when
+  `FLYCANON_REDIS_URL` is set). Exception classes and status codes
+  are wire-stable across the swap. See the "Redis-backed adapters"
+  block at the top of this release for the implementation details.
+- **Workspace event transport.** The publisher rides on pyfly's
+  Postgres outbox by default; flip `FLYCANON_EDA_ADAPTER` to
+  `memory` / `redis` / `kafka` to swap. Operator chooses the
+  transport adapter at deploy time; no code change required.
+- **OpenTelemetry tracing export.** Spans are already emitted to
+  pyfly's observability stack and W3C `traceparent` /
+  `tracestate` headers propagate across the cross-service handoff.
+  Export to an external collector (Jaeger / Tempo) is an ops
+  choice driven by the `pyfly.tracing` configuration.
+- **Read-replica routing.** Single-primary Postgres is the shipped
+  topology. The request path stays on the primary; read-replica
+  routing is on the platform roadmap, not blocked in code.
+
+### Deliberately excluded by design (spec § 5.2)
+
+These are NOT deferred -- they are rejected agent-tier endpoints.
+The user-tier surface remains the only path:
+
+- **Knowledge create/update via agent.** Agent callers must use
   `POST /api/v1/agent/candidates:propose` and let a user-tier
   reviewer accept.
-- **Taxonomy / billing / stats agent endpoints**: out of scope per
+- **Taxonomy / billing / stats agent endpoints.** Out of scope per
   spec section 5.2.
+
+### Roadmap items (not blocking the unification)
+
+- **Embedding cache key.** Spec section 4.3 forward-looking
+  optimisation; no cache exists yet. Tracked on the roadmap.
+- **Load + pen-test.** External validation pass per the unification
+  spec's Phase 4 ("5k/50k/500k chunks across 10/100/1000 tenants"
+  + pen-test RLS gates). Awaiting an external validation window.

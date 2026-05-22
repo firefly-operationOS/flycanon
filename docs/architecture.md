@@ -474,20 +474,18 @@ subjects even the table OWNER to the policy unless the role has
    `flycanon_app` role without superuser + without `BYPASSRLS` for
    the request-path engine.
 
-### Follow-up: `canon_chunk_vectors` deploy ordering
+### `canon_chunk_vectors` deploy ordering
 
 The migration's `IF EXISTS` guard handles the steady-state case where
 `canon_chunk_vectors` already exists. On a **first deploy** -- empty
 database, then `alembic upgrade head`, then the service boots and
-`PgvectorStore` creates the table -- the table arrives without an
-RLS policy. The current mitigation is operational: ensure either
-
-- The table exists before `0013` runs (e.g., explicitly create it in
-  a pre-deploy step that calls `PgvectorStore.ensure_schema()`), OR
-- A follow-up patch installs the RLS policy at `PgvectorStore` boot
-  time, alongside the table DDL.
-
-Tracked as a deferred follow-up in `CHANGELOG.md`.
+`PgvectorStore` creates the table -- the table would otherwise arrive
+without an RLS policy. `PgvectorStore` closes the gap at boot: it
+installs the RLS policy in-band with the table DDL via an idempotent
+`DO` block (fails soft on `insufficient_privilege` so non-admin
+boots don't crash). Confirm via
+`SELECT polname FROM pg_policies WHERE tablename = 'canon_chunk_vectors'`
+after the first boot.
 
 ## Workspace lifecycle events
 

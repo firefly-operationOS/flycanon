@@ -630,7 +630,7 @@ Request body for `POST /api/v1/agent-tokens`.
 | `name` | string (1-128 chars) | yes | Human-readable label, surfaced in the list view. |
 | `workspace_allowlist` | `string[]` \| null | no | When set, restricts the token to those workspace ids under the tenant. `null` (the default) means any workspace. |
 | `scopes` | `string[]` | no | Per-route scopes the token can satisfy. Defaults to `["*"]` (wildcard). See [api-reference.md -> Scope strings](api-reference.md#scope-strings). |
-| `rate_limit_rpm` | int (1-10 000) \| null | no | Advisory metadata. Persisted but **not yet enforced** by the verify path -- reserved for the per-token rate limiter we add later. |
+| `rate_limit_rpm` | int (1-10 000) \| null | no | Per-token budget enforced by `AgentTokenService.verify` via a sliding 60s in-process counter. Exceeding the budget returns `429 rate_limit_exceeded`. `null` or `<= 0` disables the check. |
 | `expires_at` | datetime \| null | no | When set, the verify path raises `agent_token_expired` once the wall clock passes it. |
 
 ```jsonc

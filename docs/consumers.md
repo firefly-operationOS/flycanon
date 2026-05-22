@@ -258,25 +258,25 @@ Consumers should:
 
 ---
 
-## Future: rate limiting
+## Rate limiting
 
-The `rate_limit_rpm` field on the mint request exists today on
+The `rate_limit_rpm` field on the mint request lives on
 [`AgentTokenMintRequest`](payload-reference.md#agenttokenmintrequest)
-and is persisted on every minted token. **It is not yet enforced**
-by the verify path -- a token whose `rate_limit_rpm` is `60` does
-NOT have its calls throttled.
+and is enforced by `AgentTokenService.verify` via a per-token sliding
+60s counter. A token over its budget returns
+`429 rate_limit_exceeded`; `rate_limit_rpm` of `null` or `<= 0`
+skips the check.
 
-Consumers should design for rate limits even when they're not active
-today:
+Consumer guidance:
 
-- Capture and forward the response status; once enforcement lands,
-  the verifier will return `429 rate_limit_exceeded` with a
-  `Retry-After` header.
-- Implement exponential backoff on 429 from the outset -- the same
-  retry path that handles 5xx covers 429 cleanly.
-- Set `rate_limit_rpm` at mint time anyway. It's a no-op today; it
-  becomes the enforcement budget once the limiter lands, no token
-  reissue required.
+- Implement exponential backoff on 429 -- the same retry path that
+  handles 5xx covers 429 cleanly.
+- For multi-replica deployments, the default in-process limiter
+  counts per-replica (N replicas effectively multiply the budget
+  by N). Opt into the Redis adapter via
+  `FLYCANON_RATE_LIMIT_BACKEND=redis` (or `auto` + `FLYCANON_REDIS_URL`)
+  to get a single counter shared across replicas, or deploy a
+  gateway-level rate limiter in front of the cluster.
 
 ---
 

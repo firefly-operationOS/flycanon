@@ -337,9 +337,10 @@ timestamps) guarded by a `threading.Lock`.
 **Known limitation:** the limiter is **process-local**. A
 multi-replica deploy multiplies the effective per-token rate by the
 replica count -- a `rate_limit_rpm=60` token can issue ~60*N requests
-per minute across N replicas. Until a Redis-backed counter shared
-across replicas lands (tracked as a follow-up; see CHANGELOG), size
-the limit conservatively or rely on an upstream gateway-level
+per minute across N replicas. Size the limit conservatively for
+multi-replica deployments, opt into the Redis-backed adapter (the
+`_RateLimiter` Protocol is the integration seam; exception class +
+status code are wire-stable), or rely on an upstream gateway-level
 rate-limiter.
 
 ---
@@ -393,7 +394,7 @@ token.
 
 | Limitation | Mitigation |
 |---|---|
-| Rate limits are per-process (see [§ 6](#6-rate-limiting)). Multi-replica deploys multiply the effective per-token rate. | Size `rate_limit_rpm` conservatively; deploy a gateway-level rate limiter in front of multi-replica clusters; Redis-backed sharing is a planned follow-up. |
+| Rate limits are per-process (see [§ 6](#6-rate-limiting)). Multi-replica deploys multiply the effective per-token rate. | Size `rate_limit_rpm` conservatively; deploy a gateway-level rate limiter in front of multi-replica clusters; opt into the Redis-backed adapter for a shared counter across replicas. |
 | `BYPASSRLS` role compromise = total tenant data exposure across all workspaces. | Treat the admin DB credential as production-secret material; rotate on operator turnover; restrict the admin role's network reach. Standard Postgres reality, not a flycanon invariant. |
 | SSE streams (`POST /api/v1/query/stream`, `POST /api/v1/agent/query/stream`, `GET /api/v1/ingest-jobs/{id}/stream`) cannot replay through idempotency -- the stream is stateful + per-connection. | Intentional. Clients re-subscribe with `?after_id=` (for ingest-job event streams) or repeat the query with the same `Idempotency-Key` if the answer is replayable as a single record. |
 | Agent tokens are valid forever until `expires_at` or `DELETE`. | Recommend `expires_at` on every mint; the [consumers.md § Expiry recommendations](consumers.md#expiry-recommendations) suggests 90 days for production service-to-service. The `last_used_at` listing column flags dormant tokens for cleanup. A null `expires_at` is permitted by the schema (no enforcement) but strongly discouraged outside dev. |

@@ -110,7 +110,9 @@ Each token carries:
 - `workspace_allowlist` — optional list of workspaces this token can speak for.
 - `scopes` — list of allowed scope strings (e.g., `agent.sources:ingest`, `agent.query:run`).
 - `expires_at` — optional expiry.
-- `rate_limit_rpm` — stored, **not yet enforced** (follow-up).
+- `rate_limit_rpm` — enforced by `AgentTokenService.verify` via a
+  per-token sliding 60s in-process counter; `429 rate_limit_exceeded`
+  on budget exhaustion. `None` or `<= 0` disables the check.
 
 Verify path uses `secrets.compare_digest` (constant-time). `mark_used` writes are deduped to a 60s window.
 

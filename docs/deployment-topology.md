@@ -208,10 +208,10 @@ flycanon-migrate  one-shot Job per release
 flyradar-migrate  one-shot Job per release
 
 Postgres
-  primary  (writes)
-  read-replica x2  (reporting / billing / audit-tail reads; the
-                    request path stays on the primary until the
-                    canonical read-replica routing follow-up lands)
+  primary  (writes + request path)
+  read-replica x2  (reporting / billing / audit-tail reads only;
+                    read-replica routing for the request path is on
+                    the platform roadmap, not plumbed in code today)
 
 Kafka  topics: canon.workspaces.v1, flycanon.ingest,
                flycanon.knowledge, flycanon.audit,
@@ -665,7 +665,7 @@ recommended (out-of-tree) stack is:
 |---------|------|---------|
 | Metrics | Prometheus + Grafana | Scrape `GET /actuator/prometheus` on each pod's `:8500`. Pyfly emits the standard HTTP request totals + latency histograms, async-pool sizes, and the EDA outbox queue depth gauge. |
 | Logs | Loki / ELK | Both services log structured JSON to stdout. Pyfly's `CorrelationFilter` stamps every log line with `correlation_id` (W3C trace-context aware) + `tenant_id` -- index those fields. |
-| Tracing | Jaeger / Tempo | W3C `traceparent` / `tracestate` already propagate through both services and the cross-service handoff client. OpenTelemetry export is a planned follow-up; for now traces ride in the log records. |
+| Tracing | Jaeger / Tempo | W3C `traceparent` / `tracestate` already propagate through both services and the cross-service handoff client. Spans are emitted to pyfly's observability stack; export to an external collector is an ops choice driven by the `pyfly.tracing` configuration. |
 | Healthchecks | Kubernetes probes | `GET /actuator/health/readiness` aggregates DB + EDA publisher health; `/actuator/health/liveness` is a process-up signal. The flyradar worker also exposes a heartbeat file (`FLYRADAR_WORKER_HEARTBEAT_PATH`) for a Docker-side liveness check. |
 | Dashboards | Grafana | Per-service: request volume / p95, EDA outbox depth, worker handler timeouts, LLM-call latencies (pyfly emits a `pyfly_llm_call_duration_seconds` histogram). |
 
