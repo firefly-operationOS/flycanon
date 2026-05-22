@@ -9,6 +9,7 @@ metadata, not by walking modules.
 
 from __future__ import annotations
 
+from flycanon.models.entities.agent_token import AgentToken
 from flycanon.models.entities.audit_event import AuditEventRow
 from flycanon.models.entities.base import Base
 from flycanon.models.entities.candidate import CandidateRow
@@ -25,6 +26,7 @@ from flycanon.models.entities.taxonomy_node import TaxonomyNodeRow
 from flycanon.models.entities.workspace import Workspace
 
 __all__ = [
+    "AgentToken",
     "AuditEventRow",
     "Base",
     "CandidateRow",
