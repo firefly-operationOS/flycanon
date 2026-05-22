@@ -746,7 +746,8 @@ class TestTTLExpiry:
 
 
 class TestHelpers:
-    def test_check_idempotency_replay_returns_none_when_store_empty(
+    @pytest.mark.asyncio
+    async def test_check_idempotency_replay_returns_none_when_store_empty(
         self,
         store: InMemoryIdempotencyStore,
     ) -> None:
@@ -759,16 +760,17 @@ class TestHelpers:
                 HEADER_IDEMPOTENCY_KEY: "NEW-KEY",
             }
         )
-        result = check_idempotency_replay(request, store, "agent.sources:ingest")
+        result = await check_idempotency_replay(request, store, "agent.sources:ingest")
         assert result is None
 
-    def test_check_idempotency_replay_returns_stored_response(
+    @pytest.mark.asyncio
+    async def test_check_idempotency_replay_returns_stored_response(
         self,
         store: InMemoryIdempotencyStore,
     ) -> None:
         from flycanon.web.controllers.agent._helpers import check_idempotency_replay
 
-        store.record_response(
+        await store.record_response(
             tenant_id=_TENANT_A,
             route="agent.sources:ingest",
             key="REPLAY-KEY",
@@ -782,12 +784,13 @@ class TestHelpers:
                 HEADER_IDEMPOTENCY_KEY: "REPLAY-KEY",
             }
         )
-        result = check_idempotency_replay(request, store, "agent.sources:ingest")
+        result = await check_idempotency_replay(request, store, "agent.sources:ingest")
         assert result is not None
         assert result.status == 201
         assert result.body == {"id": "src-from-cache"}
 
-    def test_store_idempotent_response_round_trips(
+    @pytest.mark.asyncio
+    async def test_store_idempotent_response_round_trips(
         self,
         store: InMemoryIdempotencyStore,
     ) -> None:
@@ -803,14 +806,14 @@ class TestHelpers:
                 HEADER_IDEMPOTENCY_KEY: "RT-KEY",
             }
         )
-        store_idempotent_response(
+        await store_idempotent_response(
             request,
             store,
             "agent.sources:ingest",
             status=201,
             response={"id": "rt", "value": 1},
         )
-        result = check_idempotency_replay(request, store, "agent.sources:ingest")
+        result = await check_idempotency_replay(request, store, "agent.sources:ingest")
         assert result is not None
         assert result.status == 201
         assert result.body == {"id": "rt", "value": 1}

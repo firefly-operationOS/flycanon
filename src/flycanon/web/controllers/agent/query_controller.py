@@ -110,7 +110,7 @@ class AgentQueryController:
             scope="agent.query:run",
         )
         scope = "agent.query:run"
-        cached = check_idempotency_replay(http_request, self._idempotency_store, scope)
+        cached = await check_idempotency_replay(http_request, self._idempotency_store, scope)
         if cached is not None:
             return AnswerResponse.model_validate(cached.body)
         response = await self._queries.query(
@@ -120,7 +120,7 @@ class AgentQueryController:
                 workspace_id=ctx.workspace_id,
             )
         )
-        store_idempotent_response(
+        await store_idempotent_response(
             http_request,
             self._idempotency_store,
             scope,
@@ -260,7 +260,7 @@ class AgentQueryController:
             scope="agent.query:run",
         )
         scope = "agent.search:run"
-        cached = check_idempotency_replay(http_request, self._idempotency_store, scope)
+        cached = await check_idempotency_replay(http_request, self._idempotency_store, scope)
         if cached is not None:
             return SearchResponse.model_validate(cached.body)
         response = await self._queries.query(
@@ -270,7 +270,7 @@ class AgentQueryController:
                 workspace_id=ctx.workspace_id,
             )
         )
-        store_idempotent_response(
+        await store_idempotent_response(
             http_request,
             self._idempotency_store,
             scope,

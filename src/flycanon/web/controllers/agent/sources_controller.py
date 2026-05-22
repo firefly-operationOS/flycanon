@@ -112,7 +112,7 @@ class AgentSourcesController:
             scope="agent.sources:ingest",
         )
         scope = "agent.sources:ingest"
-        cached = check_idempotency_replay(http_request, self._idempotency_store, scope)
+        cached = await check_idempotency_replay(http_request, self._idempotency_store, scope)
         if cached is not None:
             # Re-hydrate the stored JSON dict back into a
             # :class:`SourceRecord` so the controller still emits
@@ -136,7 +136,7 @@ class AgentSourcesController:
                 workspace_id=ctx.workspace_id,
             )
         )
-        store_idempotent_response(
+        await store_idempotent_response(
             http_request,
             self._idempotency_store,
             scope,

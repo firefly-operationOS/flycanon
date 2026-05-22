@@ -86,7 +86,7 @@ class AgentCandidatesController:
             scope="agent.candidates:propose",
         )
         scope = "agent.candidates:propose"
-        cached = check_idempotency_replay(http_request, self._idempotency_store, scope)
+        cached = await check_idempotency_replay(http_request, self._idempotency_store, scope)
         # Re-hydrate each cached dict back into a
         # :class:`CandidateRecord`. The store always persists a list
         # for this route (propose returns the full batch). A
@@ -104,7 +104,7 @@ class AgentCandidatesController:
                 actor=ctx.actor,
             )
         )
-        store_idempotent_response(
+        await store_idempotent_response(
             http_request,
             self._idempotency_store,
             scope,

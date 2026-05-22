@@ -42,6 +42,24 @@ class CanonSettings(BaseSettings):
     eda_adapter: str = Field(default="postgres", description="memory | postgres | redis | kafka")
     redis_url: str = "redis://localhost:6379/0"
 
+    # -- Rate limiter + idempotency backend selection -------------------
+    # Per-adapter overrides for the auth + replay surfaces. ``auto``
+    # (the default) picks Redis when ``redis_url`` is set, else falls
+    # back to the in-process implementation. ``redis`` forces Redis;
+    # ``in_memory`` forces the in-process variant even when
+    # ``redis_url`` is configured (useful for local dev with a shared
+    # Redis instance but per-process MVP semantics). See
+    # :func:`flycanon.core.configuration._use_redis` for the
+    # resolution.
+    rate_limit_backend: str = Field(
+        default="auto",
+        description="``auto`` | ``redis`` | ``in_memory``.",
+    )
+    idempotency_backend: str = Field(
+        default="auto",
+        description="``auto`` | ``redis`` | ``in_memory``.",
+    )
+
     # Topics for the event families flycanon publishes. Downstream
     # services subscribe to these to keep their projections in sync.
     ingest_topic: str = "flycanon.ingest"

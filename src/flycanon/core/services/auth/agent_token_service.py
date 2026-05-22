@@ -68,8 +68,12 @@ class RateLimitExceeded(FireflyHTTPException):
     The token's ``rate_limit_rpm`` value is enforced inside
     :meth:`AgentTokenService.verify` via a per-token sliding 60s
     window counter. ``rate_limit_rpm = None`` (or 0) disables the
-    check. The current implementation is in-memory and process-local;
-    a Redis-backed counter is a planned follow-up.
+    check. The default in-memory counter is process-local; a
+    Redis-backed counter is available via
+    :class:`flycanon.core.services.auth.redis_rate_limiter.RedisRateLimiter`
+    (opt-in through ``FLYCANON_REDIS_URL`` /
+    ``FLYCANON_RATE_LIMIT_BACKEND=redis`` -- see
+    :mod:`flycanon.core.configuration`).
     """
 
     status = 429
@@ -179,14 +183,38 @@ def _as_aware_utc(value: datetime | None) -> datetime | None:
     return value if value.tzinfo is not None else value.replace(tzinfo=UTC)
 
 
+class RateLimiter(Protocol):
+    """Pluggable per-token sliding-window rate limiter contract.
+
+    Two implementations ship today:
+
+    * :class:`_RateLimiter` -- process-local, in-memory; the default
+      wired by :class:`AgentTokenService` when no explicit limiter is
+      passed in. Fine for single-replica dev / test.
+    * :class:`flycanon.core.services.auth.redis_rate_limiter.RedisRateLimiter`
+      -- Redis-backed sliding window using a ZSET + Lua script.
+      Atomic across replicas; opt-in via ``FLYCANON_REDIS_URL`` /
+      ``FLYCANON_RATE_LIMIT_BACKEND=redis`` (see
+      :mod:`flycanon.core.configuration`).
+
+    Both methods are ``async`` so the Redis adapter can speak to the
+    async Redis client; the in-memory variant's bodies are sync but
+    keep the ``async`` keyword so the Protocol is honoured.
+    """
+
+    async def consume(self, *, token_id: str, limit_per_minute: int | None, now: float) -> bool: ...
+
+    async def drop(self, token_id: str) -> None: ...
+
+
 class _TokenBucket:
     """Sliding-window counter per ``(token_id)``.
 
     Stores monotonic timestamps for each accepted request inside a
     rolling 60s window; a request is accepted iff the window holds
     fewer than ``limit_per_minute`` entries. Process-local; not
-    durable across restarts and not shared across replicas (Redis
-    backing is a planned follow-up).
+    durable across restarts and not shared across replicas (the Redis
+    backing in :class:`RedisRateLimiter` closes the latter gap).
     """
 
     def __init__(self) -> None:
@@ -211,20 +239,26 @@ class _RateLimiter:
     the ``rate_limit_rpm`` column. A ``threading.Lock`` guards the
     bucket dict so concurrent requests from the same token never race
     on bucket creation / mutation.
+
+    ``consume`` / ``drop`` are ``async`` to honour the
+    :class:`RateLimiter` Protocol -- the bodies stay synchronous
+    (in-memory dict mutation under a threading lock) but the ``async``
+    declaration lets :class:`AgentTokenService` await either this or
+    the Redis-backed variant uniformly.
     """
 
     def __init__(self) -> None:
         self._buckets: dict[str, _TokenBucket] = {}
         self._lock = Lock()
 
-    def consume(self, *, token_id: str, limit_per_minute: int | None, now: float) -> bool:
+    async def consume(self, *, token_id: str, limit_per_minute: int | None, now: float) -> bool:
         if limit_per_minute is None or limit_per_minute <= 0:
             return True
         with self._lock:
             bucket = self._buckets.setdefault(token_id, _TokenBucket())
             return bucket.try_take(limit_per_minute=limit_per_minute, now=now)
 
-    def drop(self, token_id: str) -> None:
+    async def drop(self, token_id: str) -> None:
         with self._lock:
             self._buckets.pop(token_id, None)
 
@@ -241,9 +275,23 @@ class AgentTokenService:
     limit in that order.
     """
 
-    def __init__(self, repo: AgentTokenRepository) -> None:
+    def __init__(
+        self,
+        repo: AgentTokenRepository,
+        *,
+        rate_limiter: RateLimiter | None = None,
+    ) -> None:
+        """Construct the service with an optional pluggable rate limiter.
+
+        ``rate_limiter`` defaults to a fresh in-memory
+        :class:`_RateLimiter`; pass a
+        :class:`flycanon.core.services.auth.redis_rate_limiter.RedisRateLimiter`
+        instance (wired by :mod:`flycanon.core.configuration` when
+        ``FLYCANON_REDIS_URL`` is set) to share the sliding window
+        across replicas.
+        """
         self._repo = repo
-        self._rate_limiter = _RateLimiter()
+        self._rate_limiter: RateLimiter = rate_limiter if rate_limiter is not None else _RateLimiter()
 
     async def mint(self, request: MintRequest, *, actor: str) -> MintedAgentToken:
         token, prefix = _generate_token()
@@ -302,7 +350,7 @@ class AgentTokenService:
         if "*" not in scopes and scope not in scopes:
             raise AgentScopeDenied(f"Token scope does not permit {scope!r}.")
         rate_limit = row.get("rate_limit_rpm")
-        if rate_limit is not None and not self._rate_limiter.consume(
+        if rate_limit is not None and not await self._rate_limiter.consume(
             token_id=row["id"],
             limit_per_minute=rate_limit,
             now=time.monotonic(),
@@ -352,5 +400,5 @@ class AgentTokenService:
         """
         revoked = await self._repo.revoke(token_id, tenant_id=tenant_id, at=datetime.now(UTC))
         if revoked:
-            self._rate_limiter.drop(token_id)
+            await self._rate_limiter.drop(token_id)
         return revoked

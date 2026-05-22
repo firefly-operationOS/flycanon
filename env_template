@@ -30,6 +30,21 @@ RUN_MIGRATIONS=true
 FLYCANON_EDA_ADAPTER=postgres
 FLYCANON_REDIS_URL=redis://localhost:6379/0
 
+# Per-adapter backend selection for the auth rate limiter + replay
+# idempotency store.
+#   auto       -- (default) Redis when FLYCANON_REDIS_URL is set,
+#                 else the in-process implementation.
+#   redis      -- always Redis (errors at first use if Redis is
+#                 unreachable).
+#   in_memory  -- always the in-process variant (per-replica
+#                 buckets / dict; not durable across restarts or
+#                 shared across replicas).
+# In-memory is fine for single-replica dev / test posture; production
+# behind a load balancer MUST use ``redis`` for both so the per-token
+# rate-limit window and the replay cache are shared across replicas.
+FLYCANON_RATE_LIMIT_BACKEND=auto
+FLYCANON_IDEMPOTENCY_BACKEND=auto
+
 # Topics for the lifecycle events flycanon publishes. Downstream services
 # subscribe to these to keep their projections in sync.
 FLYCANON_INGEST_TOPIC=flycanon.ingest

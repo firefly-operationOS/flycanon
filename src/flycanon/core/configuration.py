@@ -30,7 +30,12 @@ from flycanon.config import CanonSettings, get_settings
 # and are auto-discovered via ``scan_packages``. The imports are
 # retained for the type hints used in the remaining @bean signatures.
 from flycanon.core.services.audit import AuditService  # noqa: F401
-from flycanon.core.services.auth.agent_token_service import AgentTokenService
+from flycanon.core.services.auth.agent_token_service import (
+    AgentTokenService,
+    RateLimiter,
+    _RateLimiter,
+)
+from flycanon.core.services.auth.redis_rate_limiter import RedisRateLimiter
 from flycanon.core.services.binary import (
     GotenbergConverter,
     LibreOfficeConverter,
@@ -76,6 +81,7 @@ from flycanon.web.conventions.idempotency import (
     IdempotencyStore,
     InMemoryIdempotencyStore,
 )
+from flycanon.web.conventions.redis_idempotency import RedisIdempotencyStore
 
 logger = logging.getLogger(__name__)
 
@@ -157,22 +163,52 @@ class CanonCoreConfiguration:
     # ------------------------------------------------------------------
 
     @bean
-    def agent_token_service(self, agent_token_repository: AgentTokenRepository) -> AgentTokenService:
-        return AgentTokenService(agent_token_repository)
+    def rate_limiter(self, settings: CanonSettings) -> RateLimiter:
+        """Per-token sliding-window rate limiter.
+
+        Backend selection:
+
+        * ``FLYCANON_RATE_LIMIT_BACKEND=redis`` -- always Redis.
+        * ``FLYCANON_RATE_LIMIT_BACKEND=in_memory`` -- always
+          in-memory (even when ``redis_url`` is set).
+        * unset / ``auto`` (the default) -- Redis when ``redis_url``
+          is configured, in-memory otherwise.
+
+        In-memory is fine for single-replica dev / test posture but
+        does NOT enforce ``rate_limit_rpm`` correctly across replicas;
+        production deployments behind a load balancer MUST use the
+        Redis variant or the per-replica buckets effectively multiply
+        the budget by the replica count.
+        """
+        if _use_redis(settings, "rate_limit_backend"):
+            client = _build_redis_client(settings)
+            return RedisRateLimiter(client)
+        return _RateLimiter()
+
+    @bean
+    def agent_token_service(
+        self,
+        agent_token_repository: AgentTokenRepository,
+        rate_limiter: RateLimiter,
+    ) -> AgentTokenService:
+        return AgentTokenService(agent_token_repository, rate_limiter=rate_limiter)
 
     # ------------------------------------------------------------------
     # Replay dedup for the agent surface
     #
-    # A singleton :class:`InMemoryIdempotencyStore` is shared by every
+    # A singleton :class:`IdempotencyStore` bean is shared by every
     # agent controller so a replayed POST with the same
     # ``Idempotency-Key`` returns the original response body without
-    # re-dispatching the command. In-memory is fine for MVP; a real
-    # deployment would swap in a Redis-backed implementation behind
-    # the same :class:`IdempotencyStore` Protocol.
+    # re-dispatching the command. Backend selection mirrors
+    # :meth:`rate_limiter`: Redis when ``redis_url`` is set (or
+    # ``FLYCANON_IDEMPOTENCY_BACKEND=redis``), in-memory otherwise.
     # ------------------------------------------------------------------
 
     @bean
-    def idempotency_store(self) -> IdempotencyStore:
+    def idempotency_store(self, settings: CanonSettings) -> IdempotencyStore:
+        if _use_redis(settings, "idempotency_backend"):
+            client = _build_redis_client(settings)
+            return RedisIdempotencyStore(client)
         return InMemoryIdempotencyStore()
 
     @bean(name="database_health")
@@ -357,3 +393,55 @@ class CanonCoreConfiguration:
         )
 
     # IntakeService is ``@service``-decorated; auto-discovered.
+
+
+# ----------------------------------------------------------------------
+# Redis adapter helpers
+#
+# Shared by :meth:`CanonCoreConfiguration.rate_limiter` and
+# :meth:`CanonCoreConfiguration.idempotency_store`. Build one async
+# Redis client per process and reuse it across adapters so both share
+# the connection pool.
+# ----------------------------------------------------------------------
+
+
+def _use_redis(settings: CanonSettings, backend_field: str) -> bool:
+    """Return ``True`` when the matching adapter should use Redis.
+
+    Three inputs decide:
+
+    * ``settings.<backend_field>`` -- explicit env override
+      (``redis`` / ``in_memory`` / ``auto``).
+    * ``settings.redis_url`` -- when set, Redis is the default.
+    * ``backend_field`` -- the per-adapter knob name; lets the
+      rate-limit and idempotency stores be configured independently.
+
+    ``auto`` (the default) picks Redis if ``redis_url`` is set, else
+    falls back to in-memory. Explicit values always win so operators
+    can force one or the other (e.g. for local dev with a real Redis
+    but in-memory rate limiting, or vice versa).
+    """
+    explicit = getattr(settings, backend_field, "auto") or "auto"
+    explicit = explicit.lower()
+    if explicit == "redis":
+        return True
+    if explicit in {"in_memory", "memory"}:
+        return False
+    return bool(settings.redis_url)
+
+
+def _build_redis_client(settings: CanonSettings):  # noqa: ANN202
+    """Async Redis client bound to ``settings.redis_url``.
+
+    Returns the client untyped so the import of ``redis.asyncio``
+    stays local to this helper -- callers receive a duck-typed handle
+    that satisfies :class:`RedisRateLimiter` / :class:`RedisIdempotencyStore`
+    constructors.
+
+    Decoding is left to the adapters: :class:`RedisIdempotencyStore`
+    handles both ``bytes`` and ``str`` responses so the helper does
+    not need to set ``decode_responses=True``.
+    """
+    from redis.asyncio import from_url as _redis_from_url
+
+    return _redis_from_url(settings.redis_url)

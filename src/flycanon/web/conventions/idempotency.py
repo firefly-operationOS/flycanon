@@ -112,10 +112,10 @@ class IdempotencyStore(Protocol):
     Two read APIs:
 
     * :meth:`get` -- legacy by-:class:`IdempotencyKey` reader used by
-      existing test coverage. Returns the raw :class:`IdempotencyEntry`
-      or ``None`` if absent / expired.
+      existing test coverage. Sync, returns the raw
+      :class:`IdempotencyEntry` or ``None`` if absent / expired.
     * :meth:`lookup` -- replay-dedup reader used by the agent
-      controllers. Takes the raw header string (workspace is
+      controllers. Async, takes the raw header string (workspace is
       *intentionally* not part of the namespace because the agent
       contract namespaces by ``(tenant_id, route, key)`` only --
       a token whose allowlist contains two workspaces should not be
@@ -127,9 +127,17 @@ class IdempotencyStore(Protocol):
 
     Two write APIs:
 
-    * :meth:`put` -- legacy direct-entry writer.
-    * :meth:`record_response` -- stores the response body keyed by
-      ``(tenant_id, route, key)`` with the module-default TTL.
+    * :meth:`put` -- legacy direct-entry writer (sync).
+    * :meth:`record_response` -- async; stores the response body
+      keyed by ``(tenant_id, route, key)`` with the module-default
+      TTL.
+
+    ``lookup`` and ``record_response`` are ``async`` so the Redis
+    adapter (see
+    :class:`flycanon.web.conventions.redis_idempotency.RedisIdempotencyStore`)
+    can speak to the async Redis client; the in-memory variant's
+    bodies are sync but keep the ``async`` keyword so the Protocol is
+    honoured uniformly.
     """
 
     def get(
@@ -142,7 +150,7 @@ class IdempotencyStore(Protocol):
 
     def put(self, entry: IdempotencyEntry) -> None: ...
 
-    def lookup(
+    async def lookup(
         self,
         *,
         tenant_id: str,
@@ -150,7 +158,7 @@ class IdempotencyStore(Protocol):
         key: str,
     ) -> StoredResponse | None: ...
 
-    def record_response(
+    async def record_response(
         self,
         *,
         tenant_id: str,
@@ -222,7 +230,7 @@ class InMemoryIdempotencyStore(IdempotencyStore):
         self._enforce_entries_cap()
         self._entries[(entry.tenant_id, entry.workspace_id, entry.route, entry.key.value)] = entry
 
-    def lookup(
+    async def lookup(
         self,
         *,
         tenant_id: str,
@@ -238,6 +246,11 @@ class InMemoryIdempotencyStore(IdempotencyStore):
           header upstream),
         * expired entry (TTL elapsed),
         * entry written via :meth:`put` with no replay payload.
+
+        Declared ``async`` to match the :class:`IdempotencyStore`
+        Protocol; the body is sync (in-memory dict lookup) but the
+        coroutine signature lets callers ``await`` either this or the
+        Redis variant uniformly.
         """
         if not key:
             return None
@@ -250,7 +263,7 @@ class InMemoryIdempotencyStore(IdempotencyStore):
             return None
         return StoredResponse(status=entry.response_status, body=entry.response_json)
 
-    def record_response(
+    async def record_response(
         self,
         *,
         tenant_id: str,
@@ -266,6 +279,9 @@ class InMemoryIdempotencyStore(IdempotencyStore):
         was present (the helper upstream raises 400 when it isn't,
         but a defensive no-op keeps the store side-effect-free for
         any other caller).
+
+        Declared ``async`` to match the :class:`IdempotencyStore`
+        Protocol; see :meth:`lookup` for the rationale.
         """
         if not key:
             return

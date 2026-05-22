@@ -120,7 +120,7 @@ def require_idempotency_key(http_request: Request) -> str:
     return value
 
 
-def check_idempotency_replay(
+async def check_idempotency_replay(
     http_request: Request,
     store: IdempotencyStore,
     scope: str,
@@ -138,17 +138,21 @@ def check_idempotency_replay(
        An empty string falls through and the store treats it as a
        distinct namespace (i.e. an anonymous tenant cannot collide
        with ``"acme"``).
-    3. Calls :meth:`IdempotencyStore.lookup` with the namespaced
+    3. Awaits :meth:`IdempotencyStore.lookup` with the namespaced
        tuple. Returns the stored response if the entry exists, is
        not expired, and carries a recorded response body.
 
     Returns the cached :class:`StoredResponse` if found, else
     ``None`` so the controller falls through to dispatch.
     Raises :class:`MissingIdempotencyKey` if the header is absent.
+
+    Async to honour the :class:`IdempotencyStore` Protocol -- the
+    in-memory store's body is sync but the Redis adapter awaits
+    the underlying client, so callers MUST await this helper.
     """
     key = require_idempotency_key(http_request)
     tenant_id = http_request.headers.get(HEADER_TENANT_ID, "")
-    return store.lookup(tenant_id=tenant_id, route=scope, key=key)
+    return await store.lookup(tenant_id=tenant_id, route=scope, key=key)
 
 
 def _to_json_body(response: Any) -> dict[str, Any] | list[Any]:
@@ -182,7 +186,7 @@ def _to_json_body(response: Any) -> dict[str, Any] | list[Any]:
     return {"value": response}
 
 
-def store_idempotent_response(
+async def store_idempotent_response(
     http_request: Request,
     store: IdempotencyStore,
     scope: str,
@@ -202,10 +206,14 @@ def store_idempotent_response(
     emit (pydantic ``BaseModel``, ``list[BaseModel]``, or a raw
     JSON-serialisable container); :func:`_to_json_body` normalises
     it for the store.
+
+    Async to honour the :class:`IdempotencyStore` Protocol -- the
+    in-memory store's body is sync but the Redis adapter awaits
+    the underlying client, so callers MUST await this helper.
     """
     key = http_request.headers.get(HEADER_IDEMPOTENCY_KEY) or ""
     tenant_id = http_request.headers.get(HEADER_TENANT_ID, "")
-    store.record_response(
+    await store.record_response(
         tenant_id=tenant_id,
         route=scope,
         key=key,
