@@ -20,7 +20,10 @@ from pyfly.web.adapters.fastapi.app import create_app
 
 from flycanon import __version__
 from flycanon.app import CanonApplication
-from flycanon.web.conventions import register_exception_handlers
+from flycanon.web.conventions import (
+    TenantContextMiddleware,
+    register_exception_handlers,
+)
 from flycanon.web.openapi_override import install_openapi
 
 _TITLE = "flycanon"
@@ -91,6 +94,17 @@ app = create_app(
 # the service layer keeps its HTTP status + RFC 7807 code instead of
 # being flattened to 400 COMMAND_PROCESSING_ERROR.
 register_exception_handlers(app)
+# Bind the request-scoped TenantContext from headers BEFORE any route
+# (or DB session) runs. Pyfly's @rest_controller resolver bypasses
+# FastAPI Depends, so require_tenant_context never fires for pyfly
+# routes and tenant_context_from_request returns a ctx without binding
+# the ContextVar. Without this middleware the SQLAlchemy after_begin
+# hook (install_tenant_guc_hook) reads None and skips the SET LOCAL
+# GUC writes -- every RLS-bound read through a non-BYPASSRLS role
+# would then return zero rows. The middleware is added AFTER
+# register_exception_handlers so the conventions ProblemDetail
+# response shape covers anything the middleware leaks.
+app.add_middleware(TenantContextMiddleware)
 # The W3C correlation surface (X-Correlation-Id / X-Request-Id /
 # X-Tenant-Id / traceparent / tracestate) is wired into pyfly's default
 # WebFilter chain via

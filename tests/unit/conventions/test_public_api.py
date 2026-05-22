@@ -53,6 +53,13 @@ def test_all_lists_every_export_and_size_locked() -> None:
     """
     import flycanon.web.conventions as c
 
-    assert len(c.__all__) == 36
+    assert len(c.__all__) == 37
     for name in c.__all__:
         assert hasattr(c, name), f"__all__ lists {name!r} but module has no such attribute"
+    # Newest addition (2026-05-22): TenantContextMiddleware -- pyfly's
+    # @rest_controller bypasses FastAPI Depends, so the canonical
+    # require_tenant_context yield-dep never runs. The middleware
+    # closes that gap by binding the ContextVar from headers before
+    # any DB session opens. See ``web/conventions/middleware.py``.
+    assert "TenantContextMiddleware" in c.__all__
+    assert c.TenantContextMiddleware.__name__ == "TenantContextMiddleware"

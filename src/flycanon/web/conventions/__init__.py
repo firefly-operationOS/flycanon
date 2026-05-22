@@ -69,6 +69,7 @@ from flycanon.web.conventions.idempotency import (
     InMemoryIdempotencyStore,
     InvalidIdempotencyKeyError,
 )
+from flycanon.web.conventions.middleware import TenantContextMiddleware
 from flycanon.web.conventions.validation import (
     InvalidSlugError,
     validate_slug,
@@ -118,6 +119,8 @@ __all__ = [
     "IdempotencyStore",
     "InMemoryIdempotencyStore",
     "InvalidIdempotencyKeyError",
+    # middleware
+    "TenantContextMiddleware",
     # validation
     "InvalidSlugError",
     "validate_slug",
