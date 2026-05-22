@@ -141,9 +141,7 @@ async def test_lookup_round_trip_after_record(
         status=201,
         json_body={"id": "src-1", "n": 3},
     )
-    result = await store.lookup(
-        tenant_id="acme", route="agent.sources:ingest", key="K1"
-    )
+    result = await store.lookup(tenant_id="acme", route="agent.sources:ingest", key="K1")
     assert result is not None
     assert result.status == 201
     assert result.body == {"id": "src-1", "n": 3}
