@@ -18,7 +18,7 @@
 
   <groupId>com.firefly</groupId>
   <artifactId>flycanon-sdk</artifactId>
-  <version>26.5.6</version>
+  <version>26.5.7</version>
   <packaging>jar</packaging>
 
   <name>flycanon-sdk</name>
@@ -106,6 +106,30 @@
     <dependency>
       <groupId>org.springframework.boot</groupId>
       <artifactId>spring-boot-starter-test</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <!--
+      WireMock for HTTP-level integration tests. We assert outbound
+      headers (X-Tenant-Id, X-Workspace-Id, X-Correlation-Id,
+      X-Agent-Token, Idempotency-Key, User-Agent) and exception
+      dispatch by code via real HTTP round-trips against a stubbed
+      server, so the SDK contract is verified end-to-end rather than
+      via mocked clients.
+    -->
+    <dependency>
+      <groupId>org.wiremock</groupId>
+      <artifactId>wiremock-standalone</artifactId>
+      <version>3.9.1</version>
+      <scope>test</scope>
+    </dependency>
+    <!--
+      Reactor StepVerifier for the reactive variant's test suite.
+      Brought in test-scope only so the published JAR stays free of
+      io.projectreactor.test classpath entries.
+    -->
+    <dependency>
+      <groupId>io.projectreactor</groupId>
+      <artifactId>reactor-test</artifactId>
       <scope>test</scope>
     </dependency>
   </dependencies>

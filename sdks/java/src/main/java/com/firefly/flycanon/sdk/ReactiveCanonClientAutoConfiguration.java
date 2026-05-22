@@ -51,6 +51,10 @@ public class ReactiveCanonClientAutoConfiguration {
         return ReactiveCanonClient.builder()
                 .baseUrl(properties.getBaseUrl())
                 .apiKey(properties.getApiKey())
+                .tenantId(properties.getTenantId())
+                .workspaceId(properties.getWorkspaceId())
+                .correlationId(properties.getCorrelationId())
+                .agentToken(properties.getAgentToken())
                 .timeout(properties.getTimeout())
                 .objectMapper(objectMapper)
                 .build();

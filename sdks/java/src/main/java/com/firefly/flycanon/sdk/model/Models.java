@@ -5,9 +5,13 @@
 package com.firefly.flycanon.sdk.model;
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonProperty;
+import com.fasterxml.jackson.databind.JsonNode;
 
 import java.time.OffsetDateTime;
+import java.util.ArrayList;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 
@@ -528,5 +532,348 @@ public final class Models {
             ChunkStats chunks,
             @JsonProperty("ingest_jobs") JobStats ingestJobs,
             CostStreamStats cost) {
+    }
+
+    // ------------------------------------------------------------------
+    // 26.5.7 unification -- constants
+    // ------------------------------------------------------------------
+
+    /**
+     * Topic name for workspace lifecycle events. Consumers subscribing
+     * to {@link WorkspaceCreated} / {@link WorkspaceUpdated} /
+     * {@link WorkspaceDeleted} bind to this topic.
+     */
+    public static final String CANON_WORKSPACES_TOPIC = "canon.workspaces.v1";
+
+    // ------------------------------------------------------------------
+    // 26.5.7 unification -- structured per-field error rows
+    // ------------------------------------------------------------------
+
+    /**
+     * One entry from the {@code ProblemDetail.errors} per-field list.
+     *
+     * <p>Mirrors the service's {@code {code, path, message}} triple.
+     * Used as the structured per-field payload on
+     * {@link com.firefly.flycanon.sdk.ValidationError} (and on any
+     * other typed exception that carries an {@code errors} list).
+     */
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public record FieldError(String code, String path, String message) {
+    }
+
+    /**
+     * Parse a Jackson {@link JsonNode} array of {@code {code, path,
+     * message}} triples into {@link FieldError} records. Tolerates
+     * missing keys (each defaults to empty string) so consumers can
+     * still inspect the list when the service drifts.
+     *
+     * @param errorsNode the {@code errors} sub-tree, or {@code null}
+     * @return the parsed list (never {@code null}; empty when the
+     *         input is {@code null} / not an array)
+     */
+    public static List<FieldError> parseFieldErrors(JsonNode errorsNode) {
+        if (errorsNode == null || !errorsNode.isArray()) {
+            return List.of();
+        }
+        List<FieldError> out = new ArrayList<>();
+        Iterator<JsonNode> it = errorsNode.elements();
+        while (it.hasNext()) {
+            JsonNode entry = it.next();
+            if (entry == null || !entry.isObject()) {
+                continue;
+            }
+            out.add(new FieldError(
+                    entry.path("code").asText(""),
+                    entry.path("path").asText(""),
+                    entry.path("message").asText("")));
+        }
+        return out;
+    }
+
+    // ------------------------------------------------------------------
+    // 26.5.7 unification -- agent-surface DTOs reused on user-tier paths
+    // ------------------------------------------------------------------
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    public record ProposeCandidatesRequest(
+            @JsonProperty("source_id") String sourceId,
+            String domain,
+            String jurisdiction,
+            @JsonProperty("max_chunks") Integer maxChunks,
+            String instructions,
+            String actor) {
+    }
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public record CandidateRecord(
+            String id,
+            String status,
+            @JsonProperty("source_id") String sourceId,
+            String title,
+            String body,
+            String summary,
+            String domain,
+            String jurisdiction,
+            List<String> tags,
+            List<Citation> citations,
+            Double score,
+            String rationale,
+            @JsonProperty("materialised_knowledge_item_id") String materialisedKnowledgeItemId,
+            @JsonProperty("materialised_version") Integer materialisedVersion,
+            String actor,
+            @JsonProperty("created_at") OffsetDateTime createdAt,
+            @JsonProperty("decided_at") OffsetDateTime decidedAt,
+            Map<String, Object> metadata) {
+    }
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public record Provenance(
+            @JsonProperty("knowledge_item_id") String knowledgeItemId,
+            int version,
+            List<Citation> citations,
+            List<Map<String, Object>> sources,
+            List<KnowledgeVersion> history) {
+    }
+
+    // ------------------------------------------------------------------
+    // 26.5.7 unification -- Workspace CRUD DTOs
+    // ------------------------------------------------------------------
+
+    /**
+     * Request body for ``POST /api/v1/workspaces``.
+     *
+     * <p>The {@code id} is caller-chosen (slug, {@code <= 64} chars);
+     * the tenant scope comes from the {@code X-Tenant-Id} header so
+     * a caller cannot create a workspace under another tenant.
+     */
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    public record WorkspaceCreate(
+            String id,
+            String name,
+            String status,
+            List<Object> scope,
+            @JsonProperty("sme_roster") List<Object> smeRoster,
+            @JsonProperty("retention_days") Integer retentionDays,
+            String jurisdiction) {
+
+        /**
+         * Convenience constructor for the most common case: just the
+         * {@code id} and {@code name} with the {@code status} default
+         * of {@code "active"}.
+         */
+        public static WorkspaceCreate of(String id, String name) {
+            return new WorkspaceCreate(id, name, "active", null, null, null, null);
+        }
+    }
+
+    /**
+     * Request body for ``PATCH /api/v1/workspaces/{id}``.
+     *
+     * <p>Every field is optional; only fields present in the payload
+     * are applied server-side. Null fields are omitted from the
+     * outbound JSON via {@link JsonInclude.Include#NON_NULL}.
+     */
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    public record WorkspaceUpdate(
+            String name,
+            String status,
+            List<Object> scope,
+            @JsonProperty("sme_roster") List<Object> smeRoster,
+            @JsonProperty("retention_days") Integer retentionDays,
+            String jurisdiction) {
+    }
+
+    /**
+     * Canonical workspace shape returned by
+     * ``GET /api/v1/workspaces/{id}``.
+     */
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public record WorkspaceSpec(
+            String id,
+            @JsonProperty("tenant_id") String tenantId,
+            String name,
+            String status,
+            List<Object> scope,
+            @JsonProperty("sme_roster") List<Object> smeRoster,
+            @JsonProperty("retention_days") Integer retentionDays,
+            String jurisdiction,
+            @JsonProperty("created_at") OffsetDateTime createdAt,
+            @JsonProperty("updated_at") OffsetDateTime updatedAt,
+            @JsonProperty("closed_at") OffsetDateTime closedAt) {
+    }
+
+    /**
+     * Compact row shape from ``GET /api/v1/workspaces`` -- omits
+     * {@code scope} + {@code sme_roster} details.
+     */
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public record WorkspaceSummary(
+            String id,
+            @JsonProperty("tenant_id") String tenantId,
+            String name,
+            String status,
+            @JsonProperty("retention_days") Integer retentionDays,
+            String jurisdiction,
+            @JsonProperty("created_at") OffsetDateTime createdAt,
+            @JsonProperty("updated_at") OffsetDateTime updatedAt,
+            @JsonProperty("closed_at") OffsetDateTime closedAt) {
+    }
+
+    // ------------------------------------------------------------------
+    // 26.5.7 unification -- Agent token CRUD DTOs
+    // ------------------------------------------------------------------
+
+    /**
+     * Request body for ``POST /api/v1/agent-tokens``.
+     *
+     * <p>{@code workspaceAllowlist} is optional -- {@code null} means
+     * the token can be used in any workspace under the tenant.
+     * {@code scopes} defaults to {@code ["*"]} (all scopes); the
+     * verify path treats {@code "*"} as a wildcard.
+     */
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    public record AgentTokenMintRequest(
+            String name,
+            @JsonProperty("workspace_allowlist") List<String> workspaceAllowlist,
+            List<String> scopes,
+            @JsonProperty("rate_limit_rpm") Integer rateLimitRpm,
+            @JsonProperty("expires_at") OffsetDateTime expiresAt) {
+
+        public static AgentTokenMintRequest of(String name) {
+            return new AgentTokenMintRequest(name, null, List.of("*"), null, null);
+        }
+    }
+
+    /**
+     * Token surface as listed back to user-tier callers -- secret omitted.
+     *
+     * <p>Every read path through ``GET /api/v1/agent-tokens`` returns
+     * this shape; the raw token is only available on
+     * {@link AgentTokenCreated} (mint response).
+     */
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public record AgentTokenSummary(
+            String id,
+            String name,
+            String prefix,
+            @JsonProperty("workspace_allowlist") List<String> workspaceAllowlist,
+            List<String> scopes,
+            @JsonProperty("rate_limit_rpm") Integer rateLimitRpm,
+            @JsonProperty("expires_at") OffsetDateTime expiresAt,
+            @JsonProperty("created_at") OffsetDateTime createdAt,
+            @JsonProperty("created_by") String createdBy,
+            @JsonProperty("revoked_at") OffsetDateTime revokedAt,
+            @JsonProperty("last_used_at") OffsetDateTime lastUsedAt) {
+    }
+
+    /**
+     * Mint response: includes the full {@code token} exactly once.
+     *
+     * <p>Subsequent reads only ever expose {@code prefix} -- the
+     * secret hash is stored server-side and never returned. Callers
+     * MUST capture {@code token} at mint time; there is no recovery
+     * path.
+     */
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public record AgentTokenCreated(
+            String id,
+            String name,
+            String prefix,
+            @JsonProperty("workspace_allowlist") List<String> workspaceAllowlist,
+            List<String> scopes,
+            @JsonProperty("rate_limit_rpm") Integer rateLimitRpm,
+            @JsonProperty("expires_at") OffsetDateTime expiresAt,
+            @JsonProperty("created_at") OffsetDateTime createdAt,
+            @JsonProperty("created_by") String createdBy,
+            @JsonProperty("revoked_at") OffsetDateTime revokedAt,
+            @JsonProperty("last_used_at") OffsetDateTime lastUsedAt,
+            String token) {
+    }
+
+    // ------------------------------------------------------------------
+    // 26.5.7 unification -- Workspace lifecycle event DTOs
+    // ------------------------------------------------------------------
+
+    /**
+     * A new workspace row landed in ``canon_workspaces``.
+     *
+     * <p>Emitted from ``POST /api/v1/workspaces`` on the
+     * {@link #CANON_WORKSPACES_TOPIC} topic. Payload mirrors the
+     * wire {@link WorkspaceSpec} so consumers can rebuild a cache
+     * row directly from the event body.
+     */
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public record WorkspaceCreated(
+            @JsonProperty("event_type") String eventType,
+            @JsonProperty("tenant_id") String tenantId,
+            @JsonProperty("workspace_id") String workspaceId,
+            @JsonProperty("occurred_at") OffsetDateTime occurredAt,
+            String name,
+            List<Object> scope,
+            @JsonProperty("sme_roster") List<Object> smeRoster,
+            @JsonProperty("retention_days") Integer retentionDays,
+            String jurisdiction) {
+
+        public WorkspaceCreated {
+            if (eventType == null) {
+                eventType = "workspace.created";
+            }
+        }
+    }
+
+    /**
+     * An existing workspace row was sparsely patched.
+     *
+     * <p>Emitted from ``PATCH /api/v1/workspaces/{id}`` on the
+     * {@link #CANON_WORKSPACES_TOPIC} topic. The event carries the
+     * post-update row state (not just the patched fields) so
+     * consumers can replace cached rows wholesale.
+     */
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public record WorkspaceUpdated(
+            @JsonProperty("event_type") String eventType,
+            @JsonProperty("tenant_id") String tenantId,
+            @JsonProperty("workspace_id") String workspaceId,
+            @JsonProperty("occurred_at") OffsetDateTime occurredAt,
+            String name,
+            List<Object> scope,
+            @JsonProperty("sme_roster") List<Object> smeRoster,
+            @JsonProperty("retention_days") Integer retentionDays,
+            String jurisdiction) {
+
+        public WorkspaceUpdated {
+            if (eventType == null) {
+                eventType = "workspace.updated";
+            }
+        }
+    }
+
+    /**
+     * A workspace was closed (flycanon's terminal lifecycle state).
+     *
+     * <p>Emitted from ``POST /api/v1/workspaces/{id}:close`` on the
+     * {@link #CANON_WORKSPACES_TOPIC} topic. flycanon has no
+     * hard-delete route -- closing is the terminal transition; the
+     * row is preserved for audit. The event name
+     * {@code workspace.deleted} matches the canonical lifecycle
+     * vocabulary so downstream consumers don't have to special-case
+     * flycanon's soft-delete semantics.
+     */
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public record WorkspaceDeleted(
+            @JsonProperty("event_type") String eventType,
+            @JsonProperty("tenant_id") String tenantId,
+            @JsonProperty("workspace_id") String workspaceId,
+            @JsonProperty("occurred_at") OffsetDateTime occurredAt) {
+
+        public WorkspaceDeleted {
+            if (eventType == null) {
+                eventType = "workspace.deleted";
+            }
+        }
     }
 }
