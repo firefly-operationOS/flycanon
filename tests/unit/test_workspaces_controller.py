@@ -20,20 +20,52 @@ Coverage matches the Plan 4 contract:
 from __future__ import annotations
 
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 from sqlalchemy.exc import IntegrityError
 
+from flycanon.config import CanonSettings
+from flycanon.core.services.events import WorkspaceEventPublisher
 from flycanon.interfaces.dtos.workspace import (
     WorkspaceCreate,
     WorkspaceSpec,
     WorkspaceSummary,
     WorkspaceUpdate,
 )
+from flycanon.interfaces.dtos.workspace_event import (
+    WorkspaceCreated,
+    WorkspaceDeleted,
+    WorkspaceEventBase,
+    WorkspaceUpdated,
+)
 from flycanon.interfaces.enums.workspace_status import WorkspaceStatus
 from flycanon.models.repositories.workspace_repository import WorkspaceRepository
 from flycanon.web.controllers.workspaces_controller import WorkspacesController
 from flycanon.web.conventions import WorkspaceNotFound
+
+
+class _NullPublisher:
+    """No-op pyfly :class:`EventPublisher` stub for unit tests.
+
+    The controller's lifecycle paths each call into
+    :class:`WorkspaceEventPublisher`, which in production forwards to
+    pyfly's bus. We don't exercise the bus in these tests -- the
+    in-process listener fan-out (see ``_recording_publisher``) is
+    enough to assert what each route emits.
+    """
+
+    async def publish(self, **_: Any) -> None:
+        return None
+
+    def subscribe(self, *_: Any, **__: Any) -> None:
+        return None
+
+    async def start(self) -> None:
+        return None
+
+    async def stop(self) -> None:
+        return None
 
 
 @pytest.fixture
@@ -42,8 +74,32 @@ def workspace_repo(engine, session_factory) -> WorkspaceRepository:
 
 
 @pytest.fixture
-def controller(workspace_repo: WorkspaceRepository) -> WorkspacesController:
-    return WorkspacesController(workspace_repo)
+def captured_events() -> list[WorkspaceEventBase]:
+    return []
+
+
+@pytest.fixture
+def event_publisher(
+    captured_events: list[WorkspaceEventBase],
+) -> WorkspaceEventPublisher:
+    pub = WorkspaceEventPublisher(
+        event_publisher=_NullPublisher(),
+        settings=CanonSettings(),
+    )
+
+    async def _listener(event: WorkspaceEventBase) -> None:
+        captured_events.append(event)
+
+    pub.add_listener(_listener)
+    return pub
+
+
+@pytest.fixture
+def controller(
+    workspace_repo: WorkspaceRepository,
+    event_publisher: WorkspaceEventPublisher,
+) -> WorkspacesController:
+    return WorkspacesController(workspace_repo, event_publisher)
 
 
 def _request(tenant_id: str = "acme", workspace_id: str = "default") -> object:
@@ -185,3 +241,120 @@ class TestClose:
     async def test_close_unknown_raises_404(self, controller: WorkspacesController) -> None:
         with pytest.raises(WorkspaceNotFound):
             await controller.close(_request(tenant_id="acme"), "ws-missing")
+
+
+class TestLifecycleEvents:
+    """Each mutation route emits the matching workspace lifecycle event.
+
+    The fixture-attached listener captures every event the publisher
+    fans out -- production code goes through the same code path,
+    additionally pushing onto pyfly's bus (stubbed out as a no-op
+    here).
+    """
+
+    @pytest.mark.asyncio
+    async def test_post_emits_workspace_created(
+        self,
+        controller: WorkspacesController,
+        captured_events: list[WorkspaceEventBase],
+    ) -> None:
+        await controller.create(
+            _request(tenant_id="acme"),
+            WorkspaceCreate(id="ws-1", name="Q3 audit", status=WorkspaceStatus.active),
+        )
+        assert len(captured_events) == 1
+        event = captured_events[0]
+        assert isinstance(event, WorkspaceCreated)
+        assert event.event_type == "workspace.created"
+        assert event.tenant_id == "acme"
+        assert event.workspace_id == "ws-1"
+        assert event.name == "Q3 audit"
+        assert event.occurred_at.tzinfo is not None
+
+    @pytest.mark.asyncio
+    async def test_patch_emits_workspace_updated(
+        self,
+        controller: WorkspacesController,
+        captured_events: list[WorkspaceEventBase],
+    ) -> None:
+        await controller.create(
+            _request(tenant_id="acme"),
+            WorkspaceCreate(id="ws-1", name="Original", status=WorkspaceStatus.active),
+        )
+        captured_events.clear()  # drop the WorkspaceCreated from create()
+        await controller.update(
+            _request(tenant_id="acme"),
+            "ws-1",
+            WorkspaceUpdate(name="Renamed"),
+        )
+        assert len(captured_events) == 1
+        event = captured_events[0]
+        assert isinstance(event, WorkspaceUpdated)
+        assert event.event_type == "workspace.updated"
+        assert event.tenant_id == "acme"
+        assert event.workspace_id == "ws-1"
+        assert event.name == "Renamed"
+
+    @pytest.mark.asyncio
+    async def test_close_emits_workspace_deleted(
+        self,
+        controller: WorkspacesController,
+        captured_events: list[WorkspaceEventBase],
+    ) -> None:
+        await controller.create(
+            _request(tenant_id="acme"),
+            WorkspaceCreate(id="ws-1", name="A", status=WorkspaceStatus.active),
+        )
+        captured_events.clear()
+        await controller.close(_request(tenant_id="acme"), "ws-1")
+        assert len(captured_events) == 1
+        event = captured_events[0]
+        assert isinstance(event, WorkspaceDeleted)
+        assert event.event_type == "workspace.deleted"
+        assert event.tenant_id == "acme"
+        assert event.workspace_id == "ws-1"
+
+    @pytest.mark.asyncio
+    async def test_failed_create_publishes_no_event(
+        self,
+        controller: WorkspacesController,
+        captured_events: list[WorkspaceEventBase],
+    ) -> None:
+        """Best-effort consistency: event only fires after a successful repo write.
+
+        Duplicate-id ``POST`` raises ``IntegrityError`` *before* the
+        controller reaches the publish call -- the listener must
+        not see a phantom WorkspaceCreated.
+        """
+        body = WorkspaceCreate(id="ws-1", name="A", status=WorkspaceStatus.active)
+        await controller.create(_request(tenant_id="acme"), body)
+        captured_events.clear()
+        with pytest.raises(IntegrityError):
+            await controller.create(_request(tenant_id="acme"), body)
+        assert captured_events == []
+
+    @pytest.mark.asyncio
+    async def test_failed_update_publishes_no_event(
+        self,
+        controller: WorkspacesController,
+        captured_events: list[WorkspaceEventBase],
+    ) -> None:
+        """A PATCH against a missing workspace must not publish."""
+        with pytest.raises(WorkspaceNotFound):
+            await controller.update(
+                _request(tenant_id="acme"),
+                "ws-missing",
+                WorkspaceUpdate(name="x"),
+            )
+        assert captured_events == []
+
+    @pytest.mark.asyncio
+    async def test_failed_close_publishes_no_event(
+        self,
+        controller: WorkspacesController,
+        captured_events: list[WorkspaceEventBase],
+    ) -> None:
+        """A ``:close`` against a missing workspace must not publish."""
+        with pytest.raises(WorkspaceNotFound):
+            await controller.close(_request(tenant_id="acme"), "ws-missing")
+        assert captured_events == []

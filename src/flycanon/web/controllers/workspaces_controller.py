@@ -41,6 +41,7 @@ from pyfly.container import rest_controller
 from pyfly.web import Body, PathVar, Valid, get_mapping, patch_mapping, post_mapping, request_mapping
 from starlette.requests import Request
 
+from flycanon.core.services.events import WorkspaceEventPublisher
 from flycanon.interfaces.dtos.workspace import (
     WorkspaceCreate,
     WorkspaceSpec,
@@ -59,8 +60,13 @@ logger = logging.getLogger(__name__)
 class WorkspacesController:
     """REST adapter for ``canon_workspaces`` CRUD."""
 
-    def __init__(self, repository: WorkspaceRepository) -> None:
+    def __init__(
+        self,
+        repository: WorkspaceRepository,
+        event_publisher: WorkspaceEventPublisher,
+    ) -> None:
         self._repository = repository
+        self._event_publisher = event_publisher
 
     @post_mapping("", status_code=201)
     async def create(
@@ -95,6 +101,9 @@ class WorkspacesController:
             # read-after-write must hit. If it doesn't, something
             # below the repo is broken -- surface it loudly.
             raise RuntimeError(f"workspace {body.id!r} inserted but not readable -- check repository wiring")
+        # Emit the lifecycle event after the durable write succeeded
+        # (best-effort consistency; see WorkspaceEventPublisher).
+        await self._event_publisher.publish_created(saved)
         return _to_spec(saved)
 
     @get_mapping("")
@@ -152,6 +161,7 @@ class WorkspacesController:
         updated = await self._repository.update(ctx.tenant_id, workspace_id, columns)
         if updated is None:
             raise WorkspaceNotFound(f"workspace {workspace_id!r} not found")
+        await self._event_publisher.publish_updated(updated)
         return _to_spec(updated)
 
     @post_mapping("/{workspace_id}:close")
@@ -187,6 +197,12 @@ class WorkspacesController:
                 ctx.tenant_id,
                 workspace_id,
             )
+        # Close is flycanon's terminal lifecycle transition --
+        # downstream consumers see this as the "delete" signal.
+        await self._event_publisher.publish_deleted(
+            tenant_id=ctx.tenant_id,
+            workspace_id=workspace_id,
+        )
         return _to_spec(row)
 
 

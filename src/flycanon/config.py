@@ -42,11 +42,15 @@ class CanonSettings(BaseSettings):
     eda_adapter: str = Field(default="postgres", description="memory | postgres | redis | kafka")
     redis_url: str = "redis://localhost:6379/0"
 
-    # Topics for the three event families flycanon publishes. Downstream
+    # Topics for the event families flycanon publishes. Downstream
     # services subscribe to these to keep their projections in sync.
     ingest_topic: str = "flycanon.ingest"
     knowledge_topic: str = "flycanon.knowledge"
     audit_topic: str = "flycanon.audit"
+    # Workspace lifecycle topic. The ``v1`` suffix is the contract
+    # version; future incompatible changes go on a parallel topic
+    # (``canon.workspaces.v2``) so consumers can migrate gradually.
+    workspace_topic: str = "canon.workspaces.v1"
 
     # Event-type names for each broadcast. Kept stable -- consumers
     # pattern-match on these.
@@ -59,6 +63,9 @@ class CanonSettings(BaseSettings):
     candidate_accepted_event: str = "CandidateAccepted"
     candidate_rejected_event: str = "CandidateRejected"
     audit_event: str = "AuditEventRecorded"
+    workspace_created_event: str = "WorkspaceCreated"
+    workspace_updated_event: str = "WorkspaceUpdated"
+    workspace_deleted_event: str = "WorkspaceDeleted"
 
     # Async-ingest worker budget.
     ingest_max_attempts: int = 3

@@ -52,6 +52,12 @@ from flycanon.interfaces.dtos.workspace import (
     WorkspaceSummary,
     WorkspaceUpdate,
 )
+from flycanon.interfaces.dtos.workspace_event import (
+    WorkspaceCreated,
+    WorkspaceDeleted,
+    WorkspaceEventBase,
+    WorkspaceUpdated,
+)
 
 __all__ = [
     "AcceptCandidateRequest",
@@ -87,7 +93,11 @@ __all__ = [
     "UpdateKnowledgeRequest",
     "VersionInfo",
     "WorkspaceCreate",
+    "WorkspaceCreated",
+    "WorkspaceDeleted",
+    "WorkspaceEventBase",
     "WorkspaceSpec",
     "WorkspaceSummary",
     "WorkspaceUpdate",
+    "WorkspaceUpdated",
 ]
