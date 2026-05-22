@@ -11,7 +11,7 @@ from __future__ import annotations
 from datetime import datetime
 from decimal import Decimal
 
-from sqlalchemy import DateTime, Integer, Numeric, String, func
+from sqlalchemy import DateTime, Index, Integer, Numeric, String, func, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from flycanon.models.entities.base import Base
@@ -21,6 +21,20 @@ class CostEventRow(Base):
     __tablename__ = "canon_cost_events"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    tenant_id: Mapped[str] = mapped_column(
+        String(64),
+        nullable=False,
+        server_default=text("'default'"),
+        default="default",
+        index=True,
+    )
+    workspace_id: Mapped[str] = mapped_column(
+        String(64),
+        nullable=False,
+        server_default=text("'default'"),
+        default="default",
+        index=True,
+    )
     agent_name: Mapped[str] = mapped_column(String(128), nullable=False)
     model: Mapped[str] = mapped_column(String(128), nullable=False)
     input_tokens: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
@@ -34,4 +48,8 @@ class CostEventRow(Base):
     subject_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     occurred_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+    __table_args__ = (
+        Index("ix_canon_cost_events_tenant_workspace", "tenant_id", "workspace_id"),
     )

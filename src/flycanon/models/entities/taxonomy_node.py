@@ -12,7 +12,17 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, Index, Integer, String, Text, UniqueConstraint, func
+from sqlalchemy import (
+    DateTime,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+    func,
+    text,
+)
 from sqlalchemy.orm import Mapped, mapped_column
 
 from flycanon.models.entities.base import Base
@@ -25,6 +35,20 @@ class TaxonomyNodeRow(Base):
         String(36),
         primary_key=True,
         default=lambda: str(uuid.uuid4()),
+    )
+    tenant_id: Mapped[str] = mapped_column(
+        String(64),
+        nullable=False,
+        server_default=text("'default'"),
+        default="default",
+        index=True,
+    )
+    workspace_id: Mapped[str] = mapped_column(
+        String(64),
+        nullable=False,
+        server_default=text("'default'"),
+        default="default",
+        index=True,
     )
     parent_id: Mapped[str | None] = mapped_column(
         String(36),
@@ -50,4 +74,5 @@ class TaxonomyNodeRow(Base):
     __table_args__ = (
         UniqueConstraint("parent_id", "slug", name="uq_canon_taxonomy_parent_slug"),
         Index("ix_canon_taxonomy_domain_depth", "domain", "depth"),
+        Index("ix_canon_taxonomy_nodes_tenant_workspace", "tenant_id", "workspace_id"),
     )

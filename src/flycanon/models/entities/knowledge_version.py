@@ -16,11 +16,13 @@ from sqlalchemy import (
     JSON,
     DateTime,
     ForeignKey,
+    Index,
     Integer,
     String,
     Text,
     UniqueConstraint,
     func,
+    text,
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -34,6 +36,20 @@ class KnowledgeVersionRow(Base):
         String(36),
         primary_key=True,
         default=lambda: str(uuid.uuid4()),
+    )
+    tenant_id: Mapped[str] = mapped_column(
+        String(64),
+        nullable=False,
+        server_default=text("'default'"),
+        default="default",
+        index=True,
+    )
+    workspace_id: Mapped[str] = mapped_column(
+        String(64),
+        nullable=False,
+        server_default=text("'default'"),
+        default="default",
+        index=True,
     )
     knowledge_item_id: Mapped[str] = mapped_column(
         String(36),
@@ -72,5 +88,10 @@ class KnowledgeVersionRow(Base):
             "knowledge_item_id",
             "version",
             name="uq_canon_knowledge_versions_item_version",
+        ),
+        Index(
+            "ix_canon_knowledge_versions_tenant_workspace",
+            "tenant_id",
+            "workspace_id",
         ),
     )

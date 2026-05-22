@@ -20,7 +20,7 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import JSON, DateTime, ForeignKey, Index, Integer, String, Text, func
+from sqlalchemy import JSON, DateTime, ForeignKey, Index, Integer, String, Text, func, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from flycanon.models.entities.base import Base
@@ -33,6 +33,20 @@ class KnowledgeChunkRow(Base):
         String(36),
         primary_key=True,
         default=lambda: str(uuid.uuid4()),
+    )
+    tenant_id: Mapped[str] = mapped_column(
+        String(64),
+        nullable=False,
+        server_default=text("'default'"),
+        default="default",
+        index=True,
+    )
+    workspace_id: Mapped[str] = mapped_column(
+        String(64),
+        nullable=False,
+        server_default=text("'default'"),
+        default="default",
+        index=True,
     )
     source_id: Mapped[str] = mapped_column(
         String(36),
@@ -68,4 +82,7 @@ class KnowledgeChunkRow(Base):
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
 
-    __table_args__ = (Index("ix_canon_chunks_source_idx", "source_id", "index_in_source"),)
+    __table_args__ = (
+        Index("ix_canon_chunks_source_idx", "source_id", "index_in_source"),
+        Index("ix_canon_chunks_tenant_workspace", "tenant_id", "workspace_id"),
+    )

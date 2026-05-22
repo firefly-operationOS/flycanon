@@ -22,6 +22,7 @@ from sqlalchemy import (
     String,
     Text,
     func,
+    text,
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -35,6 +36,20 @@ class CitationRow(Base):
         String(36),
         primary_key=True,
         default=lambda: str(uuid.uuid4()),
+    )
+    tenant_id: Mapped[str] = mapped_column(
+        String(64),
+        nullable=False,
+        server_default=text("'default'"),
+        default="default",
+        index=True,
+    )
+    workspace_id: Mapped[str] = mapped_column(
+        String(64),
+        nullable=False,
+        server_default=text("'default'"),
+        default="default",
+        index=True,
     )
     knowledge_version_id: Mapped[str] = mapped_column(
         String(36),
@@ -69,4 +84,5 @@ class CitationRow(Base):
             "knowledge_version_id",
             "chunk_id",
         ),
+        Index("ix_canon_citations_tenant_workspace", "tenant_id", "workspace_id"),
     )

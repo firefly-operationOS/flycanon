@@ -16,6 +16,7 @@ from sqlalchemy import (
     String,
     Text,
     func,
+    text,
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -29,6 +30,20 @@ class IngestJobRow(Base):
         String(64),
         primary_key=True,
         default=lambda: str(uuid.uuid4()),
+    )
+    tenant_id: Mapped[str] = mapped_column(
+        String(64),
+        nullable=False,
+        server_default=text("'default'"),
+        default="default",
+        index=True,
+    )
+    workspace_id: Mapped[str] = mapped_column(
+        String(64),
+        nullable=False,
+        server_default=text("'default'"),
+        default="default",
+        index=True,
     )
     status: Mapped[str] = mapped_column(String(24), nullable=False, index=True)
     source_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
@@ -59,6 +74,10 @@ class IngestJobRow(Base):
         onupdate=func.now(),
     )
 
+    __table_args__ = (
+        Index("ix_canon_ingest_jobs_tenant_workspace", "tenant_id", "workspace_id"),
+    )
+
 
 class IngestJobEventRow(Base):
     """Per-stage progress event a worker emits during an ingest job.
@@ -72,6 +91,20 @@ class IngestJobEventRow(Base):
     __tablename__ = "canon_ingest_job_events"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    tenant_id: Mapped[str] = mapped_column(
+        String(64),
+        nullable=False,
+        server_default=text("'default'"),
+        default="default",
+        index=True,
+    )
+    workspace_id: Mapped[str] = mapped_column(
+        String(64),
+        nullable=False,
+        server_default=text("'default'"),
+        default="default",
+        index=True,
+    )
     job_id: Mapped[str] = mapped_column(
         String(64),
         ForeignKey("canon_ingest_jobs.id", ondelete="CASCADE"),
@@ -89,5 +122,10 @@ class IngestJobEventRow(Base):
             "ix_canon_ingest_job_events_job_occurred",
             "job_id",
             "occurred_at",
+        ),
+        Index(
+            "ix_canon_ingest_job_events_tenant_workspace",
+            "tenant_id",
+            "workspace_id",
         ),
     )

@@ -17,6 +17,7 @@ from sqlalchemy import (
     String,
     Text,
     func,
+    text,
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -30,6 +31,20 @@ class CandidateRow(Base):
         String(36),
         primary_key=True,
         default=lambda: str(uuid.uuid4()),
+    )
+    tenant_id: Mapped[str] = mapped_column(
+        String(64),
+        nullable=False,
+        server_default=text("'default'"),
+        default="default",
+        index=True,
+    )
+    workspace_id: Mapped[str] = mapped_column(
+        String(64),
+        nullable=False,
+        server_default=text("'default'"),
+        default="default",
+        index=True,
     )
     status: Mapped[str] = mapped_column(String(24), nullable=False, index=True)
 
@@ -69,4 +84,7 @@ class CandidateRow(Base):
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
 
-    __table_args__ = (Index("ix_canon_candidates_source_status", "source_id", "status"),)
+    __table_args__ = (
+        Index("ix_canon_candidates_source_status", "source_id", "status"),
+        Index("ix_canon_candidates_tenant_workspace", "tenant_id", "workspace_id"),
+    )

@@ -16,11 +16,13 @@ from datetime import datetime
 from sqlalchemy import (
     DateTime,
     ForeignKey,
+    Index,
     Integer,
     String,
     Text,
     UniqueConstraint,
     func,
+    text,
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -34,6 +36,20 @@ class KnowledgeRelationRow(Base):
         String(64),
         primary_key=True,
         default=lambda: str(uuid.uuid4()),
+    )
+    tenant_id: Mapped[str] = mapped_column(
+        String(64),
+        nullable=False,
+        server_default=text("'default'"),
+        default="default",
+        index=True,
+    )
+    workspace_id: Mapped[str] = mapped_column(
+        String(64),
+        nullable=False,
+        server_default=text("'default'"),
+        default="default",
+        index=True,
     )
     from_item_id: Mapped[str] = mapped_column(
         String(64),
@@ -62,5 +78,10 @@ class KnowledgeRelationRow(Base):
             "to_item_id",
             "kind",
             name="uq_canon_knowledge_relations_from_to_kind",
+        ),
+        Index(
+            "ix_canon_knowledge_relations_tenant_workspace",
+            "tenant_id",
+            "workspace_id",
         ),
     )

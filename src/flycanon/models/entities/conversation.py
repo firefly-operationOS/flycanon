@@ -18,6 +18,7 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
     func,
+    text,
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -31,6 +32,20 @@ class ConversationRow(Base):
         String(64),
         primary_key=True,
         default=lambda: str(uuid.uuid4()),
+    )
+    tenant_id: Mapped[str] = mapped_column(
+        String(64),
+        nullable=False,
+        server_default=text("'default'"),
+        default="default",
+        index=True,
+    )
+    workspace_id: Mapped[str] = mapped_column(
+        String(64),
+        nullable=False,
+        server_default=text("'default'"),
+        default="default",
+        index=True,
     )
     title: Mapped[str | None] = mapped_column(String(512), nullable=True)
     summary: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -48,11 +63,29 @@ class ConversationRow(Base):
         onupdate=func.now(),
     )
 
+    __table_args__ = (
+        Index("ix_canon_conversations_tenant_workspace", "tenant_id", "workspace_id"),
+    )
+
 
 class ConversationTurnRow(Base):
     __tablename__ = "canon_conversation_turns"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    tenant_id: Mapped[str] = mapped_column(
+        String(64),
+        nullable=False,
+        server_default=text("'default'"),
+        default="default",
+        index=True,
+    )
+    workspace_id: Mapped[str] = mapped_column(
+        String(64),
+        nullable=False,
+        server_default=text("'default'"),
+        default="default",
+        index=True,
+    )
     conversation_id: Mapped[str] = mapped_column(
         String(64),
         ForeignKey("canon_conversations.id", ondelete="CASCADE"),
@@ -79,5 +112,10 @@ class ConversationTurnRow(Base):
             "ix_canon_conversation_turns_conv_created",
             "conversation_id",
             "created_at",
+        ),
+        Index(
+            "ix_canon_conversation_turns_tenant_workspace",
+            "tenant_id",
+            "workspace_id",
         ),
     )

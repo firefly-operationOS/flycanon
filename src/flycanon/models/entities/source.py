@@ -11,7 +11,7 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import JSON, DateTime, Index, Integer, String, Text, func
+from sqlalchemy import JSON, DateTime, Index, Integer, String, Text, func, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from flycanon.models.entities.base import Base
@@ -25,6 +25,20 @@ class SourceRow(Base):
         primary_key=True,
         default=lambda: str(uuid.uuid4()),
         doc="Stable string UUID used as the public source id.",
+    )
+    tenant_id: Mapped[str] = mapped_column(
+        String(64),
+        nullable=False,
+        server_default=text("'default'"),
+        default="default",
+        index=True,
+    )
+    workspace_id: Mapped[str] = mapped_column(
+        String(64),
+        nullable=False,
+        server_default=text("'default'"),
+        default="default",
+        index=True,
     )
 
     # The source kind drives loader selection. ``unknown`` is the
@@ -68,4 +82,5 @@ class SourceRow(Base):
             postgresql_where=(content_sha256.is_not(None)),
             sqlite_where=(content_sha256.is_not(None)),
         ),
+        Index("ix_canon_sources_tenant_workspace", "tenant_id", "workspace_id"),
     )
