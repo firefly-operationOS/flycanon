@@ -74,9 +74,7 @@ class IngestJobRow(Base):
         onupdate=func.now(),
     )
 
-    __table_args__ = (
-        Index("ix_canon_ingest_jobs_tenant_workspace", "tenant_id", "workspace_id"),
-    )
+    __table_args__ = (Index("ix_canon_ingest_jobs_tenant_workspace", "tenant_id", "workspace_id"),)
 
 
 class IngestJobEventRow(Base):

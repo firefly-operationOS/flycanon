@@ -63,9 +63,7 @@ class ConversationRow(Base):
         onupdate=func.now(),
     )
 
-    __table_args__ = (
-        Index("ix_canon_conversations_tenant_workspace", "tenant_id", "workspace_id"),
-    )
+    __table_args__ = (Index("ix_canon_conversations_tenant_workspace", "tenant_id", "workspace_id"),)
 
 
 class ConversationTurnRow(Base):

@@ -50,6 +50,4 @@ class CostEventRow(Base):
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
 
-    __table_args__ = (
-        Index("ix_canon_cost_events_tenant_workspace", "tenant_id", "workspace_id"),
-    )
+    __table_args__ = (Index("ix_canon_cost_events_tenant_workspace", "tenant_id", "workspace_id"),)

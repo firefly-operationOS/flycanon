@@ -127,9 +127,7 @@ class WorkspaceRepository:
     # Reads
     # ------------------------------------------------------------------
 
-    async def get(
-        self, tenant_id: str, workspace_id: str
-    ) -> dict[str, Any] | None:
+    async def get(self, tenant_id: str, workspace_id: str) -> dict[str, Any] | None:
         """Fetch a single workspace by composite key.
 
         Looking up by ``(tenant_id, workspace_id)`` -- rather than the

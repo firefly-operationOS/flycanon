@@ -52,10 +52,6 @@ class Workspace(Base):
         server_default=func.now(),
         onupdate=func.now(),
     )
-    closed_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
+    closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
-    __table_args__ = (
-        UniqueConstraint("tenant_id", "id", name="uq_canon_workspaces_tenant_id"),
-    )
+    __table_args__ = (UniqueConstraint("tenant_id", "id", name="uq_canon_workspaces_tenant_id"),)
