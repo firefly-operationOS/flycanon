@@ -82,9 +82,12 @@ def _make_intake(
     binary_normalizer.normalise = AsyncMock(return_value=[_artifact()])
 
     ingestion = MagicMock()
+
     # The ingestion service produces the in-memory SourceRow + chunks
     # synchronously -- intake_service.submit calls it as a plain func.
-    def _do_ingest(*, source: SourceRow, content: bytes, tenant_id: str, workspace_id: str) -> IngestionResult:
+    def _do_ingest(
+        *, source: SourceRow, content: bytes, tenant_id: str, workspace_id: str
+    ) -> IngestionResult:
         source.content_sha256 = "abc123"
         source.content_bytes = len(content)
         source.n_chunks = len(chunks or [])

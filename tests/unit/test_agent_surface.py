@@ -65,11 +65,7 @@ class _InMemoryAgentTokenRepository:
 
     async def get_by_prefix(self, prefix: str, *, tenant_id: str) -> dict | None:
         for row in self._rows.values():
-            if (
-                row["prefix"] == prefix
-                and row["tenant_id"] == tenant_id
-                and row["revoked_at"] is None
-            ):
+            if row["prefix"] == prefix and row["tenant_id"] == tenant_id and row["revoked_at"] is None:
                 return row
         return None
 

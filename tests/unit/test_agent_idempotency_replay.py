@@ -111,11 +111,7 @@ class _InMemoryAgentTokenRepository:
 
     async def get_by_prefix(self, prefix: str, *, tenant_id: str) -> dict | None:
         for row in self._rows.values():
-            if (
-                row["prefix"] == prefix
-                and row["tenant_id"] == tenant_id
-                and row["revoked_at"] is None
-            ):
+            if row["prefix"] == prefix and row["tenant_id"] == tenant_id and row["revoked_at"] is None:
                 return row
         return None
 
@@ -376,8 +372,12 @@ class TestAgentQueryAnswerReplay:
             idempotency_store=store,
         )
 
-        first = await controller.answer(_req(token, idempotency_key="q-K1"), AnswerRequest(question="why?", top_k=3))
-        second = await controller.answer(_req(token, idempotency_key="q-K1"), AnswerRequest(question="why?", top_k=3))
+        first = await controller.answer(
+            _req(token, idempotency_key="q-K1"), AnswerRequest(question="why?", top_k=3)
+        )
+        second = await controller.answer(
+            _req(token, idempotency_key="q-K1"), AnswerRequest(question="why?", top_k=3)
+        )
 
         queries.query.assert_awaited_once()
         assert first.model_dump(mode="json") == second.model_dump(mode="json")
@@ -425,8 +425,12 @@ class TestAgentSearchReplay:
             idempotency_store=store,
         )
 
-        first = await controller.search(_req(token, idempotency_key="s-K1"), SearchRequest(query="x", top_k=3))
-        second = await controller.search(_req(token, idempotency_key="s-K1"), SearchRequest(query="x", top_k=3))
+        first = await controller.search(
+            _req(token, idempotency_key="s-K1"), SearchRequest(query="x", top_k=3)
+        )
+        second = await controller.search(
+            _req(token, idempotency_key="s-K1"), SearchRequest(query="x", top_k=3)
+        )
 
         queries.query.assert_awaited_once()
         assert first.model_dump(mode="json") == second.model_dump(mode="json")
