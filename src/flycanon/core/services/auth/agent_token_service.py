@@ -191,7 +191,7 @@ class AgentTokenService:
             raise InvalidAgentToken("Unknown agent token.")
         if row["tenant_id"] != tenant_id:
             raise InvalidAgentToken("Token does not match the tenant header.")
-        if row["secret_hash"] != _hash(token):
+        if not secrets.compare_digest(row["secret_hash"], _hash(token)):
             raise InvalidAgentToken("Token signature mismatch.")
         expires = row.get("expires_at")
         if expires is not None and expires <= datetime.now(UTC):
@@ -202,7 +202,10 @@ class AgentTokenService:
         scopes = row.get("scopes_json") or []
         if "*" not in scopes and scope not in scopes:
             raise AgentScopeDenied(f"Token scope does not permit {scope!r}.")
-        await self._repo.mark_used(row["id"], at=datetime.now(UTC))
+        now = datetime.now(UTC)
+        last_used = row.get("last_used_at")
+        if last_used is None or (now - last_used).total_seconds() > 60:
+            await self._repo.mark_used(row["id"], at=now)
         return VerifiedAgentToken(token_id=row["id"], actor=f"agent:{prefix}", prefix=prefix)
 
     async def list_for_tenant(self, tenant_id: str) -> list[AgentTokenSummary]:

@@ -4,9 +4,11 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
+from unittest.mock import AsyncMock
 
 import pytest
 
+from flycanon.core.services.auth import agent_token_service as ats_module
 from flycanon.core.services.auth.agent_token_service import (
     AgentScopeDenied,
     AgentTokenExpired,
@@ -238,3 +240,136 @@ async def test_list_omits_secret(service: AgentTokenService) -> None:
     assert hasattr(s, "prefix")
     assert not hasattr(s, "secret_hash")
     assert not hasattr(s, "token")
+
+
+@pytest.mark.asyncio
+async def test_verify_uses_constant_time_comparison(
+    service: AgentTokenService,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The verify path must compare token hashes via ``secrets.compare_digest``."""
+    minted = await service.mint(
+        MintRequest(
+            tenant_id="acme",
+            name="ci-runner",
+            workspace_allowlist=None,
+            scopes=["agent.discoveries:validate"],
+            rate_limit_rpm=None,
+            expires_at=None,
+        ),
+        actor="user:alice",
+    )
+
+    real_compare = ats_module.secrets.compare_digest
+    call_count = 0
+
+    def counting_compare(a: object, b: object) -> bool:
+        nonlocal call_count
+        call_count += 1
+        return real_compare(a, b)
+
+    monkeypatch.setattr(ats_module.secrets, "compare_digest", counting_compare)
+
+    await service.verify(
+        minted.token,
+        tenant_id="acme",
+        workspace_id="ws-x",
+        scope="agent.discoveries:validate",
+    )
+    assert call_count >= 1, "verify must call secrets.compare_digest on the token hash"
+
+
+@pytest.mark.asyncio
+async def test_mark_used_skipped_when_recently_used(
+    repo: _InMemoryAgentTokenRepository,
+    service: AgentTokenService,
+) -> None:
+    """A verify within the 60s dedup window must NOT trigger mark_used."""
+    minted = await service.mint(
+        MintRequest(
+            tenant_id="acme",
+            name="ci-runner",
+            workspace_allowlist=None,
+            scopes=["agent.discoveries:validate"],
+            rate_limit_rpm=None,
+            expires_at=None,
+        ),
+        actor="user:alice",
+    )
+    # Seed last_used_at to 5 seconds ago.
+    repo._rows[minted.id]["last_used_at"] = datetime.now(UTC) - timedelta(seconds=5)
+
+    mark_used_mock = AsyncMock()
+    repo.mark_used = mark_used_mock  # type: ignore[method-assign]
+
+    verified = await service.verify(
+        minted.token,
+        tenant_id="acme",
+        workspace_id="ws-x",
+        scope="agent.discoveries:validate",
+    )
+    assert verified.token_id == minted.id
+    mark_used_mock.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_mark_used_called_when_stale(
+    repo: _InMemoryAgentTokenRepository,
+    service: AgentTokenService,
+) -> None:
+    """A verify after the 60s dedup window MUST call mark_used."""
+    minted = await service.mint(
+        MintRequest(
+            tenant_id="acme",
+            name="ci-runner",
+            workspace_allowlist=None,
+            scopes=["agent.discoveries:validate"],
+            rate_limit_rpm=None,
+            expires_at=None,
+        ),
+        actor="user:alice",
+    )
+    # Seed last_used_at to 5 minutes ago -- well outside the 60s window.
+    repo._rows[minted.id]["last_used_at"] = datetime.now(UTC) - timedelta(minutes=5)
+
+    mark_used_mock = AsyncMock()
+    repo.mark_used = mark_used_mock  # type: ignore[method-assign]
+
+    await service.verify(
+        minted.token,
+        tenant_id="acme",
+        workspace_id="ws-x",
+        scope="agent.discoveries:validate",
+    )
+    mark_used_mock.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_mark_used_called_when_never_used(
+    repo: _InMemoryAgentTokenRepository,
+    service: AgentTokenService,
+) -> None:
+    """A first-ever verify (last_used_at is None) MUST call mark_used."""
+    minted = await service.mint(
+        MintRequest(
+            tenant_id="acme",
+            name="ci-runner",
+            workspace_allowlist=None,
+            scopes=["agent.discoveries:validate"],
+            rate_limit_rpm=None,
+            expires_at=None,
+        ),
+        actor="user:alice",
+    )
+    assert repo._rows[minted.id]["last_used_at"] is None
+
+    mark_used_mock = AsyncMock()
+    repo.mark_used = mark_used_mock  # type: ignore[method-assign]
+
+    await service.verify(
+        minted.token,
+        tenant_id="acme",
+        workspace_id="ws-x",
+        scope="agent.discoveries:validate",
+    )
+    mark_used_mock.assert_called_once()
