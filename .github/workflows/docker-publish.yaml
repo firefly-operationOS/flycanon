@@ -57,8 +57,8 @@ concurrency:
 
 env:
   REGISTRY: ghcr.io
-  PYFLY_REF: main
-  AGENTIC_REF: main
+  PYFLY_REF: v26.05.05
+  AGENTIC_REF: v26.05.11
 
 jobs:
   publish:
