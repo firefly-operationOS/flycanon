@@ -30,6 +30,7 @@ from flycanon.config import CanonSettings, get_settings
 # and are auto-discovered via ``scan_packages``. The imports are
 # retained for the type hints used in the remaining @bean signatures.
 from flycanon.core.services.audit import AuditService  # noqa: F401
+from flycanon.core.services.auth.agent_token_service import AgentTokenService
 from flycanon.core.services.binary import (
     GotenbergConverter,
     LibreOfficeConverter,
@@ -58,6 +59,7 @@ from flycanon.core.services.retrieval import (
 from flycanon.core.services.retrieval.query_expander import QueryExpander
 from flycanon.core.services.retrieval.reranker import build_reranker
 from flycanon.models.repositories import (
+    AgentTokenRepository,
     AuditRepository,
     CandidateRepository,
     ChunkRepository,
@@ -141,6 +143,18 @@ class CanonCoreConfiguration:
     @bean
     def workspace_repository(self, settings: CanonSettings) -> WorkspaceRepository:
         return WorkspaceRepository.from_url(settings.database_url)
+
+    @bean
+    def agent_token_repository(self, settings: CanonSettings) -> AgentTokenRepository:
+        return AgentTokenRepository.from_url(settings.database_url)
+
+    # ------------------------------------------------------------------
+    # Auth services
+    # ------------------------------------------------------------------
+
+    @bean
+    def agent_token_service(self, agent_token_repository: AgentTokenRepository) -> AgentTokenService:
+        return AgentTokenService(agent_token_repository)
 
     @bean(name="database_health")
     def database_health(self, source_repository: SourceRepository) -> SqlAlchemyHealthIndicator:

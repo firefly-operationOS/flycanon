@@ -9,6 +9,7 @@ underlying async engine through the ``engine`` property.
 
 from __future__ import annotations
 
+from flycanon.models.repositories.agent_token_repository import AgentTokenRepository
 from flycanon.models.repositories.audit_repository import AuditRepository
 from flycanon.models.repositories.candidate_repository import CandidateRepository
 from flycanon.models.repositories.chunk_repository import ChunkRepository
@@ -22,6 +23,7 @@ from flycanon.models.repositories.taxonomy_repository import TaxonomyRepository
 from flycanon.models.repositories.workspace_repository import WorkspaceRepository
 
 __all__ = [
+    "AgentTokenRepository",
     "AuditRepository",
     "CandidateRepository",
     "ChunkRepository",
