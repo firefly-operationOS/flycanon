@@ -111,17 +111,24 @@ class AgentTokenRepository(Protocol):
     Implemented by
     :class:`flycanon.models.repositories.agent_token_repository.AgentTokenRepository`
     for production; the unit tests substitute an in-memory double.
+
+    ``get_by_prefix`` / ``revoke`` / ``mark_used`` all require a
+    ``tenant_id`` kwarg -- the WHERE clauses filter by both the
+    natural key (id or prefix) AND tenant so a cross-tenant operation
+    can never succeed at the SQL layer regardless of caller path.
+    Defense-in-depth alongside the ``tenant_isolation`` RLS policy on
+    ``canon_agent_tokens``.
     """
 
     async def insert(self, row: dict) -> None: ...
 
-    async def get_by_prefix(self, prefix: str) -> dict | None: ...
+    async def get_by_prefix(self, prefix: str, *, tenant_id: str) -> dict | None: ...
 
     async def list_for_tenant(self, tenant_id: str) -> list[dict]: ...
 
-    async def revoke(self, token_id: str, *, at: datetime) -> bool: ...
+    async def revoke(self, token_id: str, *, tenant_id: str, at: datetime) -> bool: ...
 
-    async def mark_used(self, token_id: str, *, at: datetime) -> None: ...
+    async def mark_used(self, token_id: str, *, tenant_id: str, at: datetime) -> None: ...
 
 
 # -- Service --------------------------------------------------------
@@ -186,9 +193,17 @@ class AgentTokenService:
         if not token.startswith("agt_") or len(token) < 12:
             raise InvalidAgentToken("Token shape is invalid.")
         prefix = token[:12]
-        row = await self._repo.get_by_prefix(prefix)
+        # The repository filters by (prefix, tenant_id) -- a row with the
+        # right prefix but wrong tenant comes back as None below, raising
+        # InvalidAgentToken("Unknown agent token.") rather than leaking
+        # the tenant-mismatch distinction.
+        row = await self._repo.get_by_prefix(prefix, tenant_id=tenant_id)
         if row is None:
             raise InvalidAgentToken("Unknown agent token.")
+        # Defense-in-depth: the repo's WHERE clause already enforces
+        # tenant scoping, but we keep this check so a bug that ever
+        # weakens the repo filter (e.g., default kwarg, accidental
+        # bypass) still fails closed at the service layer.
         if row["tenant_id"] != tenant_id:
             raise InvalidAgentToken("Token does not match the tenant header.")
         if not secrets.compare_digest(row["secret_hash"], _hash(token)):
@@ -205,7 +220,7 @@ class AgentTokenService:
         now = datetime.now(UTC)
         last_used = row.get("last_used_at")
         if last_used is None or (now - last_used).total_seconds() > 60:
-            await self._repo.mark_used(row["id"], at=now)
+            await self._repo.mark_used(row["id"], tenant_id=tenant_id, at=now)
         return VerifiedAgentToken(token_id=row["id"], actor=f"agent:{prefix}", prefix=prefix)
 
     async def list_for_tenant(self, tenant_id: str) -> list[AgentTokenSummary]:
@@ -228,5 +243,13 @@ class AgentTokenService:
             for row in rows
         ]
 
-    async def revoke(self, token_id: str) -> bool:
-        return await self._repo.revoke(token_id, at=datetime.now(UTC))
+    async def revoke(self, token_id: str, *, tenant_id: str) -> bool:
+        """Revoke a token for the given tenant.
+
+        ``tenant_id`` is REQUIRED and is forwarded to the repository's
+        WHERE clause -- a caller from tenant A can never revoke a
+        token belonging to tenant B even if they hand-craft the
+        ``token_id``. Defense-in-depth alongside the
+        ``tenant_isolation`` RLS policy on ``canon_agent_tokens``.
+        """
+        return await self._repo.revoke(token_id, tenant_id=tenant_id, at=datetime.now(UTC))

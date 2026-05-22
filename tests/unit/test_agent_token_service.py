@@ -29,25 +29,30 @@ class _InMemoryAgentTokenRepository:
     async def insert(self, row: dict) -> None:
         self._rows[row["id"]] = row
 
-    async def get_by_prefix(self, prefix: str) -> dict | None:
+    async def get_by_prefix(self, prefix: str, *, tenant_id: str) -> dict | None:
         for row in self._rows.values():
-            if row["prefix"] == prefix and row["revoked_at"] is None:
+            if (
+                row["prefix"] == prefix
+                and row["tenant_id"] == tenant_id
+                and row["revoked_at"] is None
+            ):
                 return row
         return None
 
     async def list_for_tenant(self, tenant_id: str) -> list[dict]:
         return [r for r in self._rows.values() if r["tenant_id"] == tenant_id]
 
-    async def revoke(self, token_id: str, *, at: datetime) -> bool:
+    async def revoke(self, token_id: str, *, tenant_id: str, at: datetime) -> bool:
         row = self._rows.get(token_id)
-        if not row or row["revoked_at"] is not None:
+        if not row or row["tenant_id"] != tenant_id or row["revoked_at"] is not None:
             return False
         row["revoked_at"] = at
         return True
 
-    async def mark_used(self, token_id: str, *, at: datetime) -> None:
-        if token_id in self._rows:
-            self._rows[token_id]["last_used_at"] = at
+    async def mark_used(self, token_id: str, *, tenant_id: str, at: datetime) -> None:
+        row = self._rows.get(token_id)
+        if row is not None and row["tenant_id"] == tenant_id:
+            row["last_used_at"] = at
 
 
 @pytest.fixture
@@ -214,11 +219,70 @@ async def test_revoke_marks_token_revoked(service: AgentTokenService) -> None:
         ),
         actor="user:alice",
     )
-    revoked = await service.revoke(minted.id)
+    revoked = await service.revoke(minted.id, tenant_id="acme")
     assert revoked is True
 
-    revoked_again = await service.revoke(minted.id)
+    revoked_again = await service.revoke(minted.id, tenant_id="acme")
     assert revoked_again is False
+
+
+@pytest.mark.asyncio
+async def test_revoke_cross_tenant_is_no_op(service: AgentTokenService) -> None:
+    """A caller from tenant B must never be able to revoke tenant A's token.
+
+    Defense-in-depth: the repo's WHERE clause filters by ``(id,
+    tenant_id)`` so a cross-tenant ``revoke`` flips zero rows and
+    returns False -- even if every other layer (controller pre-check,
+    RLS policy) somehow misfired.
+    """
+    minted = await service.mint(
+        MintRequest(
+            tenant_id="acme",
+            name="ci-runner",
+            workspace_allowlist=None,
+            scopes=["*"],
+            rate_limit_rpm=None,
+            expires_at=None,
+        ),
+        actor="user:alice",
+    )
+    revoked = await service.revoke(minted.id, tenant_id="bcorp")
+    assert revoked is False
+    # The original tenant can still revoke -- the wrong-tenant call
+    # above did not silently flip the row.
+    revoked_for_real = await service.revoke(minted.id, tenant_id="acme")
+    assert revoked_for_real is True
+
+
+@pytest.mark.asyncio
+async def test_verify_treats_cross_tenant_prefix_as_unknown(
+    service: AgentTokenService,
+) -> None:
+    """A token minted for tenant A must look invisible to tenant B's verify.
+
+    The repo's ``get_by_prefix`` filters by ``(prefix, tenant_id)``;
+    the service then surfaces this as ``InvalidAgentToken("Unknown
+    agent token.")`` -- callers learn nothing about whether the
+    prefix belongs to another tenant.
+    """
+    minted = await service.mint(
+        MintRequest(
+            tenant_id="acme",
+            name="ci-runner",
+            workspace_allowlist=None,
+            scopes=["agent.discoveries:validate"],
+            rate_limit_rpm=None,
+            expires_at=None,
+        ),
+        actor="user:alice",
+    )
+    with pytest.raises(InvalidAgentToken):
+        await service.verify(
+            minted.token,
+            tenant_id="bcorp",
+            workspace_id="ws-x",
+            scope="agent.discoveries:validate",
+        )
 
 
 @pytest.mark.asyncio

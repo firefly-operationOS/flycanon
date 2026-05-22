@@ -63,25 +63,30 @@ class _InMemoryAgentTokenRepository:
     async def insert(self, row: dict) -> None:
         self._rows[row["id"]] = row
 
-    async def get_by_prefix(self, prefix: str) -> dict | None:
+    async def get_by_prefix(self, prefix: str, *, tenant_id: str) -> dict | None:
         for row in self._rows.values():
-            if row["prefix"] == prefix and row["revoked_at"] is None:
+            if (
+                row["prefix"] == prefix
+                and row["tenant_id"] == tenant_id
+                and row["revoked_at"] is None
+            ):
                 return row
         return None
 
     async def list_for_tenant(self, tenant_id: str) -> list[dict]:
         return [r for r in self._rows.values() if r["tenant_id"] == tenant_id]
 
-    async def revoke(self, token_id: str, *, at: datetime) -> bool:
+    async def revoke(self, token_id: str, *, tenant_id: str, at: datetime) -> bool:
         row = self._rows.get(token_id)
-        if not row or row["revoked_at"] is not None:
+        if not row or row["tenant_id"] != tenant_id or row["revoked_at"] is not None:
             return False
         row["revoked_at"] = at
         return True
 
-    async def mark_used(self, token_id: str, *, at: datetime) -> None:
-        if token_id in self._rows:
-            self._rows[token_id]["last_used_at"] = at
+    async def mark_used(self, token_id: str, *, tenant_id: str, at: datetime) -> None:
+        row = self._rows.get(token_id)
+        if row is not None and row["tenant_id"] == tenant_id:
+            row["last_used_at"] = at
 
 
 class _StubRequest:

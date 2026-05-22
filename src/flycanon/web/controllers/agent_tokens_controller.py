@@ -132,10 +132,16 @@ class AgentTokensController:
         # is missing AND when it was already revoked. Distinguish the
         # two by checking the tenant's listing first -- this is the
         # CRUD surface, so the extra query is acceptable.
+        #
+        # Cross-tenant safety is enforced at the SQL layer by
+        # ``service.revoke`` (which forwards ``tenant_id`` to the repo
+        # WHERE clause). The list lookup here is purely for the 404 vs
+        # 204 distinction; even if the listing were stale, a
+        # cross-tenant revoke could not succeed.
         rows = await self._service.list_for_tenant(ctx.tenant_id)
         if not any(row.id == token_id for row in rows):
             raise ResourceNotFound(f"Agent token {token_id!r} not found.")
-        await self._service.revoke(token_id)
+        await self._service.revoke(token_id, tenant_id=ctx.tenant_id)
         return None
 
 

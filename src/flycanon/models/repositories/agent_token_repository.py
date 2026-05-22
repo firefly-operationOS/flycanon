@@ -54,18 +54,26 @@ class AgentTokenRepository:
         async with self._session_factory() as session, session.begin():
             session.add(AgentToken(**row))
 
-    async def revoke(self, token_id: str, *, at: datetime) -> bool:
+    async def revoke(self, token_id: str, *, tenant_id: str, at: datetime) -> bool:
         """Set ``revoked_at`` only if the row is not already revoked.
 
         Returns ``True`` when this call flipped the row, ``False`` when
-        the row is missing or had already been revoked -- mirrors the
-        idempotent contract the service layer documents.
+        the row is missing, belongs to a different tenant, or had
+        already been revoked -- mirrors the idempotent contract the
+        service layer documents.
+
+        ``tenant_id`` is REQUIRED: the WHERE clause filters by both
+        ``id`` and ``tenant_id`` so a cross-tenant revoke can never
+        succeed at the SQL layer, regardless of caller path. Defense-
+        in-depth alongside the ``tenant_isolation`` RLS policy on
+        ``canon_agent_tokens``.
         """
         async with self._session_factory() as session, session.begin():
             stmt = (
                 sa_update(AgentToken)
                 .where(
                     AgentToken.id == token_id,
+                    AgentToken.tenant_id == tenant_id,
                     AgentToken.revoked_at.is_(None),
                 )
                 .values(revoked_at=at)
@@ -74,19 +82,41 @@ class AgentTokenRepository:
             rowcount = getattr(result, "rowcount", 0) or 0
             return rowcount > 0
 
-    async def mark_used(self, token_id: str, *, at: datetime) -> None:
+    async def mark_used(self, token_id: str, *, tenant_id: str, at: datetime) -> None:
+        """Stamp ``last_used_at`` for the row.
+
+        ``tenant_id`` is REQUIRED -- the WHERE clause filters by both
+        ``id`` and ``tenant_id`` so a cross-tenant write can never
+        succeed at the SQL layer. Defense-in-depth alongside the
+        ``tenant_isolation`` RLS policy on ``canon_agent_tokens``.
+        """
         async with self._session_factory() as session, session.begin():
-            stmt = sa_update(AgentToken).where(AgentToken.id == token_id).values(last_used_at=at)
+            stmt = (
+                sa_update(AgentToken)
+                .where(
+                    AgentToken.id == token_id,
+                    AgentToken.tenant_id == tenant_id,
+                )
+                .values(last_used_at=at)
+            )
             await session.execute(stmt)
 
     # ------------------------------------------------------------------
     # Reads
     # ------------------------------------------------------------------
 
-    async def get_by_prefix(self, prefix: str) -> dict[str, Any] | None:
+    async def get_by_prefix(self, prefix: str, *, tenant_id: str) -> dict[str, Any] | None:
+        """Look a non-revoked row up by its public 12-char prefix.
+
+        ``tenant_id`` is REQUIRED -- the WHERE clause filters by both
+        ``prefix`` and ``tenant_id`` so a cross-tenant lookup can never
+        succeed at the SQL layer. Defense-in-depth alongside the
+        ``tenant_isolation`` RLS policy on ``canon_agent_tokens``.
+        """
         async with self._session_factory() as session:
             stmt = select(AgentToken).where(
                 AgentToken.prefix == prefix,
+                AgentToken.tenant_id == tenant_id,
                 AgentToken.revoked_at.is_(None),
             )
             row = (await session.execute(stmt)).scalar_one_or_none()
