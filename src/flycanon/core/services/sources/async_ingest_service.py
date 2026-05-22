@@ -163,8 +163,14 @@ class AsyncIngestService:
         Idempotent on terminal states -- if the job is already
         succeeded / failed we skip without re-running (a duplicate
         EDA delivery should not double-emit citations).
+
+        The worker dispatch path receives only the job id in the EDA
+        payload, so we read the row through the cross-workspace
+        helper to learn the scope. Every subsequent repo call --
+        including any that follow on the request path -- is keyed
+        by the row's own ``tenant_id`` / ``workspace_id``.
         """
-        job = await self._repository.get(job_id)
+        job = await self._repository.get_across_workspaces(job_id)
         if job is None:
             logger.warning("worker received unknown job_id=%s -- dropping", job_id)
             return

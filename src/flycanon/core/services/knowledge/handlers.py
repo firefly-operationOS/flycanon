@@ -193,7 +193,11 @@ class GetKnowledgeHandler(QueryHandler[GetKnowledgeQuery, KnowledgeItem | None])
         self._repository = repository
 
     async def do_handle(self, query: GetKnowledgeQuery) -> KnowledgeItem | None:
-        row = await self._repository.get_item(query.item_id)
+        row = await self._repository.get_item(
+            query.item_id,
+            tenant_id=query.tenant_id or "default",
+            workspace_id=query.workspace_id or "default",
+        )
         if row is None:
             return None
         return to_knowledge_item(row)
@@ -250,7 +254,11 @@ class GetKnowledgeHistoryHandler(QueryHandler[GetKnowledgeHistoryQuery, list[Kno
         self._repository = repository
 
     async def do_handle(self, query: GetKnowledgeHistoryQuery) -> list[KnowledgeVersion]:
-        rows = await self._repository.list_versions(query.item_id)
+        rows = await self._repository.list_versions(
+            query.item_id,
+            tenant_id=query.tenant_id or "default",
+            workspace_id=query.workspace_id or "default",
+        )
         versions: list[KnowledgeVersion] = []
         for row in rows:
             citations = await self._repository.list_citations(row.id)
@@ -274,7 +282,12 @@ class GetProvenanceHandler(QueryHandler[GetProvenanceQuery, Provenance]):
         self._provenance = provenance
 
     async def do_handle(self, query: GetProvenanceQuery) -> Provenance:
-        raw = await self._provenance.resolve(query.item_id, query.version)
+        raw = await self._provenance.resolve(
+            query.item_id,
+            query.version,
+            tenant_id=query.tenant_id or "default",
+            workspace_id=query.workspace_id or "default",
+        )
         return Provenance.model_validate(raw)
 
 
@@ -299,6 +312,8 @@ class GetKnowledgeDiffHandler(QueryHandler[GetKnowledgeDiffQuery, KnowledgeVersi
             item_id=query.item_id,
             from_version=query.from_version,
             to_version=query.to_version,
+            tenant_id=query.tenant_id or "default",
+            workspace_id=query.workspace_id or "default",
         )
 
 
@@ -376,7 +391,11 @@ class ListKnowledgeRelationsHandler(QueryHandler[ListKnowledgeRelationsQuery, Kn
         self._relations = relations
 
     async def do_handle(self, query: ListKnowledgeRelationsQuery) -> KnowledgeRelations:
-        out_rows, in_rows = await self._relations.list_for_item(query.item_id)
+        out_rows, in_rows = await self._relations.list_for_item(
+            query.item_id,
+            tenant_id=query.tenant_id or "default",
+            workspace_id=query.workspace_id or "default",
+        )
         return KnowledgeRelations(
             item_id=query.item_id,
             outgoing=[to_knowledge_relation(r) for r in out_rows],

@@ -90,7 +90,7 @@ class TestUnifiedBodyDiff:
         repo = repositories["knowledge"]
         await _seed(repo, item_id="k1", version=1, body="hello\nworld")
         await _seed(repo, item_id="k1", version=2, body="hello\nworld")
-        diff = await diff_service.diff("k1", 1, 2)
+        diff = await diff_service.diff("k1", 1, 2, tenant_id="default", workspace_id="default")
         assert diff.body_diff == ""
 
     @pytest.mark.asyncio
@@ -98,7 +98,7 @@ class TestUnifiedBodyDiff:
         repo = repositories["knowledge"]
         await _seed(repo, item_id="k1", version=1, body="line1\nline2\nline3")
         await _seed(repo, item_id="k1", version=2, body="line1\nline2-changed\nline3")
-        diff = await diff_service.diff("k1", 1, 2)
+        diff = await diff_service.diff("k1", 1, 2, tenant_id="default", workspace_id="default")
         assert "--- version 1" in diff.body_diff
         assert "+++ version 2" in diff.body_diff
         assert "-line2" in diff.body_diff
@@ -111,7 +111,7 @@ class TestFieldChanges:
         repo = repositories["knowledge"]
         await _seed(repo, item_id="k1", version=1, body="x", title="Old title")
         await _seed(repo, item_id="k1", version=2, body="x", title="New title")
-        diff = await diff_service.diff("k1", 1, 2)
+        diff = await diff_service.diff("k1", 1, 2, tenant_id="default", workspace_id="default")
         title_change = next(c for c in diff.field_changes if c.field == "title")
         assert title_change.before == "Old title"
         assert title_change.after == "New title"
@@ -121,7 +121,7 @@ class TestFieldChanges:
         repo = repositories["knowledge"]
         await _seed(repo, item_id="k1", version=1, body="x", tags=["a", "b", "c"])
         await _seed(repo, item_id="k1", version=2, body="x", tags=["c", "b", "a"])
-        diff = await diff_service.diff("k1", 1, 2)
+        diff = await diff_service.diff("k1", 1, 2, tenant_id="default", workspace_id="default")
         # Same set in different order -- no tags change.
         assert not any(c.field == "tags" for c in diff.field_changes)
 
@@ -130,7 +130,7 @@ class TestFieldChanges:
         repo = repositories["knowledge"]
         await _seed(repo, item_id="k1", version=1, body="x", tags=["a", "b"])
         await _seed(repo, item_id="k1", version=2, body="x", tags=["a", "b", "c"])
-        diff = await diff_service.diff("k1", 1, 2)
+        diff = await diff_service.diff("k1", 1, 2, tenant_id="default", workspace_id="default")
         tags_change = next(c for c in diff.field_changes if c.field == "tags")
         assert tags_change.before == ["a", "b"]
         assert tags_change.after == ["a", "b", "c"]
@@ -154,7 +154,7 @@ class TestCitationSetDiff:
             body="x",
             citations=[("src1", "chunk-B", 2), ("src1", "chunk-C", 3)],
         )
-        diff = await diff_service.diff("k1", 1, 2)
+        diff = await diff_service.diff("k1", 1, 2, tenant_id="default", workspace_id="default")
         assert [c.chunk_id for c in diff.citations_added] == ["chunk-C"]
         assert [c.chunk_id for c in diff.citations_removed] == ["chunk-A"]
         # The retained citation is in NEITHER list.
@@ -166,11 +166,11 @@ class TestErrors:
     @pytest.mark.asyncio
     async def test_unknown_item_raises(self, diff_service):
         with pytest.raises(KnowledgeItemNotFound):
-            await diff_service.diff("does-not-exist", 1, 2)
+            await diff_service.diff("does-not-exist", 1, 2, tenant_id="default", workspace_id="default")
 
     @pytest.mark.asyncio
     async def test_unknown_version_raises(self, repositories, diff_service):
         repo = repositories["knowledge"]
         await _seed(repo, item_id="k1", version=1, body="x")
         with pytest.raises(KnowledgeVersionNotFound):
-            await diff_service.diff("k1", 1, 999)
+            await diff_service.diff("k1", 1, 999, tenant_id="default", workspace_id="default")

@@ -83,7 +83,7 @@ async def test_update_appends_new_version_supersedes_previous(knowledge, reposit
     )
     assert updated.version == 2
     assert updated.body == "updated body"
-    history = await repositories["knowledge"].list_versions(item_id)
+    history = await repositories["knowledge"].list_versions(item_id, **scope)
     statuses = {row.version: row.status for row in history}
     assert statuses[1] == KnowledgeStatus.superseded.value
     assert statuses[2] == KnowledgeStatus.published.value

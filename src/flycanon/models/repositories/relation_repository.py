@@ -47,15 +47,48 @@ class RelationRepository:
             await session.refresh(row)
             return row
 
-    async def get(self, relation_id: str) -> KnowledgeRelationRow | None:
-        async with self._session_factory() as session:
-            return await session.get(KnowledgeRelationRow, relation_id)
+    async def get(
+        self,
+        relation_id: str,
+        *,
+        tenant_id: str,
+        workspace_id: str,
+    ) -> KnowledgeRelationRow | None:
+        """Look up one relation, scoped to ``(tenant_id, workspace_id)``.
 
-    async def delete(self, relation_id: str) -> bool:
-        """Drop one relation by id. Returns ``True`` when a row was deleted."""
+        Plan 6 Task 1: scope kwargs are MANDATORY. A relation owned
+        by a different workspace (same tenant) returns ``None``
+        instead of leaking.
+        """
+        async with self._session_factory() as session:
+            result = await session.execute(
+                select(KnowledgeRelationRow).where(
+                    KnowledgeRelationRow.id == relation_id,
+                    KnowledgeRelationRow.tenant_id == tenant_id,
+                    KnowledgeRelationRow.workspace_id == workspace_id,
+                )
+            )
+            return result.scalars().first()
+
+    async def delete(
+        self,
+        relation_id: str,
+        *,
+        tenant_id: str,
+        workspace_id: str,
+    ) -> bool:
+        """Drop one relation by id, scoped to ``(tenant, workspace)``.
+
+        Returns ``True`` when a row was deleted. A relation outside
+        the caller's scope returns ``False`` (Plan 6 Task 1).
+        """
         async with self.session() as session:
             result = await session.execute(
-                delete(KnowledgeRelationRow).where(KnowledgeRelationRow.id == relation_id)
+                delete(KnowledgeRelationRow).where(
+                    KnowledgeRelationRow.id == relation_id,
+                    KnowledgeRelationRow.tenant_id == tenant_id,
+                    KnowledgeRelationRow.workspace_id == workspace_id,
+                )
             )
             rowcount = getattr(result, "rowcount", 0) or 0
             return rowcount > 0
@@ -64,9 +97,15 @@ class RelationRepository:
         self,
         item_id: str,
         *,
+        tenant_id: str,
+        workspace_id: str,
         direction: str = "both",
     ) -> list[KnowledgeRelationRow]:
-        """Return relations touching ``item_id``.
+        """Return relations touching ``item_id`` within ``(tenant, workspace)``.
+
+        Plan 6 Task 1: scope kwargs are MANDATORY. Cross-workspace
+        relations are filtered out -- the caller only sees edges
+        rooted in their own workspace.
 
         ``direction``:
             - ``out``  -- relations where ``from_item_id == item_id``
@@ -84,7 +123,13 @@ class RelationRepository:
                     KnowledgeRelationRow.to_item_id == item_id,
                 )
             result = await session.execute(
-                select(KnowledgeRelationRow).where(cond).order_by(KnowledgeRelationRow.created_at.asc())
+                select(KnowledgeRelationRow)
+                .where(
+                    cond,
+                    KnowledgeRelationRow.tenant_id == tenant_id,
+                    KnowledgeRelationRow.workspace_id == workspace_id,
+                )
+                .order_by(KnowledgeRelationRow.created_at.asc())
             )
             return list(result.scalars().all())
 

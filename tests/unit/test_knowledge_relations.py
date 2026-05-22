@@ -135,7 +135,7 @@ class TestAddRelation:
         await relation_service.add(
             "a", CreateRelationRequest(to_item_id="b", kind=RelationKind.depends_on), **scope
         )
-        out, _ = await relation_service.list_for_item("a")
+        out, _ = await relation_service.list_for_item("a", **scope)
         kinds = {row.kind for row in out}
         assert kinds == {"related", "depends_on"}
 
@@ -152,7 +152,7 @@ class TestListForItem:
         await relation_service.add(
             "c", CreateRelationRequest(to_item_id="a", kind=RelationKind.depends_on), **scope
         )
-        out, inc = await relation_service.list_for_item("a")
+        out, inc = await relation_service.list_for_item("a", **scope)
         assert [r.to_item_id for r in out] == ["b"]
         assert [r.from_item_id for r in inc] == ["c"]
 
@@ -166,7 +166,7 @@ class TestRemoveRelation:
             "a", CreateRelationRequest(to_item_id="b", kind=RelationKind.related), **scope
         )
         await relation_service.remove(row.id, **scope)
-        out, _ = await relation_service.list_for_item("a")
+        out, _ = await relation_service.list_for_item("a", **scope)
         assert out == []
 
     @pytest.mark.asyncio

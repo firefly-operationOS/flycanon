@@ -28,7 +28,11 @@ class GetSourceHandler(QueryHandler[GetSourceQuery, SourceRecord | None]):
         self._repository = repository
 
     async def do_handle(self, query: GetSourceQuery) -> SourceRecord | None:
-        row = await self._repository.get(query.source_id)
+        row = await self._repository.get(
+            query.source_id,
+            tenant_id=query.tenant_id or "default",
+            workspace_id=query.workspace_id or "default",
+        )
         if row is None:
             return None
         return to_source_record(row)

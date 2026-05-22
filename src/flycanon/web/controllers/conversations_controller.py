@@ -55,7 +55,11 @@ class ConversationsController:
             workspace_id=ctx.workspace_id,
             actor=ctx.actor,
         )
-        return await self._service.get(row.id)
+        return await self._service.get(
+            row.id,
+            tenant_id=ctx.tenant_id,
+            workspace_id=ctx.workspace_id,
+        )
 
     @get_mapping("/{conversation_id}")
     async def get_conversation(
@@ -63,14 +67,21 @@ class ConversationsController:
         http_request: Request,
         conversation_id: PathVar[str],
     ) -> Conversation:
-        """Return the full session + turn history."""
-        # ctx is parsed for header enforcement even though we don't
-        # currently use it inside this read path -- the service-side
-        # scope filter is the source of truth for cross-tenant safety
-        # and lands in Plan 4 follow-ups.
-        _ctx: TenantContext = tenant_context_from_request(http_request)
+        """Return the full session + turn history.
+
+        Plan 6 Task 1 closes the workspace-scope gap on this read --
+        the service-layer ``get`` now requires ``(tenant_id,
+        workspace_id)`` and a same-tenant cross-workspace lookup
+        raises :class:`ConversationNotFound` (404), not the foreign
+        row.
+        """
+        ctx: TenantContext = tenant_context_from_request(http_request)
         try:
-            return await self._service.get(conversation_id)
+            return await self._service.get(
+                conversation_id,
+                tenant_id=ctx.tenant_id,
+                workspace_id=ctx.workspace_id,
+            )
         except ConversationNotFound as exc:
             raise ResourceNotFoundException(str(exc)) from exc
 

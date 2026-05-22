@@ -40,7 +40,37 @@ class CandidateRepository:
             yield session
             await session.commit()
 
-    async def get(self, candidate_id: str) -> CandidateRow | None:
+    async def get(
+        self,
+        candidate_id: str,
+        *,
+        tenant_id: str,
+        workspace_id: str,
+    ) -> CandidateRow | None:
+        """Look up one candidate, scoped to ``(tenant_id, workspace_id)``.
+
+        Plan 6 Task 1: scope kwargs are MANDATORY on every read-by-id
+        path. A candidate living in a different workspace (same
+        tenant) returns ``None`` instead of leaking.
+        """
+        async with self._session_factory() as session:
+            result = await session.execute(
+                select(CandidateRow).where(
+                    CandidateRow.id == candidate_id,
+                    CandidateRow.tenant_id == tenant_id,
+                    CandidateRow.workspace_id == workspace_id,
+                )
+            )
+            return result.scalars().first()
+
+    async def get_across_workspaces(self, candidate_id: str) -> CandidateRow | None:
+        """Cross-workspace lookup -- TRUSTED-CONTEXT callers only.
+
+        Workers / sweepers that walk the table without a request
+        scope use this; the row's own scope columns provide the
+        scope ex post. Plan 6 Task 4 replaces this code-level escape
+        hatch with a Postgres BYPASSRLS role.
+        """
         async with self._session_factory() as session:
             return await session.get(CandidateRow, candidate_id)
 

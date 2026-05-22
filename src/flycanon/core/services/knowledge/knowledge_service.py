@@ -167,13 +167,22 @@ class KnowledgeService:
         originating_candidate_id: str | None = None,
         correlation_id: str | None = None,
     ) -> KnowledgeVersionRow:
-        item = await self._repository.get_item(item_id)
+        item = await self._repository.get_item(
+            item_id,
+            tenant_id=tenant_id,
+            workspace_id=workspace_id,
+        )
         if item is None:
             raise KnowledgeItemNotFound(item_id)
         if item.status == KnowledgeStatus.retired.value:
             raise KnowledgeItemAlreadyRetired(item_id)
 
-        current = await self._repository.get_version(item_id, item.current_version)
+        current = await self._repository.get_version(
+            item_id,
+            item.current_version,
+            tenant_id=tenant_id,
+            workspace_id=workspace_id,
+        )
         if current is None:
             raise KnowledgeItemNotFound(item_id)
 
@@ -276,12 +285,20 @@ class KnowledgeService:
         workspace_id: str,
         correlation_id: str | None = None,
     ) -> KnowledgeItemRow:
-        item = await self._repository.get_item(item_id)
+        item = await self._repository.get_item(
+            item_id,
+            tenant_id=tenant_id,
+            workspace_id=workspace_id,
+        )
         if item is None:
             raise KnowledgeItemNotFound(item_id)
         if item_id == request.superseded_by_item_id:
             raise InvalidSupersedeTarget(item_id, request.superseded_by_item_id, "self-supersedure")
-        target = await self._repository.get_item(request.superseded_by_item_id)
+        target = await self._repository.get_item(
+            request.superseded_by_item_id,
+            tenant_id=tenant_id,
+            workspace_id=workspace_id,
+        )
         if target is None:
             raise InvalidSupersedeTarget(item_id, request.superseded_by_item_id, "target not found")
         if target.status == KnowledgeStatus.retired.value:
@@ -303,7 +320,11 @@ class KnowledgeService:
             # Refresh the row to surface the current state in the
             # 409 -- the most useful signal for the caller is "what
             # status is it now?".
-            current = await self._repository.get_item(item_id)
+            current = await self._repository.get_item(
+                item_id,
+                tenant_id=tenant_id,
+                workspace_id=workspace_id,
+            )
             current_status = current.status if current else "unknown"
             raise InvalidSupersedeTarget(
                 item_id,
@@ -346,7 +367,11 @@ class KnowledgeService:
         workspace_id: str,
         correlation_id: str | None = None,
     ) -> KnowledgeItemRow:
-        item = await self._repository.get_item(item_id)
+        item = await self._repository.get_item(
+            item_id,
+            tenant_id=tenant_id,
+            workspace_id=workspace_id,
+        )
         if item is None:
             raise KnowledgeItemNotFound(item_id)
         if item.status == KnowledgeStatus.retired.value:
@@ -390,14 +415,39 @@ class KnowledgeService:
     # Lookups
     # ------------------------------------------------------------------
 
-    async def get(self, item_id: str) -> KnowledgeItemRow:
-        item = await self._repository.get_item(item_id)
+    async def get(
+        self,
+        item_id: str,
+        *,
+        tenant_id: str,
+        workspace_id: str,
+    ) -> KnowledgeItemRow:
+        """Fetch the item or raise :class:`KnowledgeItemNotFound`.
+
+        Plan 6 Task 1: scope kwargs are MANDATORY.
+        """
+        item = await self._repository.get_item(
+            item_id,
+            tenant_id=tenant_id,
+            workspace_id=workspace_id,
+        )
         if item is None:
             raise KnowledgeItemNotFound(item_id)
         return item
 
-    async def list_versions(self, item_id: str) -> list[KnowledgeVersionRow]:
-        return await self._repository.list_versions(item_id)
+    async def list_versions(
+        self,
+        item_id: str,
+        *,
+        tenant_id: str,
+        workspace_id: str,
+    ) -> list[KnowledgeVersionRow]:
+        """Return the version history scoped to ``(tenant, workspace)``."""
+        return await self._repository.list_versions(
+            item_id,
+            tenant_id=tenant_id,
+            workspace_id=workspace_id,
+        )
 
     # ------------------------------------------------------------------
     # Helpers

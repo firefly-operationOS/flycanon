@@ -28,7 +28,11 @@ class GetIngestJobHandler(QueryHandler[GetIngestJobQuery, IngestJob | None]):
         self._repository = repository
 
     async def do_handle(self, query: GetIngestJobQuery) -> IngestJob | None:
-        row = await self._repository.get(query.job_id)
+        row = await self._repository.get(
+            query.job_id,
+            tenant_id=query.tenant_id or "default",
+            workspace_id=query.workspace_id or "default",
+        )
         if row is None:
             return None
         return _to_dto(row)
@@ -84,7 +88,13 @@ class ListIngestJobEventsHandler(QueryHandler[ListIngestJobEventsQuery, list[Ing
         self._repository = repository
 
     async def do_handle(self, query: ListIngestJobEventsQuery) -> list[IngestJobEvent]:
-        rows = await self._repository.list_events(query.job_id, after_id=query.after_id, limit=query.limit)
+        rows = await self._repository.list_events(
+            query.job_id,
+            tenant_id=query.tenant_id or "default",
+            workspace_id=query.workspace_id or "default",
+            after_id=query.after_id,
+            limit=query.limit,
+        )
         return [_event_to_dto(r) for r in rows]
 
 

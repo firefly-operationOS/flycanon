@@ -291,7 +291,11 @@ class IntakeService:
         ``None`` in the provenance graph; out of scope for this
         commit to repair).
         """
-        existing = await self._sources.get(source_id)
+        existing = await self._sources.get(
+            source_id,
+            tenant_id=tenant_id,
+            workspace_id=workspace_id,
+        )
         if existing is None:
             from flycanon.core.services.sources.errors import SourceNotFound
 

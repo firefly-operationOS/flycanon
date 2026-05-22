@@ -90,10 +90,18 @@ class KnowledgeRelationService:
         if from_item_id == request.to_item_id:
             raise InvalidRelationError("from and to must be different knowledge items")
 
-        from_item = await self._knowledge.get_item(from_item_id)
+        from_item = await self._knowledge.get_item(
+            from_item_id,
+            tenant_id=tenant_id,
+            workspace_id=workspace_id,
+        )
         if from_item is None:
             raise KnowledgeItemNotFound(from_item_id)
-        to_item = await self._knowledge.get_item(request.to_item_id)
+        to_item = await self._knowledge.get_item(
+            request.to_item_id,
+            tenant_id=tenant_id,
+            workspace_id=workspace_id,
+        )
         if to_item is None:
             raise InvalidRelationError(f"to_item_id {request.to_item_id!r} does not exist")
 
@@ -156,10 +164,18 @@ class KnowledgeRelationService:
         actor: str | None = None,
         correlation_id: str | None = None,
     ) -> None:
-        relation = await self._relations.get(relation_id)
+        relation = await self._relations.get(
+            relation_id,
+            tenant_id=tenant_id,
+            workspace_id=workspace_id,
+        )
         if relation is None:
             raise RelationNotFoundError(relation_id)
-        deleted = await self._relations.delete(relation_id)
+        deleted = await self._relations.delete(
+            relation_id,
+            tenant_id=tenant_id,
+            workspace_id=workspace_id,
+        )
         if not deleted:
             raise RelationNotFoundError(relation_id)
         await self._audit.record(
@@ -186,13 +202,38 @@ class KnowledgeRelationService:
             },
         )
 
-    async def list_for_item(self, item_id: str) -> tuple[list, list]:
-        """Return ``(outgoing, incoming)`` rows for the item."""
-        item = await self._knowledge.get_item(item_id)
+    async def list_for_item(
+        self,
+        item_id: str,
+        *,
+        tenant_id: str,
+        workspace_id: str,
+    ) -> tuple[list, list]:
+        """Return ``(outgoing, incoming)`` rows for the item.
+
+        Plan 6 Task 1: scope kwargs are MANDATORY. A foreign item
+        raises :class:`KnowledgeItemNotFound`; relations rooted in
+        a different workspace never surface.
+        """
+        item = await self._knowledge.get_item(
+            item_id,
+            tenant_id=tenant_id,
+            workspace_id=workspace_id,
+        )
         if item is None:
             raise KnowledgeItemNotFound(item_id)
-        outgoing = await self._relations.list_for_item(item_id, direction="out")
-        incoming = await self._relations.list_for_item(item_id, direction="in")
+        outgoing = await self._relations.list_for_item(
+            item_id,
+            tenant_id=tenant_id,
+            workspace_id=workspace_id,
+            direction="out",
+        )
+        incoming = await self._relations.list_for_item(
+            item_id,
+            tenant_id=tenant_id,
+            workspace_id=workspace_id,
+            direction="in",
+        )
         return outgoing, incoming
 
     async def _publish(self, event_type: str, *, payload: dict) -> None:

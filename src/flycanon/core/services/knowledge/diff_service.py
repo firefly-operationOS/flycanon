@@ -41,17 +41,39 @@ class KnowledgeDiffService:
         item_id: str,
         from_version: int,
         to_version: int,
+        *,
+        tenant_id: str,
+        workspace_id: str,
     ) -> KnowledgeVersionDiff:
-        item = await self._repository.get_item(item_id)
+        """Diff two versions of a knowledge item, scoped to ``(tenant, workspace)``.
+
+        Plan 6 Task 1: scope kwargs are MANDATORY. A cross-workspace
+        diff raises :class:`KnowledgeItemNotFound`.
+        """
+        item = await self._repository.get_item(
+            item_id,
+            tenant_id=tenant_id,
+            workspace_id=workspace_id,
+        )
         if item is None:
             raise KnowledgeItemNotFound(item_id)
 
         # Resolve both versions; raise if either is missing -- the
         # caller almost certainly mistyped a version number.
-        v_from = await self._repository.get_version(item_id, from_version)
+        v_from = await self._repository.get_version(
+            item_id,
+            from_version,
+            tenant_id=tenant_id,
+            workspace_id=workspace_id,
+        )
         if v_from is None:
             raise KnowledgeVersionNotFound(item_id, from_version)
-        v_to = await self._repository.get_version(item_id, to_version)
+        v_to = await self._repository.get_version(
+            item_id,
+            to_version,
+            tenant_id=tenant_id,
+            workspace_id=workspace_id,
+        )
         if v_to is None:
             raise KnowledgeVersionNotFound(item_id, to_version)
 

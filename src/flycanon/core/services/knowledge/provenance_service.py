@@ -30,16 +30,35 @@ class ProvenanceService:
         self._knowledge = knowledge_repository
         self._sources = source_repository
 
-    async def resolve(self, item_id: str, version: int | None = None) -> dict:
+    async def resolve(
+        self,
+        item_id: str,
+        version: int | None = None,
+        *,
+        tenant_id: str,
+        workspace_id: str,
+    ) -> dict:
         """Build the provenance dict for ``(item_id, version)``.
 
         When ``version`` is omitted, resolves the item's current version.
+        Plan 6 Task 1: ``tenant_id`` / ``workspace_id`` are MANDATORY
+        and threaded through every repository lookup so cross-workspace
+        provenance leaks are impossible.
         """
-        item = await self._knowledge.get_item(item_id)
+        item = await self._knowledge.get_item(
+            item_id,
+            tenant_id=tenant_id,
+            workspace_id=workspace_id,
+        )
         if item is None:
             raise KnowledgeItemNotFound(item_id)
         target_version = version or item.current_version
-        version_row = await self._knowledge.get_version(item_id, target_version)
+        version_row = await self._knowledge.get_version(
+            item_id,
+            target_version,
+            tenant_id=tenant_id,
+            workspace_id=workspace_id,
+        )
         if version_row is None:
             raise KnowledgeVersionNotFound(item_id, target_version)
 
@@ -47,11 +66,19 @@ class ProvenanceService:
         source_ids = sorted({c.source_id for c in citations})
         source_rows: list[SourceRow] = []
         for source_id in source_ids:
-            row = await self._sources.get(source_id)
+            row = await self._sources.get(
+                source_id,
+                tenant_id=tenant_id,
+                workspace_id=workspace_id,
+            )
             if row is not None:
                 source_rows.append(row)
 
-        history = await self._knowledge.list_versions(item_id)
+        history = await self._knowledge.list_versions(
+            item_id,
+            tenant_id=tenant_id,
+            workspace_id=workspace_id,
+        )
 
         return {
             "knowledge_item_id": item_id,

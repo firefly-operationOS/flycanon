@@ -79,7 +79,12 @@ class StaleDetector:
         if cached and _is_fresh(cached):
             return cached
 
-        version = await self._knowledge.get_version(item.id, item.current_version)
+        version = await self._knowledge.get_version(
+            item.id,
+            item.current_version,
+            tenant_id=item.tenant_id,
+            workspace_id=item.workspace_id,
+        )
         if version is None or not version.body:
             return _empty_score()
 

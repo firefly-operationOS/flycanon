@@ -118,7 +118,11 @@ class GetCandidateHandler(QueryHandler[GetCandidateQuery, CandidateRecord | None
         self._repository = repository
 
     async def do_handle(self, query: GetCandidateQuery) -> CandidateRecord | None:
-        row = await self._repository.get(query.candidate_id)
+        row = await self._repository.get(
+            query.candidate_id,
+            tenant_id=query.tenant_id or "default",
+            workspace_id=query.workspace_id or "default",
+        )
         if row is None:
             return None
         return to_candidate_record(row)

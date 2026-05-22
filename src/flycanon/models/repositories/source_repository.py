@@ -43,7 +43,42 @@ class SourceRepository:
             yield session
             await session.commit()
 
-    async def get(self, source_id: str) -> SourceRow | None:
+    async def get(
+        self,
+        source_id: str,
+        *,
+        tenant_id: str,
+        workspace_id: str,
+    ) -> SourceRow | None:
+        """Look up one source, scoped to ``(tenant_id, workspace_id)``.
+
+        Plan 6 Task 1 closes the workspace-scope gap: the scope kwargs
+        are MANDATORY. A row living in a different workspace (same
+        tenant) returns ``None`` instead of leaking to the caller.
+
+        Worker code that walks the table without a request scope must
+        use :meth:`get_across_workspaces` explicitly.
+        """
+        async with self._session_factory() as session:
+            result = await session.execute(
+                select(SourceRow).where(
+                    SourceRow.id == source_id,
+                    SourceRow.tenant_id == tenant_id,
+                    SourceRow.workspace_id == workspace_id,
+                )
+            )
+            return result.scalars().first()
+
+    async def get_across_workspaces(self, source_id: str) -> SourceRow | None:
+        """Cross-workspace lookup -- TRUSTED-CONTEXT callers only.
+
+        Used by workers / sweepers that operate without a request
+        scope (the row's own scope columns provide it ex post). Plan
+        6 Task 4 replaces this code-level escape hatch with a
+        Postgres BYPASSRLS role.
+
+        Do NOT call from request-scoped code paths.
+        """
         async with self._session_factory() as session:
             return await session.get(SourceRow, source_id)
 

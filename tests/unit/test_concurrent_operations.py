@@ -179,8 +179,8 @@ class TestIngestJobAtomicClaim:
         assert sorted(ids) == ["stale-1", "stale-2"]
         # The reclaimed rows are visible at status=queued for another
         # worker to pick up via mark_running.
-        fresh_row = await jobs.get("fresh-1")
-        stale_row = await jobs.get("stale-1")
+        fresh_row = await jobs.get("fresh-1", **_SCOPE)
+        stale_row = await jobs.get("stale-1", **_SCOPE)
         assert fresh_row.status == "running"
         assert stale_row.status == "queued"
 
@@ -407,7 +407,7 @@ class TestKnowledgeClaimStatusTransition:
         )
         assert second is None
         # Alice's pointer survives -- Bob's overwrite never lands.
-        final = await knowledge.get_item("ki-sup-2")
+        final = await knowledge.get_item("ki-sup-2", **_SCOPE)
         assert final.superseded_by_item_id == "ki-new-A"
 
     @pytest.mark.asyncio
@@ -572,7 +572,7 @@ class TestKnowledgeRetireServiceConcurrency:
         assert len(losers) == 1
         assert isinstance(losers[0], KnowledgeItemAlreadyRetired)
         # Exactly one retired_at + one reason landed on the row.
-        final = await repositories["knowledge"].get_item(item_id)
+        final = await repositories["knowledge"].get_item(item_id, **_SCOPE)
         assert final.status == "retired"
         assert final.retired_reason in ("alice", "bob")
 
@@ -636,7 +636,7 @@ class TestKnowledgeSupersedeServiceConcurrency:
         )
         # Final row state: status flipped to superseded with exactly one
         # of the two targets, not a frankenstein overwrite.
-        final = await repositories["knowledge"].get_item(item_id)
+        final = await repositories["knowledge"].get_item(item_id, **_SCOPE)
         assert final.status == "superseded"
         assert final.superseded_by_item_id in (target_b, target_c)
 
@@ -939,7 +939,7 @@ class TestKnowledgeVersionConflictServiceConcurrency:
         # Final version count is consistent: each non-exception update
         # added one version row.
         winners = [r for r in results if not isinstance(r, Exception)]
-        history = await repositories["knowledge"].list_versions(item_id)
+        history = await repositories["knowledge"].list_versions(item_id, **_SCOPE)
         # At least the original v1 + at least one new version.
         assert len(history) >= 1 + len(winners)
 

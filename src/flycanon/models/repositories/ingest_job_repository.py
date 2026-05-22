@@ -62,7 +62,44 @@ class IngestJobRepository:
             await session.refresh(row)
             return row
 
-    async def get(self, job_id: str) -> IngestJobRow | None:
+    async def get(
+        self,
+        job_id: str,
+        *,
+        tenant_id: str,
+        workspace_id: str,
+    ) -> IngestJobRow | None:
+        """Look up one ingest job, scoped to ``(tenant_id, workspace_id)``.
+
+        Plan 6 Task 1: scope kwargs are MANDATORY. A job owned by a
+        different workspace (same tenant) returns ``None`` instead
+        of leaking to the caller.
+
+        Workers that dispatch off the EDA payload (which carries the
+        job id without the request context) must use
+        :meth:`get_across_workspaces` -- the row's own scope columns
+        provide the scope ex post. Plan 6 Task 4 replaces that
+        escape hatch with a Postgres BYPASSRLS role.
+        """
+        async with self._session_factory() as session:
+            result = await session.execute(
+                select(IngestJobRow).where(
+                    IngestJobRow.id == job_id,
+                    IngestJobRow.tenant_id == tenant_id,
+                    IngestJobRow.workspace_id == workspace_id,
+                )
+            )
+            return result.scalars().first()
+
+    async def get_across_workspaces(self, job_id: str) -> IngestJobRow | None:
+        """Cross-workspace lookup -- TRUSTED-CONTEXT callers only.
+
+        Used by the EDA-driven ingest worker, which receives only
+        the job id in the event payload and reads the row to learn
+        its scope. The worker then threads the row's
+        ``tenant_id`` / ``workspace_id`` through every subsequent
+        repo call.
+        """
         async with self._session_factory() as session:
             return await session.get(IngestJobRow, job_id)
 
@@ -304,16 +341,26 @@ class IngestJobRepository:
         self,
         job_id: str,
         *,
+        tenant_id: str,
+        workspace_id: str,
         after_id: int | None = None,
         limit: int = 200,
     ) -> list[IngestJobEventRow]:
         """Return events for a job ordered by id ascending.
 
+        Plan 6 Task 1: scope kwargs are MANDATORY. Events tied to a
+        job owned by a different workspace (same tenant) return an
+        empty list instead of leaking.
+
         The SSE endpoint passes ``after_id`` so a long-running poll
         only fetches the deltas since its last cursor position.
         """
         async with self._session_factory() as session:
-            stmt = select(IngestJobEventRow).where(IngestJobEventRow.job_id == job_id)
+            stmt = select(IngestJobEventRow).where(
+                IngestJobEventRow.job_id == job_id,
+                IngestJobEventRow.tenant_id == tenant_id,
+                IngestJobEventRow.workspace_id == workspace_id,
+            )
             if after_id is not None:
                 stmt = stmt.where(IngestJobEventRow.id > after_id)
             stmt = stmt.order_by(IngestJobEventRow.id.asc()).limit(limit)

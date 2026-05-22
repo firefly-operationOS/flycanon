@@ -22,7 +22,7 @@ class TestConversationLifecycle:
         await conv_repo.add(
             ConversationRow(id="conv-1", title="t", actor="u", model="anthropic:claude", **scope)
         )
-        fetched = await conv_repo.get("conv-1")
+        fetched = await conv_repo.get("conv-1", **scope)
         assert fetched is not None
         assert fetched.title == "t"
         assert fetched.actor == "u"
@@ -58,5 +58,5 @@ class TestTurns:
         await conv_repo.add_turn(
             ConversationTurnRow(conversation_id="conv-1", turn_index=1, question="q1", **scope)
         )
-        turns = await conv_repo.list_turns("conv-1")
+        turns = await conv_repo.list_turns("conv-1", **scope)
         assert [t.turn_index for t in turns] == [1, 2]

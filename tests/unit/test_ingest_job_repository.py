@@ -27,7 +27,7 @@ class TestLifecycle:
             )
         )
         assert row.id == "job-1"
-        fetched = await jobs_repo.get("job-1")
+        fetched = await jobs_repo.get("job-1", **scope)
         assert fetched is not None
         assert fetched.status == "queued"
 
@@ -69,7 +69,7 @@ class TestEvents:
         await jobs_repo.append_event("job-1", stage="queued", message="m1", **scope)
         await jobs_repo.append_event("job-1", stage="loading", message="m2", **scope)
         await jobs_repo.append_event("job-1", stage="finished", payload={"source_id": "s"}, **scope)
-        events = await jobs_repo.list_events("job-1")
+        events = await jobs_repo.list_events("job-1", **scope)
         assert [e.stage for e in events] == ["queued", "loading", "finished"]
         # Ids monotonic.
         assert events[0].id < events[1].id < events[2].id
@@ -80,5 +80,5 @@ class TestEvents:
         e1 = await jobs_repo.append_event("job-1", stage="queued", **scope)
         e2 = await jobs_repo.append_event("job-1", stage="loading", **scope)
         # cursor = e1.id -- only e2 should come back.
-        events = await jobs_repo.list_events("job-1", after_id=e1.id)
+        events = await jobs_repo.list_events("job-1", after_id=e1.id, **scope)
         assert [e.id for e in events] == [e2.id]

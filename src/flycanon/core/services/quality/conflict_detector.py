@@ -102,6 +102,8 @@ class ConflictDetector:
             statuses=["published"],
             domains=[domain] if domain else None,
             limit=max_items,
+            tenant_id=tenant_id,
+            workspace_id=workspace_id,
         )
         if len(items) < 2:
             return {
@@ -113,7 +115,12 @@ class ConflictDetector:
         # Embed every item body once -- O(N) calls, not O(N^2).
         embeddings_by_id: dict[str, list[float]] = {}
         for item in items:
-            version = await self._knowledge.get_version(item.id, item.current_version)
+            version = await self._knowledge.get_version(
+                item.id,
+                item.current_version,
+                tenant_id=tenant_id,
+                workspace_id=workspace_id,
+            )
             if version is None or not version.body:
                 continue
             try:

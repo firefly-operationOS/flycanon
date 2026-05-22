@@ -86,7 +86,11 @@ class CandidateService:
         workspace_id: str,
         correlation_id: str | None = None,
     ) -> list[CandidateRow]:
-        source = await self._sources.get(request.source_id)
+        source = await self._sources.get(
+            request.source_id,
+            tenant_id=tenant_id,
+            workspace_id=workspace_id,
+        )
         if source is None:
             from flycanon.core.services.consolidation.errors import ConsolidationError
             from flycanon.models.entities.source import SourceRow as _SourceRow  # noqa: F401
@@ -159,7 +163,11 @@ class CandidateService:
         # materialise the same proposal twice. The previous
         # check-then-act pattern would let both threads pass
         # ``status == 'proposed'`` and both write a knowledge item.
-        existing = await self._candidates.get(candidate_id)
+        existing = await self._candidates.get(
+            candidate_id,
+            tenant_id=tenant_id,
+            workspace_id=workspace_id,
+        )
         if existing is None:
             raise CandidateNotFound(candidate_id)
         candidate = await self._candidates.claim_decision(
@@ -260,7 +268,11 @@ class CandidateService:
         workspace_id: str,
         correlation_id: str | None = None,
     ) -> CandidateRow:
-        existing = await self._candidates.get(candidate_id)
+        existing = await self._candidates.get(
+            candidate_id,
+            tenant_id=tenant_id,
+            workspace_id=workspace_id,
+        )
         if existing is None:
             raise CandidateNotFound(candidate_id)
         candidate = await self._candidates.claim_decision(

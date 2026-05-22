@@ -48,9 +48,28 @@ class ConversationRepository:
             await session.refresh(row)
             return row
 
-    async def get(self, conversation_id: str) -> ConversationRow | None:
+    async def get(
+        self,
+        conversation_id: str,
+        *,
+        tenant_id: str,
+        workspace_id: str,
+    ) -> ConversationRow | None:
+        """Look up one conversation, scoped to ``(tenant_id, workspace_id)``.
+
+        Plan 6 Task 1: scope kwargs are MANDATORY. A conversation
+        living in a different workspace (same tenant) returns
+        ``None`` instead of leaking.
+        """
         async with self._session_factory() as session:
-            return await session.get(ConversationRow, conversation_id)
+            result = await session.execute(
+                select(ConversationRow).where(
+                    ConversationRow.id == conversation_id,
+                    ConversationRow.tenant_id == tenant_id,
+                    ConversationRow.workspace_id == workspace_id,
+                )
+            )
+            return result.scalars().first()
 
     async def update(self, row: ConversationRow) -> ConversationRow:
         async with self.session() as session:
@@ -69,11 +88,27 @@ class ConversationRepository:
             await session.refresh(row)
             return row
 
-    async def list_turns(self, conversation_id: str) -> list[ConversationTurnRow]:
+    async def list_turns(
+        self,
+        conversation_id: str,
+        *,
+        tenant_id: str,
+        workspace_id: str,
+    ) -> list[ConversationTurnRow]:
+        """Return turns for ``conversation_id``, scoped to ``(tenant, workspace)``.
+
+        Scope kwargs are MANDATORY -- Plan 6 Task 1. Turns belonging
+        to a conversation owned by a different workspace (same
+        tenant) return an empty list.
+        """
         async with self._session_factory() as session:
             result = await session.execute(
                 select(ConversationTurnRow)
-                .where(ConversationTurnRow.conversation_id == conversation_id)
+                .where(
+                    ConversationTurnRow.conversation_id == conversation_id,
+                    ConversationTurnRow.tenant_id == tenant_id,
+                    ConversationTurnRow.workspace_id == workspace_id,
+                )
                 .order_by(ConversationTurnRow.turn_index.asc())
             )
             return list(result.scalars().all())

@@ -133,11 +133,21 @@ class ConversationService:
         workspace_id: str | None = None,
         actor: str | None = None,  # noqa: ARG002 -- reserved; audit comes from the conversation row
     ) -> tuple[ConversationRow, ConversationTurnRow]:
-        conversation = await self._repository.get(conversation_id)
+        scope_tenant = tenant_id or "default"
+        scope_workspace = workspace_id or "default"
+        conversation = await self._repository.get(
+            conversation_id,
+            tenant_id=scope_tenant,
+            workspace_id=scope_workspace,
+        )
         if conversation is None:
             raise ConversationNotFound(conversation_id)
 
-        prior = await self._repository.list_turns(conversation_id)
+        prior = await self._repository.list_turns(
+            conversation_id,
+            tenant_id=scope_tenant,
+            workspace_id=scope_workspace,
+        )
         # Two-pronged context delivery:
         # * Older context lives in the rolling ``summary`` and rides on
         #   the system-instructions slot (alongside any caller-supplied
@@ -227,11 +237,31 @@ class ConversationService:
         )
         return conversation, turn_stored
 
-    async def get(self, conversation_id: str) -> Conversation:
-        conv = await self._repository.get(conversation_id)
+    async def get(
+        self,
+        conversation_id: str,
+        *,
+        tenant_id: str,
+        workspace_id: str,
+    ) -> Conversation:
+        """Return ``conversation_id`` scoped to ``(tenant_id, workspace_id)``.
+
+        Plan 6 Task 1: the scope kwargs are MANDATORY. A conversation
+        owned by a different workspace (same tenant) raises
+        :class:`ConversationNotFound`.
+        """
+        conv = await self._repository.get(
+            conversation_id,
+            tenant_id=tenant_id,
+            workspace_id=workspace_id,
+        )
         if conv is None:
             raise ConversationNotFound(conversation_id)
-        turns = await self._repository.list_turns(conversation_id)
+        turns = await self._repository.list_turns(
+            conversation_id,
+            tenant_id=tenant_id,
+            workspace_id=workspace_id,
+        )
         return Conversation(
             id=conv.id,
             title=conv.title,
