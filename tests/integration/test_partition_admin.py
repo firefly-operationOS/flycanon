@@ -72,37 +72,6 @@ _TEST_DIM = 3
 
 
 # ---------------------------------------------------------------------------
-# Known fragility: ``promote_tenant_to_partition`` uses a SQLAlchemy bind
-# parameter (``FOR VALUES IN (:tenant_id)``) inside a CREATE TABLE
-# statement. asyncpg -- the driver used by the production AsyncEngine
-# this helper is invoked against -- rejects bind parameters in DDL
-# statements at the wire-protocol level:
-#
-#     InterfaceError: the server expects 0 arguments for this query,
-#     1 was passed.
-#     HINT: parameters are supported only in SELECT, INSERT, UPDATE,
-#     DELETE, MERGE and VALUES statements, and will *not* work in
-#     statements like CREATE VIEW or DECLARE CURSOR.
-#
-# Both ``validate_slug`` calls on the tenant_id keep the literal-
-# embedding form safe (the slug grammar rejects DDL-relevant
-# metacharacters), so the fix is to drop the bind parameter and
-# inline the already-validated ``tenant_id`` into the DDL. Until that
-# patch lands, every test that invokes ``promote_tenant_to_partition``
-# against asyncpg is xfail-strict so a future fix surfaces as an
-# unexpected-pass and forces the mark to be removed.
-_PROMOTE_DDL_PARAM_BUG = pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "partition_admin.promote_tenant_to_partition uses a bind parameter "
-        "in CREATE TABLE ... FOR VALUES IN (:tenant_id); asyncpg rejects "
-        "parameters in DDL. Fix: inline validate_slug(tenant_id) into the "
-        "DDL literal (it's already grammar-checked) and drop the params dict."
-    ),
-)
-
-
-# ---------------------------------------------------------------------------
 # One-time partitioned-schema setup
 # ---------------------------------------------------------------------------
 
@@ -228,6 +197,12 @@ def _clean_tenant_partitions(
         ).all()
         for row in rows:
             conn.execute(sa.text(f"DROP TABLE IF EXISTS {row.relname} CASCADE"))
+        # Also clear any rows that previous tests seeded into the default
+        # partition. Promoting a tenant later fails with a check-violation
+        # if the default partition still has rows for that tenant, since
+        # the new partition's FOR VALUES IN (...) constraint would now be
+        # violated by the surviving default-partition rows.
+        conn.execute(sa.text("DELETE FROM canon_chunk_vectors"))
 
 
 # ---------------------------------------------------------------------------
@@ -258,9 +233,7 @@ def _index_exists(engine: sa.Engine, index_name: str) -> bool:
     """Return True iff a (relkind='i') with this name exists."""
     with engine.begin() as conn:
         result = conn.execute(
-            sa.text(
-                "SELECT 1 FROM pg_class WHERE relkind = 'i' AND relname = :name"
-            ),
+            sa.text("SELECT 1 FROM pg_class WHERE relkind = 'i' AND relname = :name"),
             {"name": index_name},
         ).scalar()
     return result is not None
@@ -308,9 +281,7 @@ def _with_async_engine(pg_container, coro_factory):  # type: ignore[no-untyped-d
     """Build an asyncpg engine, hand it to ``coro_factory``, dispose."""
 
     async def _runner() -> object:
-        engine: AsyncEngine = create_async_engine(
-            _async_admin_url(pg_container), future=True
-        )
+        engine: AsyncEngine = create_async_engine(_async_admin_url(pg_container), future=True)
         try:
             return await coro_factory(engine)
         finally:
@@ -336,7 +307,6 @@ def test_is_partitioned_reports_true_for_partitioned_root(
     assert _with_async_engine(pg_container, _check) is True
 
 
-@_PROMOTE_DDL_PARAM_BUG
 def test_promote_creates_dedicated_partition(
     pg_container,  # type: ignore[no-untyped-def]
     _partitioned_chunk_table: sa.Engine,
@@ -358,7 +328,6 @@ def test_promote_creates_dedicated_partition(
     assert _has_partition(_partitioned_chunk_table, "canon_chunk_vectors_acme")
 
 
-@_PROMOTE_DDL_PARAM_BUG
 def test_promote_creates_per_partition_hnsw_index(
     pg_container,  # type: ignore[no-untyped-def]
     _partitioned_chunk_table: sa.Engine,
@@ -378,7 +347,6 @@ def test_promote_creates_per_partition_hnsw_index(
     assert _index_exists(_partitioned_chunk_table, "canon_chunk_vectors_acme_hnsw")
 
 
-@_PROMOTE_DDL_PARAM_BUG
 def test_promote_is_idempotent_on_already_promoted_tenant(
     pg_container,  # type: ignore[no-untyped-def]
     _partitioned_chunk_table: sa.Engine,
@@ -512,7 +480,6 @@ def test_promote_raises_when_table_not_partitioned(
             conn.execute(sa.text("GRANT ALL ON canon_chunk_vectors_default TO app_user"))
 
 
-@_PROMOTE_DDL_PARAM_BUG
 def test_demote_removes_partition(
     pg_container,  # type: ignore[no-untyped-def]
     _partitioned_chunk_table: sa.Engine,
@@ -539,7 +506,6 @@ def test_demote_removes_partition(
     assert not _index_exists(_partitioned_chunk_table, "canon_chunk_vectors_acme_hnsw")
 
 
-@_PROMOTE_DDL_PARAM_BUG
 def test_demote_preserves_rows_via_default_partition(
     pg_container,  # type: ignore[no-untyped-def]
     _partitioned_chunk_table: sa.Engine,
@@ -584,9 +550,7 @@ def test_demote_preserves_rows_via_default_partition(
     # Sanity: BEFORE demote, the rows live in the dedicated partition.
     with _partitioned_chunk_table.begin() as conn:
         partition_rows = conn.execute(
-            sa.text(
-                "SELECT id FROM canon_chunk_vectors_acme WHERE id LIKE 'vec-pre-demote-%'"
-            )
+            sa.text("SELECT id FROM canon_chunk_vectors_acme WHERE id LIKE 'vec-pre-demote-%'")
         ).all()
         assert {r.id for r in partition_rows} == {"vec-pre-demote-1", "vec-pre-demote-2"}
 
@@ -596,16 +560,12 @@ def test_demote_preserves_rows_via_default_partition(
     # (and routed to the default partition).
     with _partitioned_chunk_table.begin() as conn:
         root_rows = conn.execute(
-            sa.text(
-                "SELECT id FROM canon_chunk_vectors WHERE id LIKE 'vec-pre-demote-%'"
-            )
+            sa.text("SELECT id FROM canon_chunk_vectors WHERE id LIKE 'vec-pre-demote-%'")
         ).all()
         assert {r.id for r in root_rows} == {"vec-pre-demote-1", "vec-pre-demote-2"}
 
         default_rows = conn.execute(
-            sa.text(
-                "SELECT id FROM canon_chunk_vectors_default WHERE id LIKE 'vec-pre-demote-%'"
-            )
+            sa.text("SELECT id FROM canon_chunk_vectors_default WHERE id LIKE 'vec-pre-demote-%'")
         ).all()
         assert {r.id for r in default_rows} == {"vec-pre-demote-1", "vec-pre-demote-2"}
 
@@ -624,12 +584,9 @@ def test_demote_is_idempotent_on_unpromoted_tenant(
     # doesn't exist. (The validate_slug call accepts the dash form.)
     _with_async_engine(pg_container, _demote)
 
-    assert not _has_partition(
-        _partitioned_chunk_table, "canon_chunk_vectors_never-promoted"
-    )
+    assert not _has_partition(_partitioned_chunk_table, "canon_chunk_vectors_never-promoted")
 
 
-@_PROMOTE_DDL_PARAM_BUG
 def test_cross_tenant_isolation_holds_after_promotion(
     pg_container,  # type: ignore[no-untyped-def]
     _partitioned_chunk_table: sa.Engine,
@@ -684,8 +641,7 @@ def test_cross_tenant_isolation_holds_after_promotion(
         conn.execute(sa.text("SET LOCAL app.workspace_id = 'ws-a'"))
         rows = conn.execute(
             sa.text(
-                "SELECT id, tenant_id FROM canon_chunk_vectors "
-                "WHERE id IN ('vec-iso-acme', 'vec-iso-bcorp')"
+                "SELECT id, tenant_id FROM canon_chunk_vectors WHERE id IN ('vec-iso-acme', 'vec-iso-bcorp')"
             )
         ).all()
         assert {(r.id, r.tenant_id) for r in rows} == {("vec-iso-acme", "acme")}
@@ -696,8 +652,7 @@ def test_cross_tenant_isolation_holds_after_promotion(
         conn.execute(sa.text("SET LOCAL app.workspace_id = 'ws-a'"))
         rows = conn.execute(
             sa.text(
-                "SELECT id, tenant_id FROM canon_chunk_vectors "
-                "WHERE id IN ('vec-iso-acme', 'vec-iso-bcorp')"
+                "SELECT id, tenant_id FROM canon_chunk_vectors WHERE id IN ('vec-iso-acme', 'vec-iso-bcorp')"
             )
         ).all()
         assert {(r.id, r.tenant_id) for r in rows} == {("vec-iso-bcorp", "bcorp")}

@@ -124,16 +124,21 @@ async def promote_tenant_to_partition(engine: AsyncEngine, tenant_id: str) -> No
         )
         if existing.scalar() is not None:
             return
-        # CREATE TABLE inside a transaction; FOR VALUES IN parametrised.
+        # CREATE TABLE inside a transaction. asyncpg rejects bind parameters
+        # in DDL at the wire-protocol level ("parameters are supported only
+        # in SELECT/INSERT/UPDATE/DELETE/MERGE/VALUES"), so we inline the
+        # tenant slug after validating it through the slug grammar
+        # (``^[a-z0-9][a-z0-9_-]{0,63}$``) -- no SQL metacharacter can survive
+        # that, which is what makes the literal embed safe here.
+        safe_tenant_id = validate_slug(tenant_id)
         await conn.execute(
             text(
                 f"""
                 CREATE TABLE {partition}
                 PARTITION OF canon_chunk_vectors
-                FOR VALUES IN (:tenant_id)
+                FOR VALUES IN ('{safe_tenant_id}')
                 """
-            ),
-            {"tenant_id": validate_slug(tenant_id)},
+            )
         )
         await conn.execute(
             text(
