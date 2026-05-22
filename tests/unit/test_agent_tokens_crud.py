@@ -132,9 +132,7 @@ def controller(service: AgentTokenService) -> AgentTokensController:
 
 class TestMint:
     @pytest.mark.asyncio
-    async def test_mint_returns_full_secret_once(
-        self, controller: AgentTokensController
-    ) -> None:
+    async def test_mint_returns_full_secret_once(self, controller: AgentTokensController) -> None:
         body = AgentTokenMintRequest(
             name="ci-runner",
             scopes=["agent.discoveries:validate"],
@@ -153,9 +151,7 @@ class TestMint:
         assert created.created_at is not None
 
     @pytest.mark.asyncio
-    async def test_mint_defaults_scopes_to_wildcard(
-        self, controller: AgentTokensController
-    ) -> None:
+    async def test_mint_defaults_scopes_to_wildcard(self, controller: AgentTokensController) -> None:
         body = AgentTokenMintRequest(name="default-scopes")
         created = await controller.mint(_request(tenant_id="acme"), body)
         assert created.scopes == ["*"]
@@ -163,9 +159,7 @@ class TestMint:
         assert created.rate_limit_rpm is None
 
     @pytest.mark.asyncio
-    async def test_mint_with_workspace_allowlist_persists(
-        self, controller: AgentTokensController
-    ) -> None:
+    async def test_mint_with_workspace_allowlist_persists(self, controller: AgentTokensController) -> None:
         body = AgentTokenMintRequest(
             name="scoped",
             workspace_allowlist=["ws-a", "ws-b"],
@@ -176,9 +170,7 @@ class TestMint:
         assert created.rate_limit_rpm == 120
 
     @pytest.mark.asyncio
-    async def test_agent_tier_caller_cannot_mint(
-        self, controller: AgentTokensController
-    ) -> None:
+    async def test_agent_tier_caller_cannot_mint(self, controller: AgentTokensController) -> None:
         # ``actor_from_agent_token`` resolves the actor string to
         # ``f"agent:{prefix}"`` (first 12 chars of the raw token) -- a
         # request carrying ``X-Agent-Token`` mirrors what reaches the
@@ -259,16 +251,12 @@ class TestRevoke:
         assert second is None
 
     @pytest.mark.asyncio
-    async def test_revoke_unknown_raises_404(
-        self, controller: AgentTokensController
-    ) -> None:
+    async def test_revoke_unknown_raises_404(self, controller: AgentTokensController) -> None:
         with pytest.raises(ResourceNotFound):
             await controller.revoke(_request(tenant_id="acme"), "does-not-exist")
 
     @pytest.mark.asyncio
-    async def test_revoke_cross_tenant_raises_404(
-        self, controller: AgentTokensController
-    ) -> None:
+    async def test_revoke_cross_tenant_raises_404(self, controller: AgentTokensController) -> None:
         # Token belongs to acme; bcorp must not be able to revoke it.
         minted = await controller.mint(
             _request(tenant_id="acme"),
@@ -280,9 +268,7 @@ class TestRevoke:
 
 class TestRemint:
     @pytest.mark.asyncio
-    async def test_remint_same_name_succeeds(
-        self, controller: AgentTokensController
-    ) -> None:
+    async def test_remint_same_name_succeeds(self, controller: AgentTokensController) -> None:
         """Names are not unique -- the same operator can mint a second
         token with the same human label and get a fresh secret back."""
         first = await controller.mint(
@@ -308,9 +294,7 @@ class TestCreatedAtUtc:
     """
 
     @pytest.mark.asyncio
-    async def test_created_at_is_timezone_aware(
-        self, controller: AgentTokensController
-    ) -> None:
+    async def test_created_at_is_timezone_aware(self, controller: AgentTokensController) -> None:
         created = await controller.mint(
             _request(tenant_id="acme"),
             AgentTokenMintRequest(name="tz-check"),
