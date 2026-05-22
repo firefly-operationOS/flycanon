@@ -31,6 +31,7 @@ over the result.
 ## Data model
 
 ```
+canon_workspaces        canonical store for workspace identity + lifecycle
 canon_sources           one row per inbound artefact (no bytes stored)
   -> canon_chunks       N rows per source, the retrieval-grade fragments
 canon_candidates        pre-canonical LLM proposals tied to a source
@@ -51,6 +52,46 @@ share the same operational Postgres; the file-backed SQLite FTS5
 corpus is only used when the `sqlite-vec` vector backend is selected.
 The dense vector projection is fully pluggable -- see _Pluggable
 retrieval backends_ below.
+
+Every `canon_*` row also carries `(tenant_id, workspace_id)` as the
+multitenancy scope -- see _Workspace + multitenancy_ below.
+
+## Workspace + multitenancy (Plan 2 foundation)
+
+Flycanon is the **canonical store** for workspace identity (per the
+unification spec section 4.1). The `canon_workspaces` table holds
+the authoritative row for every workspace; sibling services
+(flyradar, flydesk-*) read workspace details via a cached client
+(added in their respective plans).
+
+Every `canon_*` row carries `(tenant_id, workspace_id)` as NOT NULL
+columns. Today they default to `'default'` on every insert -- Plan 4
+(conventions adoption) will wire `require_tenant_context()` so
+services pass real values from request headers. Composite
+`(tenant_id, workspace_id)` indexes back the workspace-scoped query
+paths that Plan 4 introduces.
+
+### Workspace lifecycle
+
+`WorkspaceStatus` is one of: `draft`, `active`, `closed`,
+`handed_off`. The CRUD API at `/api/v1/workspaces` (added in Plan 4)
+exposes:
+
+- `POST /api/v1/workspaces` -- create
+- `GET /api/v1/workspaces` -- list (tenant-scoped via header)
+- `GET /api/v1/workspaces/{id}` -- fetch one
+- `PATCH /api/v1/workspaces/{id}` -- update
+- `POST /api/v1/workspaces/{id}:close` -- close (sets status +
+  `closed_at`)
+
+### Conventions module
+
+`flycanon.web.conventions` (ported from flyradar in Plan 1) supplies
+the building blocks for tenant-scoped HTTP: RFC 7807 envelope, the
+`require_tenant_context()` FastAPI dependency, an exception
+hierarchy that maps to RFC 7807, idempotency primitives, and a
+tenant-safe outbound HTTP client. It is in-tree and unit-tested
+today; controllers start consuming it in Plan 4.
 
 ## The seven workshop features
 
