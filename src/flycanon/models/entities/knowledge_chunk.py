@@ -20,7 +20,7 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import JSON, DateTime, ForeignKey, Index, Integer, String, Text, func, text
+from sqlalchemy import JSON, DateTime, ForeignKey, Index, Integer, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from flycanon.models.entities.base import Base
@@ -37,15 +37,11 @@ class KnowledgeChunkRow(Base):
     tenant_id: Mapped[str] = mapped_column(
         String(64),
         nullable=False,
-        server_default=text("'default'"),
-        default="default",
         index=True,
     )
     workspace_id: Mapped[str] = mapped_column(
         String(64),
         nullable=False,
-        server_default=text("'default'"),
-        default="default",
         index=True,
     )
     source_id: Mapped[str] = mapped_column(

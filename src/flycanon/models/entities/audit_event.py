@@ -14,7 +14,7 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import JSON, DateTime, Index, String, func, text
+from sqlalchemy import JSON, DateTime, Index, String, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from flycanon.models.entities.base import Base
@@ -31,15 +31,11 @@ class AuditEventRow(Base):
     tenant_id: Mapped[str] = mapped_column(
         String(64),
         nullable=False,
-        server_default=text("'default'"),
-        default="default",
         index=True,
     )
     workspace_id: Mapped[str] = mapped_column(
         String(64),
         nullable=False,
-        server_default=text("'default'"),
-        default="default",
         index=True,
     )
 

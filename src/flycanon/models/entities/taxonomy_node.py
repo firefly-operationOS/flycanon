@@ -21,7 +21,6 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
     func,
-    text,
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -39,15 +38,11 @@ class TaxonomyNodeRow(Base):
     tenant_id: Mapped[str] = mapped_column(
         String(64),
         nullable=False,
-        server_default=text("'default'"),
-        default="default",
         index=True,
     )
     workspace_id: Mapped[str] = mapped_column(
         String(64),
         nullable=False,
-        server_default=text("'default'"),
-        default="default",
         index=True,
     )
     parent_id: Mapped[str | None] = mapped_column(

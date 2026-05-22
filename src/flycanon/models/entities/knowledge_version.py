@@ -22,7 +22,6 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
     func,
-    text,
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -40,15 +39,11 @@ class KnowledgeVersionRow(Base):
     tenant_id: Mapped[str] = mapped_column(
         String(64),
         nullable=False,
-        server_default=text("'default'"),
-        default="default",
         index=True,
     )
     workspace_id: Mapped[str] = mapped_column(
         String(64),
         nullable=False,
-        server_default=text("'default'"),
-        default="default",
         index=True,
     )
     knowledge_item_id: Mapped[str] = mapped_column(

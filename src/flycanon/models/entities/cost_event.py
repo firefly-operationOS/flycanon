@@ -11,7 +11,7 @@ from __future__ import annotations
 from datetime import datetime
 from decimal import Decimal
 
-from sqlalchemy import DateTime, Index, Integer, Numeric, String, func, text
+from sqlalchemy import DateTime, Index, Integer, Numeric, String, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from flycanon.models.entities.base import Base
@@ -24,15 +24,11 @@ class CostEventRow(Base):
     tenant_id: Mapped[str] = mapped_column(
         String(64),
         nullable=False,
-        server_default=text("'default'"),
-        default="default",
         index=True,
     )
     workspace_id: Mapped[str] = mapped_column(
         String(64),
         nullable=False,
-        server_default=text("'default'"),
-        default="default",
         index=True,
     )
     agent_name: Mapped[str] = mapped_column(String(128), nullable=False)

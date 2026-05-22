@@ -16,7 +16,6 @@ from sqlalchemy import (
     String,
     Text,
     func,
-    text,
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -34,15 +33,11 @@ class IngestJobRow(Base):
     tenant_id: Mapped[str] = mapped_column(
         String(64),
         nullable=False,
-        server_default=text("'default'"),
-        default="default",
         index=True,
     )
     workspace_id: Mapped[str] = mapped_column(
         String(64),
         nullable=False,
-        server_default=text("'default'"),
-        default="default",
         index=True,
     )
     status: Mapped[str] = mapped_column(String(24), nullable=False, index=True)
@@ -92,15 +87,11 @@ class IngestJobEventRow(Base):
     tenant_id: Mapped[str] = mapped_column(
         String(64),
         nullable=False,
-        server_default=text("'default'"),
-        default="default",
         index=True,
     )
     workspace_id: Mapped[str] = mapped_column(
         String(64),
         nullable=False,
-        server_default=text("'default'"),
-        default="default",
         index=True,
     )
     job_id: Mapped[str] = mapped_column(

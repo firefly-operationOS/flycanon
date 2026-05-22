@@ -11,7 +11,7 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import JSON, DateTime, Index, Integer, String, Text, func, text
+from sqlalchemy import JSON, DateTime, Index, Integer, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from flycanon.models.entities.base import Base
@@ -29,15 +29,11 @@ class SourceRow(Base):
     tenant_id: Mapped[str] = mapped_column(
         String(64),
         nullable=False,
-        server_default=text("'default'"),
-        default="default",
         index=True,
     )
     workspace_id: Mapped[str] = mapped_column(
         String(64),
         nullable=False,
-        server_default=text("'default'"),
-        default="default",
         index=True,
     )
 
@@ -71,12 +67,17 @@ class SourceRow(Base):
     )
 
     __table_args__ = (
-        # SHA-256 is the idempotency anchor: two uploads of the same
-        # bytes hit the same row. The partial index keeps the
-        # constraint useful even on Postgres where ``NULL`` would
-        # otherwise be globally allowed.
+        # SHA-256 is the idempotency anchor *within a workspace*: two
+        # uploads of the same bytes into the same workspace hit the
+        # same row, while the same bytes uploaded into a different
+        # workspace get their own row (per unification spec section
+        # 4.2). The partial index keeps the constraint useful even
+        # on Postgres where ``NULL`` would otherwise be globally
+        # allowed.
         Index(
-            "uq_canon_sources_content_sha256",
+            "uq_canon_sources_tenant_workspace_content_sha256",
+            "tenant_id",
+            "workspace_id",
             "content_sha256",
             unique=True,
             postgresql_where=(content_sha256.is_not(None)),
