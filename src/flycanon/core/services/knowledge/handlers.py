@@ -55,6 +55,9 @@ from flycanon.models.repositories import KnowledgeRepository
 class CreateKnowledgeCommand(Command[KnowledgeVersion]):
     request: CreateKnowledgeRequest
     correlation_id: str | None = None
+    tenant_id: str | None = None
+    workspace_id: str | None = None
+    actor: str | None = None
 
 
 @command_handler
@@ -83,6 +86,9 @@ class UpdateKnowledgeCommand(Command[KnowledgeVersion]):
     item_id: str
     request: UpdateKnowledgeRequest
     correlation_id: str | None = None
+    tenant_id: str | None = None
+    workspace_id: str | None = None
+    actor: str | None = None
 
 
 @command_handler
@@ -112,6 +118,9 @@ class SupersedeKnowledgeCommand(Command[KnowledgeItem]):
     item_id: str
     request: SupersedeKnowledgeRequest
     correlation_id: str | None = None
+    tenant_id: str | None = None
+    workspace_id: str | None = None
+    actor: str | None = None
 
 
 @command_handler
@@ -135,6 +144,9 @@ class RetireKnowledgeCommand(Command[KnowledgeItem]):
     item_id: str
     request: RetireKnowledgeRequest
     correlation_id: str | None = None
+    tenant_id: str | None = None
+    workspace_id: str | None = None
+    actor: str | None = None
 
 
 @command_handler
@@ -161,6 +173,8 @@ class RetireKnowledgeHandler(CommandHandler[RetireKnowledgeCommand, KnowledgeIte
 @dataclass(frozen=True)
 class GetKnowledgeQuery(Query[KnowledgeItem | None]):
     item_id: str
+    tenant_id: str | None = None
+    workspace_id: str | None = None
 
 
 @query_handler
@@ -184,6 +198,8 @@ class ListKnowledgeQuery(Query[KnowledgeItemsPage]):
     jurisdictions: list[Jurisdiction] = field(default_factory=list)
     limit: int = 50
     offset: int = 0
+    tenant_id: str | None = None
+    workspace_id: str | None = None
 
 
 @query_handler
@@ -200,6 +216,8 @@ class ListKnowledgeHandler(QueryHandler[ListKnowledgeQuery, KnowledgeItemsPage])
             jurisdictions=[j.value for j in query.jurisdictions] or None,
             limit=query.limit,
             offset=query.offset,
+            tenant_id=query.tenant_id,
+            workspace_id=query.workspace_id,
         )
         return KnowledgeItemsPage(
             items=[to_knowledge_item(r) for r in rows],
@@ -212,6 +230,8 @@ class ListKnowledgeHandler(QueryHandler[ListKnowledgeQuery, KnowledgeItemsPage])
 @dataclass(frozen=True)
 class GetKnowledgeHistoryQuery(Query[list[KnowledgeVersion]]):
     item_id: str
+    tenant_id: str | None = None
+    workspace_id: str | None = None
 
 
 @query_handler
@@ -234,6 +254,8 @@ class GetKnowledgeHistoryHandler(QueryHandler[GetKnowledgeHistoryQuery, list[Kno
 class GetProvenanceQuery(Query[Provenance]):
     item_id: str
     version: int | None = None
+    tenant_id: str | None = None
+    workspace_id: str | None = None
 
 
 @query_handler
@@ -253,6 +275,8 @@ class GetKnowledgeDiffQuery(Query[KnowledgeVersionDiff]):
     item_id: str
     from_version: int
     to_version: int
+    tenant_id: str | None = None
+    workspace_id: str | None = None
 
 
 @query_handler
@@ -280,6 +304,9 @@ class AddKnowledgeRelationCommand(Command[KnowledgeRelation]):
     from_item_id: str
     request: CreateRelationRequest
     correlation_id: str | None = None
+    tenant_id: str | None = None
+    workspace_id: str | None = None
+    actor: str | None = None
 
 
 @command_handler
@@ -303,6 +330,8 @@ class RemoveKnowledgeRelationCommand(Command[None]):
     relation_id: str
     actor: str | None = None
     correlation_id: str | None = None
+    tenant_id: str | None = None
+    workspace_id: str | None = None
 
 
 @command_handler
@@ -323,6 +352,8 @@ class RemoveKnowledgeRelationHandler(CommandHandler[RemoveKnowledgeRelationComma
 @dataclass(frozen=True)
 class ListKnowledgeRelationsQuery(Query[KnowledgeRelations]):
     item_id: str
+    tenant_id: str | None = None
+    workspace_id: str | None = None
 
 
 @query_handler
@@ -353,6 +384,8 @@ class GetKnowledgeGraphQuery(Query[KnowledgeGraph]):
     statuses: list[KnowledgeStatus] = field(default_factory=list)
     include_sources: bool = True
     limit: int = 500
+    tenant_id: str | None = None
+    workspace_id: str | None = None
 
 
 @query_handler
@@ -379,6 +412,8 @@ class GetKnowledgeGraphMermaidQuery(Query[MermaidGraph]):
     statuses: list[KnowledgeStatus] = field(default_factory=list)
     include_sources: bool = True
     limit: int = 200
+    tenant_id: str | None = None
+    workspace_id: str | None = None
 
 
 @query_handler

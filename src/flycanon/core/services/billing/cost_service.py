@@ -86,13 +86,15 @@ class CostService:
         self,
         *,
         group_by: list[str],
-        actor: str | None = None,
+        tenant_id: str | None = None,
+        workspace_id: str | None = None,
         since: datetime | None = None,
         until: datetime | None = None,
     ) -> list[dict[str, Any]]:
         return await self._repository.aggregate(
             group_by=group_by,
-            actor=actor,
+            tenant_id=tenant_id,
+            workspace_id=workspace_id,
             since=since,
             until=until,
         )
@@ -100,7 +102,8 @@ class CostService:
     async def list_events(
         self,
         *,
-        actor: str | None = None,
+        tenant_id: str | None = None,
+        workspace_id: str | None = None,
         agent_name: str | None = None,
         since: datetime | None = None,
         until: datetime | None = None,
@@ -110,7 +113,8 @@ class CostService:
         """Per-call drill-down. The aggregator hides timing + correlation
         breadcrumbs; this list exposes them for incident forensics."""
         return await self._repository.list_events(
-            actor=actor,
+            tenant_id=tenant_id,
+            workspace_id=workspace_id,
             agent_name=agent_name,
             since=since,
             until=until,
@@ -122,20 +126,30 @@ class CostService:
         self,
         *,
         now: datetime | None = None,
-        actor: str | None = None,
+        tenant_id: str | None = None,
+        workspace_id: str | None = None,
     ) -> dict[str, Any]:
         """Snapshot of recent spend across rolling windows.
 
         Returns a single dict carrying ``last_24h`` / ``last_7d`` /
-        ``last_30d`` buckets plus the top model + top actor inside
-        each window. Designed for a status banner: "$4.20 today, $87
-        this month, top: anthropic:claude-sonnet-4-6".
+        ``last_30d`` buckets plus the top model inside each window.
+        Designed for a status banner: "$4.20 today, $87 this month,
+        top: anthropic:claude-sonnet-4-6".
+
+        Scope is fixed to the (tenant, workspace) passed in -- the
+        legacy ``actor`` partitioning proxy was retired in Plan 4.
         """
         now = now or datetime.now(UTC)
         result: dict[str, Any] = {"generated_at": now.isoformat()}
         for label, delta in _SUMMARY_WINDOWS:
             since = now - delta
-            rows = await self._repository.aggregate(group_by=["model"], actor=actor, since=since, until=now)
+            rows = await self._repository.aggregate(
+                group_by=["model"],
+                tenant_id=tenant_id,
+                workspace_id=workspace_id,
+                since=since,
+                until=now,
+            )
             total_cost = Decimal("0")
             total_calls = 0
             total_input = 0
@@ -151,20 +165,6 @@ class CostService:
                 if cost > top_model_cost:
                     top_model_cost = cost
                     top_model = r.get("model")
-            # Top actor across the same window (omitted when caller
-            # narrowed to a specific actor -- the answer would be
-            # trivially that actor).
-            top_actor: str | None = None
-            top_actor_cost = Decimal("0")
-            if not actor:
-                actor_rows = await self._repository.aggregate(group_by=["actor"], since=since, until=now)
-                for r in actor_rows:
-                    if r.get("actor") is None:
-                        continue
-                    cost = Decimal(str(r["cost_usd"] or 0))
-                    if cost > top_actor_cost:
-                        top_actor_cost = cost
-                        top_actor = r.get("actor")
             result[label] = {
                 "since": since.isoformat(),
                 "calls": total_calls,
@@ -174,8 +174,6 @@ class CostService:
                 "cost_usd": str(total_cost),
                 "top_model": top_model,
                 "top_model_cost_usd": str(top_model_cost),
-                "top_actor": top_actor,
-                "top_actor_cost_usd": str(top_actor_cost),
             }
         return result
 
@@ -183,6 +181,8 @@ class CostService:
         self,
         *,
         dimension: str,
+        tenant_id: str | None = None,
+        workspace_id: str | None = None,
         since: datetime | None = None,
         until: datetime | None = None,
         limit: int = _DEFAULT_TOP_LIMIT,
@@ -190,15 +190,22 @@ class CostService:
         """Top-N consumers by cost on a single dimension.
 
         ``dimension`` is one of the columns ``aggregate`` accepts
-        (``model`` / ``agent_name`` / ``actor``). Returned rows are
-        sorted by ``cost_usd`` descending in Python so the same
-        contract works on both Postgres and SQLite.
+        (``model`` / ``agent_name``). Returned rows are sorted by
+        ``cost_usd`` descending in Python so the same contract works
+        on both Postgres and SQLite. ``actor`` is intentionally NOT a
+        valid dimension -- it is audit metadata, not a scope key.
         """
-        if dimension not in {"model", "agent_name", "actor"}:
+        if dimension not in {"model", "agent_name"}:
             raise ValueError(
-                f"unknown billing top dimension {dimension!r}; expected one of: model, agent_name, actor"
+                f"unknown billing top dimension {dimension!r}; expected one of: model, agent_name"
             )
-        rows = await self._repository.aggregate(group_by=[dimension], since=since, until=until)
+        rows = await self._repository.aggregate(
+            group_by=[dimension],
+            tenant_id=tenant_id,
+            workspace_id=workspace_id,
+            since=since,
+            until=until,
+        )
         rows.sort(key=lambda r: Decimal(str(r.get("cost_usd") or 0)), reverse=True)
         return rows[: max(1, int(limit))]
 
@@ -206,6 +213,8 @@ class CostService:
         self,
         *,
         subject_kind: str | None = None,
+        tenant_id: str | None = None,
+        workspace_id: str | None = None,
         since: datetime | None = None,
         until: datetime | None = None,
         limit: int = _DEFAULT_TOP_LIMIT,
@@ -220,6 +229,8 @@ class CostService:
         """
         return await self._repository.list_subject_costs(
             subject_kind=subject_kind,
+            tenant_id=tenant_id,
+            workspace_id=workspace_id,
             since=since,
             until=until,
             limit=limit,
@@ -229,6 +240,8 @@ class CostService:
         self,
         *,
         group_by: list[str],
+        tenant_id: str | None = None,
+        workspace_id: str | None = None,
         since: datetime | None = None,
         until: datetime | None = None,
     ) -> list[dict[str, Any]]:
@@ -238,8 +251,14 @@ class CostService:
         captured alongside cost on every FireflyAgent invocation. The
         result is a sorted list with one entry per group bucket.
         """
-        groups = [g for g in group_by if g in {"model", "agent_name", "actor"}] or ["model"]
-        samples = await self._repository.latency_samples(group_by=groups, since=since, until=until)
+        groups = [g for g in group_by if g in {"model", "agent_name"}] or ["model"]
+        samples = await self._repository.latency_samples(
+            group_by=groups,
+            tenant_id=tenant_id,
+            workspace_id=workspace_id,
+            since=since,
+            until=until,
+        )
         out: list[dict[str, Any]] = []
         for key, latencies in samples.items():
             if not latencies:

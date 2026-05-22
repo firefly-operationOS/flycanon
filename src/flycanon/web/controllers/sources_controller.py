@@ -36,6 +36,7 @@ from pyfly.web import (
     put_mapping,
     request_mapping,
 )
+from starlette.requests import Request
 
 from flycanon.core.services.sources import (
     GetSourceQuery,
@@ -54,6 +55,7 @@ from flycanon.interfaces.dtos.source import (
     SubmitSourceRequest,
 )
 from flycanon.interfaces.enums import SourceKind, SourceStatus
+from flycanon.web.conventions import TenantContext, tenant_context_from_request
 
 logger = logging.getLogger(__name__)
 
@@ -121,6 +123,7 @@ class SourcesController:
     @post_mapping("", status_code=201)
     async def submit_json(
         self,
+        http_request: Request,
         payload: Valid[Body[SubmitSourceJsonPayload]],
         mode: QueryParam[str] = "sync",
         callback_url: QueryParam[str] = "",
@@ -178,6 +181,7 @@ class SourcesController:
         ``status=failed`` and the typed ``error_code`` /
         ``error_message`` so callers can inspect and re-submit.
         """
+        ctx: TenantContext = tenant_context_from_request(http_request)
         content, content_type, filename = await self._resolve_payload_content(payload)
         correlation_id = get_correlation_id()
         if mode.lower() == "async":
@@ -188,9 +192,11 @@ class SourcesController:
                 content=content,
                 filename=filename,
                 content_type=content_type,
-                actor=None,
+                actor=ctx.actor,
                 correlation_id=correlation_id,
                 callback_url=callback_url or None,
+                tenant_id=ctx.tenant_id,
+                workspace_id=ctx.workspace_id,
             )
             return to_ingest_job(row)
         return await self._commands.send(
@@ -201,7 +207,10 @@ class SourcesController:
                 content_type=content_type,
                 kind=payload.kind,
                 uri=payload.uri,
+                actor=ctx.actor,
                 correlation_id=correlation_id,
+                tenant_id=ctx.tenant_id,
+                workspace_id=ctx.workspace_id,
             )
         )
 
@@ -252,7 +261,11 @@ class SourcesController:
         raise ValueError("either content_base64 (inline bytes) or uri (URL to fetch) is required")
 
     @get_mapping("/{source_id}")
-    async def get_source(self, source_id: PathVar[str]) -> SourceRecord:
+    async def get_source(
+        self,
+        http_request: Request,
+        source_id: PathVar[str],
+    ) -> SourceRecord:
         """Fetch a single source by id.
 
         Returns the full :class:`SourceRecord`. The
@@ -264,7 +277,14 @@ class SourcesController:
 
         * ``404 source_not_found`` -- the id is unknown.
         """
-        record = await self._queries.query(GetSourceQuery(source_id=source_id))
+        ctx: TenantContext = tenant_context_from_request(http_request)
+        record = await self._queries.query(
+            GetSourceQuery(
+                source_id=source_id,
+                tenant_id=ctx.tenant_id,
+                workspace_id=ctx.workspace_id,
+            )
+        )
         if record is None:
             raise ResourceNotFoundException(f"source {source_id!r} not found")
         return record
@@ -272,6 +292,7 @@ class SourcesController:
     @post_mapping(":bulk", status_code=200)
     async def submit_bulk(
         self,
+        http_request: Request,
         payload: Valid[Body[BulkSubmitSourcesPayload]],
     ) -> BulkSourcesResponse:
         """Submit up to 100 sources in one call.
@@ -298,6 +319,7 @@ class SourcesController:
         SQS / S3 batch-API convention so an SDK retry helper can
         operate on the result list directly.
         """
+        ctx: TenantContext = tenant_context_from_request(http_request)
         correlation_id = get_correlation_id()
         results: list[BulkSourceResult] = []
         succeeded = 0
@@ -318,7 +340,10 @@ class SourcesController:
                         content_type=entry.content_type,
                         kind=entry.kind,
                         uri=entry.uri,
+                        actor=ctx.actor,
                         correlation_id=correlation_id,
+                        tenant_id=ctx.tenant_id,
+                        workspace_id=ctx.workspace_id,
                     )
                 )
                 results.append(BulkSourceResult(index=index, status="succeeded", source=source))
@@ -350,6 +375,7 @@ class SourcesController:
     @put_mapping("/{source_id}")
     async def replace_source(
         self,
+        http_request: Request,
         source_id: PathVar[str],
         payload: Valid[Body[SubmitSourceJsonPayload]],
     ) -> SourceRecord:
@@ -374,6 +400,7 @@ class SourcesController:
         citation) but do NOT block the replacement -- the audit
         trail is the system of record for that case.
         """
+        ctx: TenantContext = tenant_context_from_request(http_request)
         if not payload.content_base64:
             raise ValueError("content_base64 is required; URL-fetched re-ingestion is on the roadmap")
         try:
@@ -389,13 +416,17 @@ class SourcesController:
                 content_type=payload.content_type,
                 kind=payload.kind,
                 uri=payload.uri,
+                actor=ctx.actor,
                 correlation_id=get_correlation_id(),
+                tenant_id=ctx.tenant_id,
+                workspace_id=ctx.workspace_id,
             )
         )
 
     @get_mapping("")
     async def list_sources(
         self,
+        http_request: Request,
         status: QueryParam[str] = "",
         kind: QueryParam[str] = "",
         limit: QueryParam[int] = 50,
@@ -415,10 +446,18 @@ class SourcesController:
         index ``ix_canon_sources_kind_status_created`` keeps the
         query index-only.
         """
+        ctx: TenantContext = tenant_context_from_request(http_request)
         statuses = [SourceStatus(s) for s in _split_csv(status)] if status else []
         kinds = [SourceKind(k) for k in _split_csv(kind)] if kind else []
         return await self._queries.query(
-            ListSourcesQuery(statuses=statuses, kinds=kinds, limit=limit, offset=offset)
+            ListSourcesQuery(
+                statuses=statuses,
+                kinds=kinds,
+                limit=limit,
+                offset=offset,
+                tenant_id=ctx.tenant_id,
+                workspace_id=ctx.workspace_id,
+            )
         )
 
 

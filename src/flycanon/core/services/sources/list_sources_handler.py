@@ -20,6 +20,8 @@ class ListSourcesQuery(Query[SourcesPage]):
     kinds: list[SourceKind] = field(default_factory=list)
     limit: int = 50
     offset: int = 0
+    tenant_id: str | None = None
+    workspace_id: str | None = None
 
 
 @query_handler
@@ -35,6 +37,8 @@ class ListSourcesHandler(QueryHandler[ListSourcesQuery, SourcesPage]):
             kinds=[k.value for k in query.kinds] or None,
             limit=query.limit,
             offset=query.offset,
+            tenant_id=query.tenant_id,
+            workspace_id=query.workspace_id,
         )
         return SourcesPage(
             items=[to_source_record(r) for r in rows],

@@ -8,6 +8,7 @@ from datetime import datetime
 
 from pyfly.container import rest_controller
 from pyfly.web import get_mapping, request_mapping
+from starlette.requests import Request
 
 from flycanon.core.services.stats import StatsService
 from flycanon.interfaces.dtos.stats import (
@@ -19,6 +20,7 @@ from flycanon.interfaces.dtos.stats import (
     KnowledgeItemStats,
     SourceStats,
 )
+from flycanon.web.conventions import TenantContext, tenant_context_from_request
 
 logger = logging.getLogger(__name__)
 
@@ -33,13 +35,19 @@ class StatsController:
     rollup so a status dashboard can render the whole picture in one
     HTTP round-trip. Detailed cost drill-downs live under
     ``/api/v1/billing/*``.
+
+    Scope is enforced via the standard request headers, even though
+    the v1 snapshot itself is currently global -- per-workspace
+    rollups land in a follow-up so the snapshot wiring already
+    enforces the tenant contract.
     """
 
     def __init__(self, stats: StatsService) -> None:
         self._stats = stats
 
     @get_mapping("")
-    async def get(self) -> CorpusStats:
+    async def get(self, http_request: Request) -> CorpusStats:
+        _ctx: TenantContext = tenant_context_from_request(http_request)
         snapshot = await self._stats.snapshot()
         return CorpusStats(
             generated_at=datetime.fromisoformat(snapshot["generated_at"]),

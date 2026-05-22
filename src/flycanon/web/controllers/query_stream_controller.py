@@ -24,6 +24,7 @@ import time
 from pyfly.container import rest_controller
 from pyfly.cqrs import DefaultQueryBus
 from pyfly.web import Body, Valid, post_mapping, request_mapping
+from starlette.requests import Request
 from starlette.responses import StreamingResponse
 
 from flycanon.core.services.conversations import QuestionSuggester
@@ -31,6 +32,7 @@ from flycanon.core.services.query.answer_service import AnswerService
 from flycanon.core.services.query.search_service import _filters_from_request
 from flycanon.interfaces.dtos.conversation import SuggestRequest, SuggestResponse
 from flycanon.interfaces.dtos.query import AnswerRequest, SearchRequest
+from flycanon.web.conventions import TenantContext, tenant_context_from_request
 
 logger = logging.getLogger(__name__)
 
@@ -48,7 +50,11 @@ class QueryStreamController:
         self._suggester = suggester
 
     @post_mapping("/stream")
-    async def stream_answer(self, request: Valid[Body[AnswerRequest]]) -> StreamingResponse:
+    async def stream_answer(
+        self,
+        http_request: Request,
+        request: Valid[Body[AnswerRequest]],
+    ) -> StreamingResponse:
         """SSE answer stream.
 
         Frames:
@@ -57,7 +63,12 @@ class QueryStreamController:
           (UI can render citation badges immediately).
         * ``event: final`` -- terminal frame with the full answer
           + the cited subset + model + elapsed_ms + no_answer flag.
+
+        Scope is fixed to the (tenant, workspace) carried by the
+        request headers; the :class:`RetrievalService` fails closed
+        on missing values.
         """
+        ctx: TenantContext = tenant_context_from_request(http_request)
 
         async def _stream():
             started = time.perf_counter()
@@ -76,6 +87,8 @@ class QueryStreamController:
             )
             retrieval = await self._answer._retrieval.search(  # noqa: SLF001
                 query=request.question,
+                tenant_id=ctx.tenant_id,
+                workspace_id=ctx.workspace_id,
                 top_k=request.top_k,
                 filters=_filters_from_request(search_request),
             )
@@ -89,7 +102,11 @@ class QueryStreamController:
             # once the agentic framework's streaming surface lands;
             # in the meantime callers can still render citations
             # immediately and the answer body when it arrives.
-            response = await self._answer.answer(request)
+            response = await self._answer.answer(
+                request,
+                tenant_id=ctx.tenant_id,
+                workspace_id=ctx.workspace_id,
+            )
             elapsed = int((time.perf_counter() - started) * 1000)
             yield _sse_frame(
                 "final",
@@ -112,8 +129,16 @@ class QueryStreamController:
         )
 
     @post_mapping("/suggest")
-    async def suggest(self, request: Valid[Body[SuggestRequest]]) -> SuggestResponse:
+    async def suggest(
+        self,
+        http_request: Request,
+        request: Valid[Body[SuggestRequest]],
+    ) -> SuggestResponse:
         """Suggested follow-up questions for chat UI chips."""
+        # ctx is parsed for header enforcement -- the suggester is a
+        # stateless LLM call that doesn't touch tenant-scoped storage,
+        # so we don't thread the scope down further.
+        _ctx: TenantContext = tenant_context_from_request(http_request)
         suggestions = await self._suggester.suggest(
             question=request.question,
             answer=request.answer,

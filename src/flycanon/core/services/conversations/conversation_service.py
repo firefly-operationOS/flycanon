@@ -90,24 +90,35 @@ class ConversationService:
         request: CreateConversationRequest,
         *,
         correlation_id: str | None = None,
+        tenant_id: str | None = None,
+        workspace_id: str | None = None,
+        actor: str | None = None,
     ) -> ConversationRow:
+        # ``actor`` is audit metadata: it identifies the human / token
+        # that opened the conversation, not a scope key. Plan 4 wires
+        # it from the request context (``ctx.actor``) so the body
+        # surface no longer carries it.
         row = ConversationRow(
             id=str(uuid.uuid4()),
             title=request.title,
-            actor=request.actor,
+            actor=actor,
             model=request.model or self._settings.answer_model,
             metadata_json=dict(request.metadata or {}),
         )
+        if tenant_id is not None:
+            row.tenant_id = tenant_id
+        if workspace_id is not None:
+            row.workspace_id = workspace_id
         stored = await self._repository.add(row)
         await self._audit.record(
             event_type="conversation.created",
             subject_kind="conversation",
             subject_id=stored.id,
-            actor=request.actor,
+            actor=actor,
             correlation_id=correlation_id,
             payload={"title": request.title, "model": stored.model},
         )
-        logger.info("conversation created id=%s actor=%s", stored.id, request.actor)
+        logger.info("conversation created id=%s actor=%s", stored.id, actor)
         return stored
 
     async def append_turn(
@@ -116,6 +127,9 @@ class ConversationService:
         request: CreateTurnRequest,
         *,
         correlation_id: str | None = None,
+        tenant_id: str | None = None,
+        workspace_id: str | None = None,
+        actor: str | None = None,  # noqa: ARG002 -- reserved; audit comes from the conversation row
     ) -> tuple[ConversationRow, ConversationTurnRow]:
         conversation = await self._repository.get(conversation_id)
         if conversation is None:
@@ -146,6 +160,8 @@ class ConversationService:
                 model=conversation.model,
             ),
             prior_turns=message_history,
+            tenant_id=tenant_id,
+            workspace_id=workspace_id,
         )
 
         # Retry on the UNIQUE(conversation_id, turn_index) collision

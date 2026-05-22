@@ -35,6 +35,8 @@ class ReplaceSourceCommand(Command[SourceRecord]):
     uri: str | None = None
     actor: str | None = None
     correlation_id: str | None = None
+    tenant_id: str | None = None
+    workspace_id: str | None = None
     extra: dict[str, Any] = field(default_factory=dict)
 
 

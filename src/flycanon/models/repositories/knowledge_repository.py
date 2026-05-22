@@ -80,6 +80,8 @@ class KnowledgeRepository:
         jurisdictions: Sequence[str] | None = None,
         limit: int = 50,
         offset: int = 0,
+        tenant_id: str | None = None,
+        workspace_id: str | None = None,
     ) -> tuple[list[KnowledgeItemRow], int]:
         conditions: list[Any] = []
         if statuses:
@@ -88,6 +90,10 @@ class KnowledgeRepository:
             conditions.append(KnowledgeItemRow.domain.in_(list(domains)))
         if jurisdictions:
             conditions.append(KnowledgeItemRow.jurisdiction.in_(list(jurisdictions)))
+        if tenant_id:
+            conditions.append(KnowledgeItemRow.tenant_id == tenant_id)
+        if workspace_id:
+            conditions.append(KnowledgeItemRow.workspace_id == workspace_id)
 
         async with self._session_factory() as session:
             stmt = select(KnowledgeItemRow)

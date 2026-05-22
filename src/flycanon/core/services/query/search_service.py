@@ -17,10 +17,25 @@ class SearchService:
     def __init__(self, *, retrieval: RetrievalService) -> None:
         self._retrieval = retrieval
 
-    async def search(self, request: SearchRequest) -> SearchResponse:
+    async def search(
+        self,
+        request: SearchRequest,
+        *,
+        tenant_id: str | None = None,
+        workspace_id: str | None = None,
+    ) -> SearchResponse:
+        """Hybrid retrieval scoped to ``(tenant_id, workspace_id)``.
+
+        :class:`RetrievalService.search` fails closed on missing
+        scope, so callers MUST pass both values. The query handler
+        threads them through from the request-scoped
+        :class:`TenantContext`.
+        """
         filters = _filters_from_request(request)
         result = await self._retrieval.search(
             query=request.query,
+            tenant_id=tenant_id,
+            workspace_id=workspace_id,
             top_k=request.top_k,
             per_query_k=request.per_query_k,
             filters=filters,

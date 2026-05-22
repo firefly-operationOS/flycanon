@@ -3,12 +3,16 @@
 
 Six endpoints, all read-only:
 
-* ``GET /api/v1/billing``            -- aggregated report (date / model / agent_name / actor).
+* ``GET /api/v1/billing``            -- aggregated report (date / model / agent_name).
 * ``GET /api/v1/billing/events``     -- per-call drill-down (incident forensics).
 * ``GET /api/v1/billing/summary``    -- rolling-window snapshot (24h / 7d / 30d).
 * ``GET /api/v1/billing/top``        -- top-N consumers by cost on a chosen dimension.
 * ``GET /api/v1/billing/by-subject`` -- cost attribution per ``(subject_kind, subject_id)``.
 * ``GET /api/v1/billing/latency``    -- p50/p95/p99 latency from the same cost-event stream.
+
+All endpoints are scoped to the (tenant, workspace) carried by the
+``X-Tenant-Id`` + ``X-Workspace-Id`` request headers; cross-tenant
+and cross-workspace queries are out of scope for v1.
 
 Together these answer the four ops questions billing teams actually
 ask: "what did we spend?", "who spent it?", "where did it go?", and
@@ -24,6 +28,7 @@ from decimal import Decimal
 from pyfly.container import rest_controller
 from pyfly.kernel import InvalidRequestException
 from pyfly.web import QueryParam, get_mapping, request_mapping
+from starlette.requests import Request
 
 from flycanon.core.services.billing import CostService
 from flycanon.interfaces.dtos.billing import (
@@ -40,12 +45,18 @@ from flycanon.interfaces.dtos.billing import (
     TopConsumerRow,
     TopConsumersReport,
 )
+from flycanon.web.conventions import TenantContext, tenant_context_from_request
 
 logger = logging.getLogger(__name__)
 
 
-_TOP_DIMENSIONS: frozenset[str] = frozenset({"model", "agent_name", "actor"})
-_GROUP_COLUMNS: frozenset[str] = frozenset({"date", "model", "agent_name", "actor"})
+# Scope is fixed to (tenant_id, workspace_id) from request headers --
+# cross-tenant / cross-workspace billing reports are out of scope for
+# the v1 contract. The dimensions below only enumerate columns that
+# vary WITHIN one workspace; ``actor`` is audit metadata, never a
+# partitioning key.
+_TOP_DIMENSIONS: frozenset[str] = frozenset({"model", "agent_name"})
+_LATENCY_DIMENSIONS: frozenset[str] = frozenset({"model", "agent_name"})
 
 
 @rest_controller
@@ -57,19 +68,20 @@ class BillingController:
     @get_mapping("")
     async def report(
         self,
+        http_request: Request,
         group_by: QueryParam[str] = "date,model",
-        actor: QueryParam[str] = "",
         since: QueryParam[str] = "",
         until: QueryParam[str] = "",
     ) -> BillingReport:
         """Aggregated cost report.
 
+        Scope is fixed to the (tenant, workspace) carried by the
+        request headers; cross-scope rollups are out of v1.
+
         Query params:
 
         * ``group_by`` -- comma-separated columns. Allowed:
-          ``date`` / ``model`` / ``agent_name`` / ``actor``.
-        * ``actor`` -- narrow to a specific actor (a v1 proxy for
-          tenant before multi-tenancy lands).
+          ``date`` / ``model`` / ``agent_name``.
         * ``since`` / ``until`` -- ISO-8601 timestamps to bound
           the window.
 
@@ -77,14 +89,14 @@ class BillingController:
         the overall ``total_cost_usd`` + ``total_calls`` for the
         same filter window.
         """
+        ctx: TenantContext = tenant_context_from_request(http_request)
         groups = [g.strip() for g in (group_by or "").split(",") if g.strip()]
-        since_dt = _parse_iso(since)
-        until_dt = _parse_iso(until)
         records = await self._cost.aggregate(
             group_by=groups or ["date"],
-            actor=actor or None,
-            since=since_dt,
-            until=until_dt,
+            tenant_id=ctx.tenant_id,
+            workspace_id=ctx.workspace_id,
+            since=_parse_iso(since),
+            until=_parse_iso(until),
         )
 
         rows: list[BillingRow] = []
@@ -114,7 +126,7 @@ class BillingController:
     @get_mapping("/events")
     async def list_events(
         self,
-        actor: QueryParam[str] = "",
+        http_request: Request,
         agent_name: QueryParam[str] = "",
         since: QueryParam[str] = "",
         until: QueryParam[str] = "",
@@ -124,13 +136,16 @@ class BillingController:
         """Per-call drill-down view.
 
         The aggregator hides the call-level breadcrumbs (correlation
-        id, subject id, latency). This endpoint surfaces them so an
-        on-call engineer triaging "why did our spend spike at 14:32?"
-        can pivot from the aggregate row into the underlying call
-        list.
+        id, subject id, latency, actor). This endpoint surfaces them
+        so an on-call engineer triaging "why did our spend spike at
+        14:32?" can pivot from the aggregate row into the underlying
+        call list. ``actor`` is retained as audit metadata on each
+        row, but is no longer a scope filter.
         """
+        ctx: TenantContext = tenant_context_from_request(http_request)
         rows = await self._cost.list_events(
-            actor=actor or None,
+            tenant_id=ctx.tenant_id,
+            workspace_id=ctx.workspace_id,
             agent_name=agent_name or None,
             since=_parse_iso(since),
             until=_parse_iso(until),
@@ -161,15 +176,19 @@ class BillingController:
         )
 
     @get_mapping("/summary")
-    async def summary(self, actor: QueryParam[str] = "") -> BillingSummary:
+    async def summary(self, http_request: Request) -> BillingSummary:
         """Rolling-window cost snapshot.
 
         Three windows -- ``last_24h``, ``last_7d``, ``last_30d`` --
-        are always populated. The top model + top actor inside each
-        window land in the same envelope so a dashboard can render a
-        single banner without a follow-up query.
+        are always populated. The top model inside each window lands
+        in the same envelope so a dashboard can render a single
+        banner without a follow-up query.
         """
-        payload = await self._cost.summary(actor=actor or None)
+        ctx: TenantContext = tenant_context_from_request(http_request)
+        payload = await self._cost.summary(
+            tenant_id=ctx.tenant_id,
+            workspace_id=ctx.workspace_id,
+        )
         return BillingSummary(
             generated_at=_parse_iso_required(payload["generated_at"]),
             last_24h=_window(payload["last_24h"]),
@@ -180,6 +199,7 @@ class BillingController:
     @get_mapping("/top")
     async def top(
         self,
+        http_request: Request,
         dimension: QueryParam[str] = "model",
         since: QueryParam[str] = "",
         until: QueryParam[str] = "",
@@ -187,16 +207,19 @@ class BillingController:
     ) -> TopConsumersReport:
         """Top-N consumers by cost on a single dimension.
 
-        ``dimension`` is one of ``model`` / ``agent_name`` / ``actor``.
-        The handler returns the highest-cost ``limit`` rows for the
-        provided window.
+        ``dimension`` is one of ``model`` / ``agent_name``. The
+        handler returns the highest-cost ``limit`` rows for the
+        provided window, scoped to the request headers.
         """
+        ctx: TenantContext = tenant_context_from_request(http_request)
         if dimension not in _TOP_DIMENSIONS:
             raise InvalidRequestException(
                 f"unknown billing top dimension {dimension!r}; expected one of: {sorted(_TOP_DIMENSIONS)}"
             )
         rows = await self._cost.top(
             dimension=dimension,
+            tenant_id=ctx.tenant_id,
+            workspace_id=ctx.workspace_id,
             since=_parse_iso(since),
             until=_parse_iso(until),
             limit=max(1, min(int(limit), 100)),
@@ -219,6 +242,7 @@ class BillingController:
     @get_mapping("/by-subject")
     async def by_subject(
         self,
+        http_request: Request,
         subject_kind: QueryParam[str] = "",
         since: QueryParam[str] = "",
         until: QueryParam[str] = "",
@@ -231,8 +255,11 @@ class BillingController:
         ``subject_id`` when recording the cost event; rows without a
         subject are excluded from this report.
         """
+        ctx: TenantContext = tenant_context_from_request(http_request)
         rows = await self._cost.by_subject(
             subject_kind=subject_kind or None,
+            tenant_id=ctx.tenant_id,
+            workspace_id=ctx.workspace_id,
             since=_parse_iso(since),
             until=_parse_iso(until),
             limit=max(1, min(int(limit), 200)),
@@ -255,6 +282,7 @@ class BillingController:
     @get_mapping("/latency")
     async def latency(
         self,
+        http_request: Request,
         group_by: QueryParam[str] = "model",
         since: QueryParam[str] = "",
         until: QueryParam[str] = "",
@@ -267,15 +295,18 @@ class BillingController:
         ``percentile_cont`` (kept dialect-agnostic for the SQLite
         test path).
         """
+        ctx: TenantContext = tenant_context_from_request(http_request)
         groups = [g.strip() for g in (group_by or "").split(",") if g.strip()]
-        invalid = [g for g in groups if g not in _TOP_DIMENSIONS]
+        invalid = [g for g in groups if g not in _LATENCY_DIMENSIONS]
         if invalid:
             raise InvalidRequestException(
                 f"unknown latency group_by columns: {invalid}; "
-                f"expected one or more of: {sorted(_TOP_DIMENSIONS)}"
+                f"expected one or more of: {sorted(_LATENCY_DIMENSIONS)}"
             )
         rows = await self._cost.latency(
             group_by=groups or ["model"],
+            tenant_id=ctx.tenant_id,
+            workspace_id=ctx.workspace_id,
             since=_parse_iso(since),
             until=_parse_iso(until),
         )
@@ -319,6 +350,4 @@ def _window(payload: dict) -> BillingWindow:
         cost_usd=str(payload["cost_usd"]),
         top_model=payload.get("top_model"),
         top_model_cost_usd=str(payload.get("top_model_cost_usd") or "0"),
-        top_actor=payload.get("top_actor"),
-        top_actor_cost_usd=str(payload.get("top_actor_cost_usd") or "0"),
     )

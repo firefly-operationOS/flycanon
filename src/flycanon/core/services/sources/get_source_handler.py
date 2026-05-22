@@ -16,6 +16,8 @@ from flycanon.models.repositories import SourceRepository
 @dataclass(frozen=True)
 class GetSourceQuery(Query[SourceRecord | None]):
     source_id: str
+    tenant_id: str | None = None
+    workspace_id: str | None = None
 
 
 @query_handler

@@ -22,6 +22,8 @@ class CreateTaxonomyNodeCommand(Command[TaxonomyNode]):
     request: CreateTaxonomyNodeRequest
     actor: str | None = None
     correlation_id: str | None = None
+    tenant_id: str | None = None
+    workspace_id: str | None = None
 
 
 @command_handler
@@ -42,7 +44,8 @@ class CreateTaxonomyNodeHandler(CommandHandler[CreateTaxonomyNodeCommand, Taxono
 
 @dataclass(frozen=True)
 class GetTaxonomyQuery(Query[TaxonomyTree]):
-    pass
+    tenant_id: str | None = None
+    workspace_id: str | None = None
 
 
 @query_handler

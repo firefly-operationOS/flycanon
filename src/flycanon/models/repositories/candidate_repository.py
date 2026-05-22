@@ -52,6 +52,8 @@ class CandidateRepository:
         domain: str | None = None,
         limit: int = 50,
         offset: int = 0,
+        tenant_id: str | None = None,
+        workspace_id: str | None = None,
     ) -> tuple[list[CandidateRow], int]:
         conditions: list[Any] = []
         if statuses:
@@ -60,6 +62,10 @@ class CandidateRepository:
             conditions.append(CandidateRow.source_id == source_id)
         if domain:
             conditions.append(CandidateRow.domain == domain)
+        if tenant_id:
+            conditions.append(CandidateRow.tenant_id == tenant_id)
+        if workspace_id:
+            conditions.append(CandidateRow.workspace_id == workspace_id)
 
         async with self._session_factory() as session:
             stmt = select(CandidateRow)

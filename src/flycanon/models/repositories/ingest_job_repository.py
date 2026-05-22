@@ -249,11 +249,17 @@ class IngestJobRepository:
         statuses: Sequence[str] | None = None,
         limit: int = 50,
         offset: int = 0,
+        tenant_id: str | None = None,
+        workspace_id: str | None = None,
     ) -> list[IngestJobRow]:
         async with self._session_factory() as session:
             stmt = select(IngestJobRow)
             if statuses:
                 stmt = stmt.where(IngestJobRow.status.in_(list(statuses)))
+            if tenant_id:
+                stmt = stmt.where(IngestJobRow.tenant_id == tenant_id)
+            if workspace_id:
+                stmt = stmt.where(IngestJobRow.workspace_id == workspace_id)
             stmt = stmt.order_by(IngestJobRow.created_at.desc()).limit(limit).offset(offset)
             result = await session.execute(stmt)
             return list(result.scalars().all())

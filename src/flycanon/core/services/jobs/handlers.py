@@ -16,6 +16,8 @@ from flycanon.models.repositories.ingest_job_repository import IngestJobReposito
 @dataclass(frozen=True)
 class GetIngestJobQuery(Query[IngestJob | None]):
     job_id: str
+    tenant_id: str | None = None
+    workspace_id: str | None = None
 
 
 @query_handler
@@ -37,6 +39,8 @@ class ListIngestJobsQuery(Query[IngestJobsPage]):
     status: str | None = None
     limit: int = 50
     offset: int = 0
+    tenant_id: str | None = None
+    workspace_id: str | None = None
 
 
 @query_handler
@@ -52,6 +56,8 @@ class ListIngestJobsHandler(QueryHandler[ListIngestJobsQuery, IngestJobsPage]):
             statuses=statuses,
             limit=query.limit,
             offset=query.offset,
+            tenant_id=query.tenant_id,
+            workspace_id=query.workspace_id,
         )
         return IngestJobsPage(
             items=[_to_dto(row) for row in rows],
@@ -66,6 +72,8 @@ class ListIngestJobEventsQuery(Query[list[IngestJobEvent]]):
     job_id: str
     after_id: int | None = None
     limit: int = 200
+    tenant_id: str | None = None
+    workspace_id: str | None = None
 
 
 @query_handler

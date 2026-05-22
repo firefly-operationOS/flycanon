@@ -7,16 +7,24 @@ from pydantic import BaseModel, Field
 from pyfly.container import rest_controller
 from pyfly.observability.correlation import get_correlation_id
 from pyfly.web import Body, Valid, get_mapping, post_mapping, request_mapping
+from starlette.requests import Request
 
 from flycanon.core.services.quality import ConflictDetector, StaleDetector
 from flycanon.models.repositories.knowledge_repository import KnowledgeRepository
+from flycanon.web.conventions import TenantContext, tenant_context_from_request
 
 
 class ConflictScanRequest(BaseModel):
+    """``POST /api/v1/knowledge:detect-conflicts`` body.
+
+    ``actor`` is intentionally NOT a body field: the audit actor is
+    derived from the request context (the JWT subject or agent-token
+    prefix), per the Plan 4 wire contract.
+    """
+
     domain: str | None = Field(default=None)
     min_similarity: float = Field(default=0.85, ge=0.5, le=1.0)
     max_items: int = Field(default=50, ge=2, le=500)
-    actor: str | None = Field(default=None)
 
 
 class ConflictScanResponse(BaseModel):
@@ -62,7 +70,7 @@ class KnowledgeQualityController:
         self._conflicts = conflicts
 
     @get_mapping(":stale")
-    async def stale_report(self) -> StaleReport:
+    async def stale_report(self, http_request: Request) -> StaleReport:
         """Return staleness scores for every published knowledge item.
 
         Score is on-demand + cached on
@@ -73,7 +81,13 @@ class KnowledgeQualityController:
         ``score = 1 - max(cosine(version_body, recent_source))``.
         High = the canon disagrees with fresh sources.
         """
-        items, _total = await self._knowledge.list_items(statuses=["published"], limit=200)
+        ctx: TenantContext = tenant_context_from_request(http_request)
+        items, _total = await self._knowledge.list_items(
+            statuses=["published"],
+            limit=200,
+            tenant_id=ctx.tenant_id,
+            workspace_id=ctx.workspace_id,
+        )
         rows: list[StaleItem] = []
         for item in items:
             stale = await self._stale.score(item)
@@ -93,6 +107,7 @@ class KnowledgeQualityController:
     @post_mapping(":detect-conflicts")
     async def detect_conflicts(
         self,
+        http_request: Request,
         request: Valid[Body[ConflictScanRequest]],
     ) -> ConflictScanResponse:
         """Run the conflict-detection pass and queue any contradictions.
@@ -102,11 +117,12 @@ class KnowledgeQualityController:
         existing candidate queue surfaces them alongside ordinary
         proposals.
         """
+        ctx: TenantContext = tenant_context_from_request(http_request)
         result = await self._conflicts.detect(
             domain=request.domain,
             min_similarity=request.min_similarity,
             max_items=request.max_items,
-            actor=request.actor,
+            actor=ctx.actor,
             correlation_id=get_correlation_id(),
         )
         return ConflictScanResponse(

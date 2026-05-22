@@ -13,8 +13,9 @@ class BillingRow(BaseModel):
     """One row of the aggregated billing report.
 
     Group columns echo the request's ``group_by`` selection
-    (``date`` / ``model`` / ``agent_name`` / ``actor``). The
-    summed columns are always present.
+    (``date`` / ``model`` / ``agent_name``). The summed columns
+    are always present. Scope (tenant + workspace) is fixed via
+    request headers and never appears in ``group_by``.
     """
 
     input_tokens: int = Field(ge=0, description="Sum of input tokens across calls in this bucket.")
@@ -69,7 +70,11 @@ class CostEvent(BaseModel):
     )
     actor: str | None = Field(
         default=None,
-        description="Caller identity. Stable proxy for tenant until multi-tenancy lands.",
+        description=(
+            "Caller identity for audit / forensics (JWT subject or "
+            "agent-token prefix). NOT a scope key -- the (tenant, "
+            "workspace) headers drive scoping."
+        ),
     )
     correlation_id: str | None = Field(
         default=None,
@@ -114,14 +119,6 @@ class BillingWindow(BaseModel):
         description="Most expensive model identifier in this window (``null`` if no rows).",
     )
     top_model_cost_usd: str = Field(default="0", description="USD spend on ``top_model`` in this window.")
-    top_actor: str | None = Field(
-        default=None,
-        description=(
-            "Most expensive actor in this window. Omitted (``null``) when the "
-            "caller narrowed the report to a specific actor."
-        ),
-    )
-    top_actor_cost_usd: str = Field(default="0", description="USD spend on ``top_actor`` in this window.")
 
 
 class BillingSummary(BaseModel):
@@ -141,9 +138,7 @@ class BillingSummary(BaseModel):
 class TopConsumerRow(BaseModel):
     """One entry in the top-N list keyed by the requested dimension."""
 
-    dimension: str = Field(
-        description="Column we grouped by (one of ``model`` / ``agent_name`` / ``actor``)."
-    )
+    dimension: str = Field(description="Column we grouped by (one of ``model`` / ``agent_name``).")
     value: str | None = Field(
         default=None,
         description="The grouped value for this row (``null`` if the row had no value for ``dimension``).",

@@ -10,6 +10,7 @@ from pyfly.cqrs import DefaultCommandBus, DefaultQueryBus
 from pyfly.kernel import ResourceNotFoundException
 from pyfly.observability.correlation import get_correlation_id
 from pyfly.web import Body, PathVar, Valid, get_mapping, post_mapping, request_mapping
+from starlette.requests import Request
 
 from flycanon.core.services.conversations import (
     ConversationNotFound,
@@ -21,6 +22,7 @@ from flycanon.interfaces.dtos.conversation import (
     CreateTurnRequest,
     TurnResponse,
 )
+from flycanon.web.conventions import TenantContext, tenant_context_from_request
 
 logger = logging.getLogger(__name__)
 
@@ -41,15 +43,32 @@ class ConversationsController:
     @post_mapping("", status_code=201)
     async def create_conversation(
         self,
+        http_request: Request,
         request: Valid[Body[CreateConversationRequest]],
     ) -> Conversation:
         """Open a fresh conversation -- returns the empty session."""
-        row = await self._service.create(request, correlation_id=get_correlation_id())
+        ctx: TenantContext = tenant_context_from_request(http_request)
+        row = await self._service.create(
+            request,
+            correlation_id=get_correlation_id(),
+            tenant_id=ctx.tenant_id,
+            workspace_id=ctx.workspace_id,
+            actor=ctx.actor,
+        )
         return await self._service.get(row.id)
 
     @get_mapping("/{conversation_id}")
-    async def get_conversation(self, conversation_id: PathVar[str]) -> Conversation:
+    async def get_conversation(
+        self,
+        http_request: Request,
+        conversation_id: PathVar[str],
+    ) -> Conversation:
         """Return the full session + turn history."""
+        # ctx is parsed for header enforcement even though we don't
+        # currently use it inside this read path -- the service-side
+        # scope filter is the source of truth for cross-tenant safety
+        # and lands in Plan 4 follow-ups.
+        _ctx: TenantContext = tenant_context_from_request(http_request)
         try:
             return await self._service.get(conversation_id)
         except ConversationNotFound as exc:
@@ -58,15 +77,20 @@ class ConversationsController:
     @post_mapping("/{conversation_id}/turn", status_code=201)
     async def append_turn(
         self,
+        http_request: Request,
         conversation_id: PathVar[str],
         request: Valid[Body[CreateTurnRequest]],
     ) -> TurnResponse:
         """Run the next turn and return the answer + citations."""
+        ctx: TenantContext = tenant_context_from_request(http_request)
         try:
             _conv, turn = await self._service.append_turn(
                 conversation_id,
                 request,
                 correlation_id=get_correlation_id(),
+                tenant_id=ctx.tenant_id,
+                workspace_id=ctx.workspace_id,
+                actor=ctx.actor,
             )
         except ConversationNotFound as exc:
             raise ResourceNotFoundException(str(exc)) from exc

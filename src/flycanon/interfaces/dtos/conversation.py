@@ -19,10 +19,14 @@ from flycanon.interfaces.dtos.query import Hit
 
 
 class CreateConversationRequest(BaseModel):
-    """Open a fresh conversation."""
+    """Open a fresh conversation.
+
+    ``actor`` is intentionally NOT a body field: the conversation's
+    actor is derived from the request context (the JWT subject or
+    agent-token prefix), per the Plan 4 wire contract.
+    """
 
     title: str | None = Field(default=None, max_length=512)
-    actor: str | None = Field(default=None)
     model: str | None = Field(
         default=None,
         description=(

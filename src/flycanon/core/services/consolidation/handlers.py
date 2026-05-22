@@ -25,6 +25,9 @@ from flycanon.models.repositories import CandidateRepository
 class ProposeCandidatesCommand(Command[list[CandidateRecord]]):
     request: ProposeCandidateRequest
     correlation_id: str | None = None
+    tenant_id: str | None = None
+    workspace_id: str | None = None
+    actor: str | None = None
 
 
 @command_handler
@@ -46,6 +49,9 @@ class AcceptCandidateCommand(Command[CandidateRecord]):
     candidate_id: str
     request: AcceptCandidateRequest
     correlation_id: str | None = None
+    tenant_id: str | None = None
+    workspace_id: str | None = None
+    actor: str | None = None
 
 
 @command_handler
@@ -67,6 +73,9 @@ class RejectCandidateCommand(Command[CandidateRecord]):
     candidate_id: str
     request: RejectCandidateRequest
     correlation_id: str | None = None
+    tenant_id: str | None = None
+    workspace_id: str | None = None
+    actor: str | None = None
 
 
 @command_handler
@@ -86,6 +95,8 @@ class RejectCandidateHandler(CommandHandler[RejectCandidateCommand, CandidateRec
 @dataclass(frozen=True)
 class GetCandidateQuery(Query[CandidateRecord | None]):
     candidate_id: str
+    tenant_id: str | None = None
+    workspace_id: str | None = None
 
 
 @query_handler
@@ -109,6 +120,8 @@ class ListCandidatesQuery(Query[CandidatesPage]):
     domain: Domain | None = None
     limit: int = 50
     offset: int = 0
+    tenant_id: str | None = None
+    workspace_id: str | None = None
 
 
 @query_handler
@@ -125,6 +138,8 @@ class ListCandidatesHandler(QueryHandler[ListCandidatesQuery, CandidatesPage]):
             domain=query.domain.value if query.domain else None,
             limit=query.limit,
             offset=query.offset,
+            tenant_id=query.tenant_id,
+            workspace_id=query.workspace_id,
         )
         return CandidatesPage(
             items=[to_candidate_record(r) for r in rows],

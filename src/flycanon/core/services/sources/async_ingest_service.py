@@ -76,6 +76,8 @@ class AsyncIngestService:
         actor: str | None,
         correlation_id: str | None,
         callback_url: str | None = None,
+        tenant_id: str | None = None,
+        workspace_id: str | None = None,
     ) -> IngestJobRow:
         """Persist a job row + broadcast the IngestSourceRequested event."""
         job_id = str(uuid.uuid4())
@@ -103,6 +105,10 @@ class AsyncIngestService:
             callback_url=callback_url,
             metadata_json=payload,
         )
+        if tenant_id is not None:
+            row.tenant_id = tenant_id
+        if workspace_id is not None:
+            row.workspace_id = workspace_id
         stored = await self._repository.add(row)
         await self._repository.append_event(
             stored.id,

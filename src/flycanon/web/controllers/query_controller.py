@@ -17,6 +17,7 @@ from __future__ import annotations
 from pyfly.container import rest_controller
 from pyfly.cqrs import DefaultQueryBus
 from pyfly.web import Body, Valid, post_mapping, request_mapping
+from starlette.requests import Request
 
 from flycanon.core.services.query.handlers import (
     AnswerKnowledgeQuery,
@@ -28,6 +29,7 @@ from flycanon.interfaces.dtos.query import (
     SearchRequest,
     SearchResponse,
 )
+from flycanon.web.conventions import TenantContext, tenant_context_from_request
 
 
 @rest_controller
@@ -39,7 +41,11 @@ class QueryController:
         self._queries = queries
 
     @post_mapping("/search")
-    async def search(self, request: Valid[Body[SearchRequest]]) -> SearchResponse:
+    async def search(
+        self,
+        http_request: Request,
+        request: Valid[Body[SearchRequest]],
+    ) -> SearchResponse:
         """Hybrid retrieval over the canon corpus.
 
         BM25 (Postgres ``tsvector`` + GIN on ``canon_chunks`` for the
@@ -60,6 +66,10 @@ class QueryController:
         trimming, but heavy filtering may still starve the result
         set -- raise ``per_query_k`` if so.
 
+        Scope is fixed to the (tenant, workspace) carried by the
+        request headers; the :class:`RetrievalService` fails closed
+        on missing values.
+
         Use this surface when:
 
         * you want to power your own answer / summarisation step,
@@ -71,10 +81,21 @@ class QueryController:
         Returns :class:`SearchResponse` (always 200). Empty result
         sets return ``hits=[]``.
         """
-        return await self._queries.query(SearchKnowledgeQuery(request=request))
+        ctx: TenantContext = tenant_context_from_request(http_request)
+        return await self._queries.query(
+            SearchKnowledgeQuery(
+                request=request,
+                tenant_id=ctx.tenant_id,
+                workspace_id=ctx.workspace_id,
+            )
+        )
 
     @post_mapping("/query")
-    async def answer(self, request: Valid[Body[AnswerRequest]]) -> AnswerResponse:
+    async def answer(
+        self,
+        http_request: Request,
+        request: Valid[Body[AnswerRequest]],
+    ) -> AnswerResponse:
         """Grounded RAG answer with explicit citations.
 
         Pipeline:
@@ -110,6 +131,10 @@ class QueryController:
           ``citations`` list. The citations are a *subset* of the
           retrieval (only the chunks the model actually cited).
 
+        Scope is fixed to the (tenant, workspace) carried by the
+        request headers; the :class:`RetrievalService` fails closed
+        on missing values.
+
         Use this surface when:
 
         * you want a final user-facing answer with citation badges,
@@ -117,4 +142,11 @@ class QueryController:
           backend,
         * you're prototyping a chatbot or a copilot integration.
         """
-        return await self._queries.query(AnswerKnowledgeQuery(request=request))
+        ctx: TenantContext = tenant_context_from_request(http_request)
+        return await self._queries.query(
+            AnswerKnowledgeQuery(
+                request=request,
+                tenant_id=ctx.tenant_id,
+                workspace_id=ctx.workspace_id,
+            )
+        )

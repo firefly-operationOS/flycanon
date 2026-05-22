@@ -73,12 +73,18 @@ class SourceRepository:
         kinds: Sequence[str] | None = None,
         limit: int = 50,
         offset: int = 0,
+        tenant_id: str | None = None,
+        workspace_id: str | None = None,
     ) -> tuple[list[SourceRow], int]:
         conditions: list[Any] = []
         if statuses:
             conditions.append(SourceRow.status.in_(list(statuses)))
         if kinds:
             conditions.append(SourceRow.kind.in_(list(kinds)))
+        if tenant_id:
+            conditions.append(SourceRow.tenant_id == tenant_id)
+        if workspace_id:
+            conditions.append(SourceRow.workspace_id == workspace_id)
 
         async with self._session_factory() as session:
             stmt = select(SourceRow)

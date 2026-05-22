@@ -53,6 +53,8 @@ class AuditRepository:
         event_type: str | None = None,
         limit: int = 50,
         offset: int = 0,
+        tenant_id: str | None = None,
+        workspace_id: str | None = None,
     ) -> tuple[list[AuditEventRow], int]:
         conditions: list[Any] = []
         if subject_id:
@@ -61,6 +63,10 @@ class AuditRepository:
             conditions.append(AuditEventRow.subject_kind == subject_kind)
         if event_type:
             conditions.append(AuditEventRow.event_type == event_type)
+        if tenant_id:
+            conditions.append(AuditEventRow.tenant_id == tenant_id)
+        if workspace_id:
+            conditions.append(AuditEventRow.workspace_id == workspace_id)
 
         async with self._session_factory() as session:
             stmt = select(AuditEventRow)

@@ -50,7 +50,8 @@ class CostRepository:
     async def list_events(
         self,
         *,
-        actor: str | None = None,
+        tenant_id: str | None = None,
+        workspace_id: str | None = None,
         agent_name: str | None = None,
         since: datetime | None = None,
         until: datetime | None = None,
@@ -59,8 +60,10 @@ class CostRepository:
     ) -> list[CostEventRow]:
         async with self._session_factory() as session:
             stmt = select(CostEventRow)
-            if actor:
-                stmt = stmt.where(CostEventRow.actor == actor)
+            if tenant_id:
+                stmt = stmt.where(CostEventRow.tenant_id == tenant_id)
+            if workspace_id:
+                stmt = stmt.where(CostEventRow.workspace_id == workspace_id)
             if agent_name:
                 stmt = stmt.where(CostEventRow.agent_name == agent_name)
             if since is not None:
@@ -75,6 +78,8 @@ class CostRepository:
         self,
         *,
         subject_kind: str | None = None,
+        tenant_id: str | None = None,
+        workspace_id: str | None = None,
         since: datetime | None = None,
         until: datetime | None = None,
         limit: int = 100,
@@ -103,6 +108,10 @@ class CostRepository:
             )
             if subject_kind:
                 stmt = stmt.where(CostEventRow.subject_kind == subject_kind)
+            if tenant_id:
+                stmt = stmt.where(CostEventRow.tenant_id == tenant_id)
+            if workspace_id:
+                stmt = stmt.where(CostEventRow.workspace_id == workspace_id)
             if since is not None:
                 stmt = stmt.where(CostEventRow.occurred_at >= since)
             if until is not None:
@@ -129,6 +138,8 @@ class CostRepository:
         self,
         *,
         group_by: Sequence[str],
+        tenant_id: str | None = None,
+        workspace_id: str | None = None,
         since: datetime | None = None,
         until: datetime | None = None,
     ) -> dict[tuple[str, ...], list[int]]:
@@ -144,13 +155,16 @@ class CostRepository:
         column_map = {
             "model": CostEventRow.model,
             "agent_name": CostEventRow.agent_name,
-            "actor": CostEventRow.actor,
         }
         cols = [column_map[g] for g in group_by if g in column_map]
         if not cols:
             cols = [CostEventRow.model]
         async with self._session_factory() as session:
             stmt = select(*cols, CostEventRow.latency_ms).where(CostEventRow.latency_ms.isnot(None))
+            if tenant_id:
+                stmt = stmt.where(CostEventRow.tenant_id == tenant_id)
+            if workspace_id:
+                stmt = stmt.where(CostEventRow.workspace_id == workspace_id)
             if since is not None:
                 stmt = stmt.where(CostEventRow.occurred_at >= since)
             if until is not None:
@@ -167,20 +181,23 @@ class CostRepository:
         self,
         *,
         group_by: Sequence[str],
-        actor: str | None = None,
+        tenant_id: str | None = None,
+        workspace_id: str | None = None,
         since: datetime | None = None,
         until: datetime | None = None,
     ) -> list[dict]:
         """Sum tokens + cost grouped by the named columns.
 
-        ``group_by`` accepts ``model``, ``agent_name``, ``actor``,
+        ``group_by`` accepts ``model``, ``agent_name``,
         and ``date`` (occurred_at truncated to UTC day). Unknown
         groups are silently ignored so a typo doesn't return empty.
+
+        Scope is enforced via ``tenant_id`` + ``workspace_id`` --
+        ``actor`` is audit metadata, never a partitioning key.
         """
         column_map = {
             "model": CostEventRow.model,
             "agent_name": CostEventRow.agent_name,
-            "actor": CostEventRow.actor,
             "date": func.date(CostEventRow.occurred_at),
         }
         groups = [column_map[g] for g in group_by if g in column_map]
@@ -196,8 +213,10 @@ class CostRepository:
                 func.coalesce(func.sum(CostEventRow.cost_usd), 0),
                 func.count(CostEventRow.id),
             )
-            if actor:
-                stmt = stmt.where(CostEventRow.actor == actor)
+            if tenant_id:
+                stmt = stmt.where(CostEventRow.tenant_id == tenant_id)
+            if workspace_id:
+                stmt = stmt.where(CostEventRow.workspace_id == workspace_id)
             if since is not None:
                 stmt = stmt.where(CostEventRow.occurred_at >= since)
             if until is not None:

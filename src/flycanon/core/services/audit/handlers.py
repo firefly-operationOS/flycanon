@@ -20,6 +20,8 @@ class ListAuditQuery(Query[AuditPage]):
     event_type: str | None = None
     limit: int = 50
     offset: int = 0
+    tenant_id: str | None = None
+    workspace_id: str | None = None
 
 
 @query_handler
@@ -36,6 +38,8 @@ class ListAuditHandler(QueryHandler[ListAuditQuery, AuditPage]):
             event_type=query.event_type,
             limit=query.limit,
             offset=query.offset,
+            tenant_id=query.tenant_id,
+            workspace_id=query.workspace_id,
         )
         return AuditPage(
             items=[to_audit_event(r) for r in rows],

@@ -14,6 +14,7 @@ from __future__ import annotations
 from pyfly.container import rest_controller
 from pyfly.cqrs import DefaultQueryBus
 from pyfly.web import QueryParam, get_mapping, request_mapping
+from starlette.requests import Request
 
 from flycanon.core.services.knowledge.handlers import (
     GetKnowledgeGraphMermaidQuery,
@@ -21,6 +22,7 @@ from flycanon.core.services.knowledge.handlers import (
 )
 from flycanon.interfaces.dtos.graph import KnowledgeGraph, MermaidGraph
 from flycanon.interfaces.enums import Domain, Jurisdiction, KnowledgeStatus
+from flycanon.web.conventions import TenantContext, tenant_context_from_request
 
 
 @rest_controller
@@ -34,6 +36,7 @@ class KnowledgeGraphController:
     @get_mapping("/knowledge:graph")
     async def get_graph(
         self,
+        http_request: Request,
         format: QueryParam[str] = "json",
         domain: QueryParam[str] = "",
         jurisdiction: QueryParam[str] = "",
@@ -66,6 +69,7 @@ class KnowledgeGraphController:
         * :class:`MermaidGraph` carrying a ``graph LR`` Mermaid
           block ready to drop in a Markdown viewer.
         """
+        ctx: TenantContext = tenant_context_from_request(http_request)
         domains = [Domain(d) for d in _split_csv(domain)] if domain else []
         jurisdictions = [Jurisdiction(j) for j in _split_csv(jurisdiction)] if jurisdiction else []
         statuses = [KnowledgeStatus(s) for s in _split_csv(status)] if status else []
@@ -78,6 +82,8 @@ class KnowledgeGraphController:
                     statuses=statuses,
                     include_sources=_parse_bool(include_sources),
                     limit=limit,
+                    tenant_id=ctx.tenant_id,
+                    workspace_id=ctx.workspace_id,
                 )
             )
         return await self._queries.query(
@@ -87,6 +93,8 @@ class KnowledgeGraphController:
                 statuses=statuses,
                 include_sources=_parse_bool(include_sources),
                 limit=limit,
+                tenant_id=ctx.tenant_id,
+                workspace_id=ctx.workspace_id,
             )
         )
 

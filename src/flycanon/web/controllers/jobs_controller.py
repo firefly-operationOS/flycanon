@@ -24,6 +24,7 @@ from pyfly.container import rest_controller
 from pyfly.cqrs import DefaultQueryBus
 from pyfly.kernel import ResourceNotFoundException
 from pyfly.web import PathVar, QueryParam, get_mapping, request_mapping
+from starlette.requests import Request
 from starlette.responses import StreamingResponse
 
 from flycanon.core.services.jobs import (
@@ -32,6 +33,7 @@ from flycanon.core.services.jobs import (
     ListIngestJobsQuery,
 )
 from flycanon.interfaces.dtos.job import IngestJob, IngestJobsPage
+from flycanon.web.conventions import TenantContext, tenant_context_from_request
 
 logger = logging.getLogger(__name__)
 
@@ -47,24 +49,39 @@ class JobsController:
     @get_mapping("")
     async def list_jobs(
         self,
+        http_request: Request,
         status: QueryParam[str] = "",
         limit: QueryParam[int] = 50,
         offset: QueryParam[int] = 0,
     ) -> IngestJobsPage:
         """Paginated listing of async ingest jobs."""
+        ctx: TenantContext = tenant_context_from_request(http_request)
         return await self._queries.query(
             ListIngestJobsQuery(
                 status=status or None,
                 limit=limit,
                 offset=offset,
+                tenant_id=ctx.tenant_id,
+                workspace_id=ctx.workspace_id,
             )
         )
 
     @get_mapping("/{job_id}")
-    async def get_job(self, job_id: PathVar[str]) -> IngestJob:
+    async def get_job(
+        self,
+        http_request: Request,
+        job_id: PathVar[str],
+    ) -> IngestJob:
         """Single-shot lookup. Polling target for callers that
         prefer ``GET`` over SSE."""
-        row = await self._queries.query(GetIngestJobQuery(job_id=job_id))
+        ctx: TenantContext = tenant_context_from_request(http_request)
+        row = await self._queries.query(
+            GetIngestJobQuery(
+                job_id=job_id,
+                tenant_id=ctx.tenant_id,
+                workspace_id=ctx.workspace_id,
+            )
+        )
         if row is None:
             raise ResourceNotFoundException(f"ingest job {job_id!r} not found")
         return row
@@ -72,6 +89,7 @@ class JobsController:
     @get_mapping("/{job_id}/stream")
     async def stream_job(
         self,
+        http_request: Request,
         job_id: PathVar[str],
         poll_interval_ms: QueryParam[int] = 500,
     ) -> StreamingResponse:
@@ -85,9 +103,16 @@ class JobsController:
         long-lived DB connection per stream and works under
         pgbouncer transaction-mode pooling.
         """
+        ctx: TenantContext = tenant_context_from_request(http_request)
         # First check the job exists -- 404 propagates as a proper
         # HTTP error before the streaming response body opens.
-        job = await self._queries.query(GetIngestJobQuery(job_id=job_id))
+        job = await self._queries.query(
+            GetIngestJobQuery(
+                job_id=job_id,
+                tenant_id=ctx.tenant_id,
+                workspace_id=ctx.workspace_id,
+            )
+        )
         if job is None:
             raise ResourceNotFoundException(f"ingest job {job_id!r} not found")
 
@@ -97,7 +122,13 @@ class JobsController:
             terminal = {"succeeded", "failed"}
             # Open with a snapshot of the current state so the
             # client gets the job header immediately.
-            current = await self._queries.query(GetIngestJobQuery(job_id=job_id))
+            current = await self._queries.query(
+                GetIngestJobQuery(
+                    job_id=job_id,
+                    tenant_id=ctx.tenant_id,
+                    workspace_id=ctx.workspace_id,
+                )
+            )
             if current is not None:
                 yield _sse_event(
                     "status",
@@ -108,7 +139,14 @@ class JobsController:
                     },
                 )
             while True:
-                events = await self._queries.query(ListIngestJobEventsQuery(job_id=job_id, after_id=cursor))
+                events = await self._queries.query(
+                    ListIngestJobEventsQuery(
+                        job_id=job_id,
+                        after_id=cursor,
+                        tenant_id=ctx.tenant_id,
+                        workspace_id=ctx.workspace_id,
+                    )
+                )
                 for event in events:
                     cursor = event.id
                     yield _sse_event(
@@ -121,7 +159,13 @@ class JobsController:
                             "occurred_at": event.occurred_at.isoformat() if event.occurred_at else None,
                         },
                     )
-                current = await self._queries.query(GetIngestJobQuery(job_id=job_id))
+                current = await self._queries.query(
+                    GetIngestJobQuery(
+                        job_id=job_id,
+                        tenant_id=ctx.tenant_id,
+                        workspace_id=ctx.workspace_id,
+                    )
+                )
                 if current is None:
                     break
                 if current.status in terminal:

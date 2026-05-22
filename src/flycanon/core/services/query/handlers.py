@@ -21,6 +21,8 @@ from flycanon.interfaces.dtos.query import (
 @dataclass(frozen=True)
 class SearchKnowledgeQuery(Query[SearchResponse]):
     request: SearchRequest
+    tenant_id: str | None = None
+    workspace_id: str | None = None
 
 
 @query_handler
@@ -31,12 +33,18 @@ class SearchKnowledgeHandler(QueryHandler[SearchKnowledgeQuery, SearchResponse])
         self._search = search
 
     async def do_handle(self, query: SearchKnowledgeQuery) -> SearchResponse:
-        return await self._search.search(query.request)
+        return await self._search.search(
+            query.request,
+            tenant_id=query.tenant_id,
+            workspace_id=query.workspace_id,
+        )
 
 
 @dataclass(frozen=True)
 class AnswerKnowledgeQuery(Query[AnswerResponse]):
     request: AnswerRequest
+    tenant_id: str | None = None
+    workspace_id: str | None = None
 
 
 @query_handler
@@ -47,7 +55,11 @@ class AnswerKnowledgeHandler(QueryHandler[AnswerKnowledgeQuery, AnswerResponse])
         self._answer = answer
 
     async def do_handle(self, query: AnswerKnowledgeQuery) -> AnswerResponse:
-        return await self._answer.answer(query.request)
+        return await self._answer.answer(
+            query.request,
+            tenant_id=query.tenant_id,
+            workspace_id=query.workspace_id,
+        )
 
 
 __all__ = [

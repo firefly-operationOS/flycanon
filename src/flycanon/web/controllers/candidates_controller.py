@@ -16,6 +16,7 @@ from pyfly.web import (
     post_mapping,
     request_mapping,
 )
+from starlette.requests import Request
 
 from flycanon.core.services.consolidation.handlers import (
     AcceptCandidateCommand,
@@ -32,6 +33,7 @@ from flycanon.interfaces.dtos.candidate import (
     RejectCandidateRequest,
 )
 from flycanon.interfaces.enums import CandidateStatus, Domain
+from flycanon.web.conventions import TenantContext, tenant_context_from_request
 
 
 @rest_controller
@@ -46,23 +48,33 @@ class CandidatesController:
     @post_mapping(":propose", status_code=201)
     async def propose(
         self,
+        http_request: Request,
         request: Valid[Body[ProposeCandidateRequest]],
     ) -> list[CandidateRecord]:
         """Run the consolidation stage against a source and persist
         every resulting candidate in ``proposed`` status."""
+        ctx: TenantContext = tenant_context_from_request(http_request)
         return await self._commands.send(
-            ProposeCandidatesCommand(request=request, correlation_id=get_correlation_id())
+            ProposeCandidatesCommand(
+                request=request,
+                correlation_id=get_correlation_id(),
+                tenant_id=ctx.tenant_id,
+                workspace_id=ctx.workspace_id,
+                actor=ctx.actor,
+            )
         )
 
     @get_mapping("")
     async def list_candidates(
         self,
+        http_request: Request,
         status: QueryParam[str] = "",
         source_id: QueryParam[str] = "",
         domain: QueryParam[str] = "",
         limit: QueryParam[int] = 50,
         offset: QueryParam[int] = 0,
     ) -> CandidatesPage:
+        ctx: TenantContext = tenant_context_from_request(http_request)
         statuses = [CandidateStatus(s) for s in _split_csv(status)] if status else []
         return await self._queries.query(
             ListCandidatesQuery(
@@ -71,12 +83,25 @@ class CandidatesController:
                 domain=Domain(domain) if domain else None,
                 limit=limit,
                 offset=offset,
+                tenant_id=ctx.tenant_id,
+                workspace_id=ctx.workspace_id,
             )
         )
 
     @get_mapping("/{candidate_id}")
-    async def get_candidate(self, candidate_id: PathVar[str]) -> CandidateRecord:
-        record = await self._queries.query(GetCandidateQuery(candidate_id=candidate_id))
+    async def get_candidate(
+        self,
+        http_request: Request,
+        candidate_id: PathVar[str],
+    ) -> CandidateRecord:
+        ctx: TenantContext = tenant_context_from_request(http_request)
+        record = await self._queries.query(
+            GetCandidateQuery(
+                candidate_id=candidate_id,
+                tenant_id=ctx.tenant_id,
+                workspace_id=ctx.workspace_id,
+            )
+        )
         if record is None:
             raise ResourceNotFoundException(f"candidate {candidate_id!r} not found")
         return record
@@ -84,29 +109,39 @@ class CandidatesController:
     @post_mapping("/{candidate_id}:accept")
     async def accept(
         self,
+        http_request: Request,
         candidate_id: PathVar[str],
         request: Valid[Body[AcceptCandidateRequest]],
     ) -> CandidateRecord:
         """Materialise the candidate as a knowledge version."""
+        ctx: TenantContext = tenant_context_from_request(http_request)
         return await self._commands.send(
             AcceptCandidateCommand(
                 candidate_id=candidate_id,
                 request=request,
                 correlation_id=get_correlation_id(),
+                tenant_id=ctx.tenant_id,
+                workspace_id=ctx.workspace_id,
+                actor=ctx.actor,
             )
         )
 
     @post_mapping("/{candidate_id}:reject")
     async def reject(
         self,
+        http_request: Request,
         candidate_id: PathVar[str],
         request: Valid[Body[RejectCandidateRequest]],
     ) -> CandidateRecord:
+        ctx: TenantContext = tenant_context_from_request(http_request)
         return await self._commands.send(
             RejectCandidateCommand(
                 candidate_id=candidate_id,
                 request=request,
                 correlation_id=get_correlation_id(),
+                tenant_id=ctx.tenant_id,
+                workspace_id=ctx.workspace_id,
+                actor=ctx.actor,
             )
         )
 

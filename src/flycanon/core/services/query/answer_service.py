@@ -64,6 +64,8 @@ class AnswerService:
         request: AnswerRequest,
         *,
         prior_turns: list[tuple[str, str]] | None = None,
+        tenant_id: str | None = None,
+        workspace_id: str | None = None,
     ) -> AnswerResponse:
         """Single-turn (or conversational) RAG answer.
 
@@ -74,10 +76,18 @@ class AnswerService:
         path used by :class:`ConversationService`. Single-shot callers
         (``POST /api/v1/query``) leave it empty and the agent runs the
         same way as before.
+
+        ``tenant_id`` / ``workspace_id`` are the authoritative scope --
+        :class:`RetrievalService.search` raises
+        :class:`MissingTenantContext` on missing values, so callers
+        MUST pass both. The query handler threads them through from
+        the request-scoped :class:`TenantContext`.
         """
         start = time.perf_counter()
         result = await self._retrieval.search(
             query=request.question,
+            tenant_id=tenant_id,
+            workspace_id=workspace_id,
             top_k=request.top_k,
             filters=_filters_from_request(  # reuse the search-service helper
                 _to_search_request(request)
