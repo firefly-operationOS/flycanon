@@ -192,6 +192,10 @@ select = ["E", "F", "I", "N", "UP", "B", "SIM"]
 # exception-naming convention (no ``Error`` suffix); renaming them
 # would ripple through every controller advice mapping.
 "src/flycanon/core/services/**" = ["N818"]
+# Framework HTTP-shaped exceptions follow ``<Name>Exception`` not
+# ``<Name>Error`` to match pyfly + Starlette conventions; see
+# exceptions.py in this dir.
+"src/flycanon/web/conventions/**" = ["N818"]
 # Tests routinely build long inline DTOs; the line-length cap is a
 # code-smell signal we don't enforce on test fixtures.
 "tests/**" = ["E501"]
