@@ -26,6 +26,7 @@ from flycanon.core.services.retrieval.corpus_factory import CorpusContext
 from flycanon.models.repositories.chunk_repository import ChunkRepository
 from flycanon.models.repositories.knowledge_repository import KnowledgeRepository
 from flycanon.models.repositories.source_repository import SourceRepository
+from flycanon.web.conventions import MissingTenantContext
 
 if TYPE_CHECKING:
     from flycanon.core.services.retrieval.query_expander import QueryExpander
@@ -101,18 +102,56 @@ class RetrievalService:
         self,
         *,
         query: str,
+        tenant_id: str | None = None,
+        workspace_id: str | None = None,
         top_k: int | None = None,
         per_query_k: int | None = None,
         filters: RetrievalFilters | None = None,
     ) -> RetrievalResult:
-        """Run hybrid retrieval against the corpus and return hydrated hits."""
+        """Run hybrid retrieval against the corpus and return hydrated hits.
+
+        ``tenant_id`` / ``workspace_id`` are the authoritative scope --
+        every BM25 + ANN read is filtered by the composite. Missing
+        scope is a programmer error: the service raises
+        :class:`MissingTenantContext` rather than silently falling
+        back to ``'default'`` so leak-by-omission can never reach
+        production. Plan 4 wires every caller to pass real values.
+        """
+        if not tenant_id or not workspace_id:
+            # Fail closed -- the read path is security-critical.
+            # Plan 4 will tighten the write path too, but until
+            # then callers MUST present a real scope for the read.
+            raise MissingTenantContext(
+                "RetrievalService.search requires tenant_id and workspace_id; "
+                "callers must thread the tenant scope explicitly."
+            )
+
         from fireflyframework_agentic.rag.retrieval.hybrid import HybridRetriever
 
+        # Approach (a) -- scope-bound proxies. The agentic
+        # ``HybridRetriever`` calls ``corpus.bm25_search(text,
+        # top_k=...)`` and ``vector_store.search(qvec, top_k=...)``
+        # without scope kwargs, so we wrap the two corpora in thin
+        # adapters that bake the scope into every call before
+        # delegating. The framework's RRF fusion + telemetry stays
+        # untouched; only the read predicate is augmented. The
+        # alternative -- reimplementing fusion at the service layer
+        # -- would duplicate the agentic RRF math without benefit.
+        scoped_corpus = _ScopedCorpus(
+            self._context.corpus,
+            tenant_id=tenant_id,
+            workspace_id=workspace_id,
+        )
+        scoped_vector_store = _ScopedVectorStore(
+            self._context.vector_store,
+            tenant_id=tenant_id,
+            workspace_id=workspace_id,
+        )
         # The agentic embedder protocol is honoured by our EmbeddingService
         # via the ``embed`` method; pass it through directly.
         retriever = HybridRetriever(
-            corpus=self._context.corpus,  # type: ignore[arg-type]
-            vector_store=self._context.vector_store,  # type: ignore[arg-type]
+            corpus=scoped_corpus,  # type: ignore[arg-type]
+            vector_store=scoped_vector_store,  # type: ignore[arg-type]
             embedder=_EmbedderShim(self._embeddings),  # type: ignore[arg-type]
         )
         effective_top_k = top_k or self._default_top_k
@@ -342,3 +381,130 @@ class _EmbedderShim:
 @dataclass(slots=True)
 class _EmbedResult:
     embeddings: list[list[float]]
+
+
+class _ScopedCorpus:
+    """Bind ``(tenant_id, workspace_id)`` onto every corpus read.
+
+    The agentic ``HybridRetriever`` calls ``bm25_search(text, top_k=...)``
+    and ``get_chunks(ids)`` without scope kwargs; this thin wrapper
+    intercepts those reads and forwards the scope to the underlying
+    corpus when its signature accepts it.
+
+    Only flycanon's :class:`PostgresCorpus` honours scope kwargs
+    natively (Plan 3 task 4). The agentic ``SqliteCorpus`` (used
+    by the ``sqlite-vec`` backend) doesn't expose scope yet, so
+    the wrapper detects support and falls back to the un-scoped
+    call. In multi-tenant deployments operators MUST use the
+    ``pgvector`` backend; ``sqlite-vec`` is intentionally a
+    single-tenant local-dev convenience. Write surfaces are not
+    wrapped -- the index writer goes through :class:`IndexService`
+    directly, with its own scope threading.
+    """
+
+    _SUPPORTS_SCOPE_KEYS = ("tenant_id", "workspace_id")
+
+    def __init__(self, inner: object, *, tenant_id: str, workspace_id: str) -> None:
+        self._inner = inner
+        self._tenant_id = tenant_id
+        self._workspace_id = workspace_id
+        self._supports_bm25_scope = self._probe(getattr(inner, "bm25_search", None))
+        self._supports_get_chunks_scope = self._probe(getattr(inner, "get_chunks", None))
+
+    @staticmethod
+    def _probe(method: object) -> bool:
+        """Inspect ``method``'s signature for scope kwargs."""
+        import inspect
+
+        if method is None:
+            return False
+        try:
+            sig = inspect.signature(method)  # type: ignore[arg-type]
+        except (TypeError, ValueError):
+            return False
+        params = sig.parameters
+        return all(name in params for name in _ScopedCorpus._SUPPORTS_SCOPE_KEYS)
+
+    async def bm25_search(self, query: str, *, top_k: int = 30):  # noqa: ANN201
+        if self._supports_bm25_scope:
+            return await self._inner.bm25_search(  # type: ignore[attr-defined]
+                query,
+                top_k=top_k,
+                tenant_id=self._tenant_id,
+                workspace_id=self._workspace_id,
+            )
+        return await self._inner.bm25_search(  # type: ignore[attr-defined]
+            query,
+            top_k=top_k,
+        )
+
+    async def get_chunks(self, chunk_ids: list[str]):  # noqa: ANN201
+        if self._supports_get_chunks_scope:
+            return await self._inner.get_chunks(  # type: ignore[attr-defined]
+                chunk_ids,
+                tenant_id=self._tenant_id,
+                workspace_id=self._workspace_id,
+            )
+        return await self._inner.get_chunks(chunk_ids)  # type: ignore[attr-defined]
+
+
+class _ScopedVectorStore:
+    """Bind ``(tenant_id, workspace_id)`` onto every vector-store read.
+
+    Mirror of :class:`_ScopedCorpus` for the dense projection. The
+    agentic retriever calls ``search(qvec, top_k=...)`` without
+    scope; this wrapper forwards the scope to whichever vector
+    store the deployment picked.
+
+    Only the flycanon :class:`PgVectorVectorStore` honours scope
+    kwargs natively (Plan 3 task 3). For the agentic backends
+    (``sqlite-vec``, ``chroma``, ``qdrant``, ``pinecone``,
+    ``memory``) the scope isn't pushed down -- their ``search``
+    signature would reject the extras with ``TypeError`` -- but
+    the scope is still enforced by :class:`_ScopedCorpus`. The
+    agentic ``HybridRetriever`` always re-hydrates the fused
+    top ids via ``corpus.get_chunks(...)`` which is scope-filtered;
+    any vector hit pointing at a foreign-scope chunk is silently
+    dropped when hydration can't find it. Backends that grow
+    scope kwargs in a future agentic release will pick them up
+    automatically -- the signature probe below detects them.
+    """
+
+    _SUPPORTS_SCOPE_KEYS = ("tenant_id", "workspace_id")
+
+    def __init__(self, inner: object, *, tenant_id: str, workspace_id: str) -> None:
+        self._inner = inner
+        self._tenant_id = tenant_id
+        self._workspace_id = workspace_id
+        self._supports_scope = self._probe_scope_support(inner)
+
+    @staticmethod
+    def _probe_scope_support(inner: object) -> bool:
+        """Detect whether ``inner.search`` accepts scope kwargs.
+
+        Inspects the signature once at construction so the per-call
+        path stays branch-light. Returning ``True`` for any backend
+        whose ``search`` declares ``tenant_id`` + ``workspace_id``
+        parameters (regardless of order or default).
+        """
+        import inspect
+
+        try:
+            sig = inspect.signature(inner.search)  # type: ignore[attr-defined]
+        except (TypeError, ValueError):
+            return False
+        params = sig.parameters
+        return all(name in params for name in _ScopedVectorStore._SUPPORTS_SCOPE_KEYS)
+
+    async def search(self, query_embedding, top_k: int = 5):  # noqa: ANN001, ANN201
+        if self._supports_scope:
+            return await self._inner.search(  # type: ignore[attr-defined]
+                query_embedding,
+                top_k=top_k,
+                tenant_id=self._tenant_id,
+                workspace_id=self._workspace_id,
+            )
+        return await self._inner.search(  # type: ignore[attr-defined]
+            query_embedding,
+            top_k=top_k,
+        )

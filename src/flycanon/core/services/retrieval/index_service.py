@@ -42,10 +42,20 @@ class IndexService:
         chunks: Sequence[KnowledgeChunkRow],
         embeddings: Sequence[Sequence[float]],
         embedding_model: str,
+        tenant_id: str = "default",
+        workspace_id: str = "default",
     ) -> int:
         """Replace every indexed chunk for ``source.id`` atomically.
 
         Returns the number of chunks ingested into the index.
+
+        ``tenant_id`` / ``workspace_id`` default to ``'default'`` --
+        the WRITE-path soft default lets existing ingestion callers
+        keep working while Plan 4 wires real scope through. The
+        column-level server defaults (Plan 2) catch forgotten writes
+        at the database layer; this signature lets adopting callers
+        pass real values without breaking the existing flow. Plan 4
+        will tighten the write path to fail-closed too.
         """
         if len(chunks) != len(embeddings):
             raise ValueError(
@@ -95,7 +105,12 @@ class IndexService:
         if stored_chunks:
             await self._context.corpus.upsert_chunks(stored_chunks)  # type: ignore[attr-defined]
         if vector_documents:
-            await self._context.vector_store.upsert(vector_documents)  # type: ignore[attr-defined]
+            # Probe the upsert signature so we only push scope to
+            # backends that accept it (currently flycanon's
+            # PgVectorVectorStore -- the agentic stores ignore the
+            # scope and rely on the canon_chunks scope filter on
+            # read-hydration as the safety net).
+            await self._upsert_vectors(vector_documents, tenant_id=tenant_id, workspace_id=workspace_id)
 
         # Note the model on the entity so re-embedding with a different
         # model can detect the mismatch.
@@ -103,19 +118,60 @@ class IndexService:
             chunk.embedding_model = embedding_model
 
         logger.info(
-            "indexed source=%s chunks=%d backend=%s",
+            "indexed source=%s chunks=%d backend=%s tenant=%s workspace=%s",
             source.id,
             len(stored_chunks),
             getattr(self._context, "backend", "unknown"),
+            tenant_id,
+            workspace_id,
         )
         return len(stored_chunks)
 
-    async def remove_for_source(self, source_id: str) -> int:
-        """Wipe every projection for ``source_id``. Idempotent."""
+    async def _upsert_vectors(
+        self,
+        documents: Sequence[object],
+        *,
+        tenant_id: str,
+        workspace_id: str,
+    ) -> None:
+        """Thread scope to vector-store ``upsert`` when supported.
+
+        Backends that don't yet accept ``tenant_id``/``workspace_id``
+        kwargs (agentic ``InMemory`` / ``SqliteVec`` / ``Chroma`` /
+        etc.) are called without the extras. The flycanon
+        :class:`PgVectorVectorStore` always accepts them.
+        """
+        import inspect
+
+        upsert = self._context.vector_store.upsert  # type: ignore[attr-defined]
+        try:
+            sig = inspect.signature(upsert)
+            supports_scope = "tenant_id" in sig.parameters and "workspace_id" in sig.parameters
+        except (TypeError, ValueError):
+            supports_scope = False
+        if supports_scope:
+            await upsert(list(documents), tenant_id=tenant_id, workspace_id=workspace_id)
+        else:
+            await upsert(list(documents))
+
+    async def remove_for_source(
+        self,
+        source_id: str,
+        *,
+        tenant_id: str = "default",  # noqa: ARG002 -- reserved for symmetry with replace_for_source
+        workspace_id: str = "default",  # noqa: ARG002
+    ) -> int:
+        """Wipe every projection for ``source_id``. Idempotent.
+
+        ``tenant_id`` / ``workspace_id`` are accepted for signature
+        symmetry with :meth:`replace_for_source` -- the BM25 wipe
+        already runs through the source's FK cascade (canonical
+        store enforces the scope at delete time) and the vector
+        cleanup happens lazily via id-overwrite at next ingest.
+        Callers that need an immediate vector-store purge should
+        also call ``vector_store.delete([...])`` with the chunk ids.
+        """
         deleted = await self._context.corpus.delete_by_doc_id(source_id)  # type: ignore[attr-defined]
-        # vector-store cleanup happens lazily via id-overwrite at next ingest;
-        # callers that need an immediate purge should also call
-        # ``vector_store.delete([...])`` with the chunk ids.
         return int(deleted or 0)
 
     @staticmethod
