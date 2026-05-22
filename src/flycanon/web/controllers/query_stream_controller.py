@@ -72,52 +72,63 @@ class QueryStreamController:
 
         async def _stream():
             started = time.perf_counter()
-            # Reuse the answer service's retrieval -> answer pipeline.
-            # We emit the hits first so the UI gets citation chips
-            # before the model finishes writing.
-            search_request = SearchRequest(
-                query=request.question,
-                top_k=request.top_k,
-                source_ids=request.source_ids,
-                knowledge_item_ids=request.knowledge_item_ids,
-                domains=request.domains,
-                jurisdictions=request.jurisdictions,
-                tags=request.tags,
-                statuses=request.statuses,
-            )
-            retrieval = await self._answer._retrieval.search(  # noqa: SLF001
-                query=request.question,
-                tenant_id=ctx.tenant_id,
-                workspace_id=ctx.workspace_id,
-                top_k=request.top_k,
-                filters=_filters_from_request(search_request),
-            )
-            from flycanon.core.services.query.search_service import _hit_dto
+            try:
+                # Reuse the answer service's retrieval -> answer pipeline.
+                # We emit the hits first so the UI gets citation chips
+                # before the model finishes writing.
+                search_request = SearchRequest(
+                    query=request.question,
+                    top_k=request.top_k,
+                    source_ids=request.source_ids,
+                    knowledge_item_ids=request.knowledge_item_ids,
+                    domains=request.domains,
+                    jurisdictions=request.jurisdictions,
+                    tags=request.tags,
+                    statuses=request.statuses,
+                )
+                retrieval = await self._answer._retrieval.search(  # noqa: SLF001
+                    query=request.question,
+                    tenant_id=ctx.tenant_id,
+                    workspace_id=ctx.workspace_id,
+                    top_k=request.top_k,
+                    filters=_filters_from_request(search_request),
+                )
+                from flycanon.core.services.query.search_service import _hit_dto
 
-            for hit in retrieval.hits:
-                dto = _hit_dto(hit)
-                yield _sse_frame("hit", dto.model_dump(mode="json"))
+                for hit in retrieval.hits:
+                    dto = _hit_dto(hit)
+                    yield _sse_frame("hit", dto.model_dump(mode="json"))
 
-            # Answer in one shot. Per-token streaming is a follow-up
-            # once the agentic framework's streaming surface lands;
-            # in the meantime callers can still render citations
-            # immediately and the answer body when it arrives.
-            response = await self._answer.answer(
-                request,
-                tenant_id=ctx.tenant_id,
-                workspace_id=ctx.workspace_id,
-            )
-            elapsed = int((time.perf_counter() - started) * 1000)
-            yield _sse_frame(
-                "final",
-                {
-                    "answer": response.answer,
-                    "citations": [c.model_dump(mode="json") for c in response.citations],
-                    "model": response.model,
-                    "elapsed_ms": elapsed,
-                    "no_answer": response.no_answer,
-                },
-            )
+                # Answer in one shot. Per-token streaming is a follow-up
+                # once the agentic framework's streaming surface lands;
+                # in the meantime callers can still render citations
+                # immediately and the answer body when it arrives.
+                response = await self._answer.answer(
+                    request,
+                    tenant_id=ctx.tenant_id,
+                    workspace_id=ctx.workspace_id,
+                )
+                elapsed = int((time.perf_counter() - started) * 1000)
+                yield _sse_frame(
+                    "final",
+                    {
+                        "answer": response.answer,
+                        "citations": [c.model_dump(mode="json") for c in response.citations],
+                        "model": response.model,
+                        "elapsed_ms": elapsed,
+                        "no_answer": response.no_answer,
+                    },
+                )
+            except Exception as exc:  # noqa: BLE001 -- terminal error frame
+                # A mid-stream failure (retrieval / answer / serialisation)
+                # used to leave the SSE socket open with no terminal frame
+                # so the client hung until idle timeout. Emit one well-
+                # formed ``error`` frame, log the cause, then close cleanly.
+                logger.exception("query stream failed mid-stream: %s", exc)
+                yield _sse_frame(
+                    "error",
+                    {"code": "stream_error", "message": str(exc)},
+                )
 
         return StreamingResponse(
             _stream(),
