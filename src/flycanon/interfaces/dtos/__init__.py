@@ -42,6 +42,12 @@ from flycanon.interfaces.dtos.taxonomy import (
     TaxonomyTree,
 )
 from flycanon.interfaces.dtos.version import VersionInfo
+from flycanon.interfaces.dtos.workspace import (
+    WorkspaceCreate,
+    WorkspaceSpec,
+    WorkspaceSummary,
+    WorkspaceUpdate,
+)
 
 __all__ = [
     "AcceptCandidateRequest",
@@ -74,4 +80,8 @@ __all__ = [
     "TaxonomyTree",
     "UpdateKnowledgeRequest",
     "VersionInfo",
+    "WorkspaceCreate",
+    "WorkspaceSpec",
+    "WorkspaceSummary",
+    "WorkspaceUpdate",
 ]
