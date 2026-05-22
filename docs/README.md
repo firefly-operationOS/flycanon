@@ -75,7 +75,8 @@ Pick the entry point that matches what you're trying to do:
 | [pipeline.md](pipeline.md)                        | You're touching the orchestrator, adding a new stage, or chasing a slow ingest.                                                |
 | [api-reference.md](api-reference.md)              | You're integrating with the HTTP API and need every endpoint, shape, and status code.                                          |
 | [payload-reference.md](payload-reference.md)      | You're composing the request payload — every field, option, and example.                                                       |
-| [eda-events.md](eda-events.md)                    | You're subscribing to the `flycanon.ingest` / `flycanon.knowledge` / `flycanon.audit` topics.                                  |
+| [eda-events.md](eda-events.md)                    | You're subscribing to the `flycanon.ingest` / `flycanon.knowledge` / `flycanon.audit` / `canon.workspaces.v1` topics.           |
+| [consumers.md](consumers.md)                      | You're building or auditing a service that consumes flycanon -- agent token scopes, workspace events, retry posture, wire-contract stability. |
 | [conversations.md](conversations.md)              | You're building chat-style UX on flycanon -- threads, turns, rolling summary, suggested follow-ups.                            |
 | [async-ingest.md](async-ingest.md)                | You're enqueuing large / bulk ingests and streaming progress via SSE.                                                          |
 | [quality.md](quality.md)                          | You're running staleness scans or conflict detection on the canon.                                                             |

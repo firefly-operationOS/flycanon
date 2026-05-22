@@ -277,7 +277,8 @@ public class CopilotService {
 | [docs/pipeline.md](docs/pipeline.md) | You're touching the orchestrator, adding a new stage, or chasing a slow ingest. |
 | [docs/api-reference.md](docs/api-reference.md) | You're integrating with the HTTP API and need every endpoint, shape, and status code. |
 | [docs/payload-reference.md](docs/payload-reference.md) | You're composing the request payload — every field, option, and example. |
-| [docs/eda-events.md](docs/eda-events.md) | You're subscribing to the `flycanon.ingest` / `flycanon.knowledge` / `flycanon.audit` topics. |
+| [docs/eda-events.md](docs/eda-events.md) | You're subscribing to the `flycanon.ingest` / `flycanon.knowledge` / `flycanon.audit` / `canon.workspaces.v1` topics. |
+| [docs/consumers.md](docs/consumers.md) | You're building or auditing a service that consumes flycanon -- agent token scopes, workspace events, retry posture, wire-contract stability. |
 | [docs/deployment.md](docs/deployment.md) | You're running this in production — env vars, topologies, OCR engines, embedding providers, auth, observability, sizing. |
 | [docs/cicd.md](docs/cicd.md) | You're cutting a release or wiring CI/CD — the three GitHub Actions workflows, release cookbook, required secrets. |
 | [docs/troubleshooting.md](docs/troubleshooting.md) | The service / ingest / search / answer surface is misbehaving — symptom → root cause → fix. |
