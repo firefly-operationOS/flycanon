@@ -1,20 +1,39 @@
 # Copyright 2026 Firefly Software Solutions Inc
 """Typed errors raised by the knowledge service.
 
-Each subclass carries a stable ``code`` the exception advice maps to
-``ProblemDetails.code``.
+Each subclass inherits from :class:`FireflyHTTPException` so the
+conventions exception handler renders it as an RFC 7807
+``ProblemDetail`` automatically. The legacy
+``flycanon.web.problem_handlers`` still catches each subclass by
+class during the Phase 4 migration window; once that file is
+deleted in Task 2 the conventions handler picks them up via their
+:class:`FireflyHTTPException` base.
+
+``http_status`` is kept alongside the new ClassVar ``status`` so
+the legacy parent handlers (``KnowledgeServiceError`` /
+``ConsolidationError`` / ``IngestionError``) -- which read
+``getattr(exc, "http_status", 400)`` -- continue to work during the
+window. Both attributes are kept in sync.
 """
 
 from __future__ import annotations
 
+from typing import ClassVar
 
-class KnowledgeServiceError(Exception):
-    code: str = "knowledge_error"
-    http_status: int = 400
+from flycanon.web.conventions import FireflyHTTPException
+
+
+class KnowledgeServiceError(FireflyHTTPException):
+    status: ClassVar[int] = 400
+    code: ClassVar[str] = "knowledge_error"
+    title: ClassVar[str] = "Knowledge service error"
+    http_status: ClassVar[int] = 400
 
 
 class KnowledgeItemNotFound(KnowledgeServiceError):
+    status = 404
     code = "knowledge_item_not_found"
+    title = "Knowledge item not found"
     http_status = 404
 
     def __init__(self, item_id: str) -> None:
@@ -23,7 +42,9 @@ class KnowledgeItemNotFound(KnowledgeServiceError):
 
 
 class KnowledgeVersionNotFound(KnowledgeServiceError):
+    status = 404
     code = "knowledge_version_not_found"
+    title = "Knowledge version not found"
     http_status = 404
 
     def __init__(self, item_id: str, version: int) -> None:
@@ -33,7 +54,9 @@ class KnowledgeVersionNotFound(KnowledgeServiceError):
 
 
 class KnowledgeItemAlreadyRetired(KnowledgeServiceError):
+    status = 409
     code = "knowledge_item_already_retired"
+    title = "Knowledge item already retired"
     http_status = 409
 
     def __init__(self, item_id: str) -> None:
@@ -42,7 +65,9 @@ class KnowledgeItemAlreadyRetired(KnowledgeServiceError):
 
 
 class InvalidSupersedeTarget(KnowledgeServiceError):
+    status = 409
     code = "invalid_supersede_target"
+    title = "Invalid supersede target"
     http_status = 409
 
     def __init__(self, item_id: str, target_id: str, detail: str) -> None:
@@ -60,7 +85,9 @@ class KnowledgeVersionConflict(KnowledgeServiceError):
     now higher than they expected) and re-submit.
     """
 
+    status = 409
     code = "knowledge_version_conflict"
+    title = "Knowledge version conflict"
     http_status = 409
 
     def __init__(self, item_id: str, attempted_version: int) -> None:

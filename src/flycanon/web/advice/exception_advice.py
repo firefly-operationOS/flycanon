@@ -121,7 +121,11 @@ class ExceptionAdvice:
             status=409,
             code=exc.code,
             detail=str(exc),
-            extensions={"candidate_id": exc.candidate_id, "status": exc.status},
+            # ``exc.status`` would now return the HTTP ClassVar (409);
+            # the candidate's lifecycle state lives on
+            # ``candidate_status`` after the FireflyHTTPException
+            # migration.
+            extensions={"candidate_id": exc.candidate_id, "status": exc.candidate_status},
         )
 
     @exception_handler(ConsolidationError)

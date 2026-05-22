@@ -23,32 +23,39 @@ from flycanon.interfaces.dtos.relation import CreateRelationRequest
 from flycanon.models.entities.knowledge_relation import KnowledgeRelationRow
 from flycanon.models.repositories.knowledge_repository import KnowledgeRepository
 from flycanon.models.repositories.relation_repository import RelationRepository
+from flycanon.web.conventions import FireflyHTTPException
 
 logger = logging.getLogger(__name__)
 
 
-class RelationConflictError(Exception):
+class RelationConflictError(FireflyHTTPException):
     """Same (from, to, kind) tuple already exists."""
 
+    status = 409
     code = "relation_already_exists"
+    title = "Relation already exists"
     http_status = 409
 
     def __init__(self, from_item_id: str, to_item_id: str, kind: str) -> None:
         super().__init__(f"relation already exists: {from_item_id} -[{kind}]-> {to_item_id}")
 
 
-class InvalidRelationError(Exception):
+class InvalidRelationError(FireflyHTTPException):
     """Self-relations / unknown target."""
 
+    status = 422
     code = "invalid_relation"
+    title = "Invalid relation"
     http_status = 422
 
     def __init__(self, message: str) -> None:
         super().__init__(message)
 
 
-class RelationNotFoundError(Exception):
+class RelationNotFoundError(FireflyHTTPException):
+    status = 404
     code = "relation_not_found"
+    title = "Relation not found"
     http_status = 404
 
     def __init__(self, relation_id: str) -> None:
