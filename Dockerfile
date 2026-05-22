@@ -31,14 +31,14 @@ ENV UV_PROJECT_ENVIRONMENT=/app/.venv \
     UV_LINK_MODE=copy
 
 # Stage sibling sources (only what uv needs to install the editable wheel).
-COPY --from=firefly-pyfly                     /pyproject.toml  /build/pyfly/pyproject.toml
-COPY --from=firefly-pyfly                     /README.md       /build/pyfly/README.md
-COPY --from=firefly-pyfly                     /src             /build/pyfly/src
+COPY --from=pyfly                     /pyproject.toml  /build/pyfly/pyproject.toml
+COPY --from=pyfly                     /README.md       /build/pyfly/README.md
+COPY --from=pyfly                     /src             /build/pyfly/src
 
-COPY --from=firefly-agentic  /pyproject.toml          /build/fireflyframework-agentic/pyproject.toml
-COPY --from=firefly-agentic  /README.md               /build/fireflyframework-agentic/README.md
-COPY --from=firefly-agentic  /LICENSE                 /build/fireflyframework-agentic/LICENSE
-COPY --from=firefly-agentic  /fireflyframework_agentic /build/fireflyframework-agentic/fireflyframework_agentic
+COPY --from=fireflyframework-agentic  /pyproject.toml          /build/fireflyframework-agentic/pyproject.toml
+COPY --from=fireflyframework-agentic  /README.md               /build/fireflyframework-agentic/README.md
+COPY --from=fireflyframework-agentic  /LICENSE                 /build/fireflyframework-agentic/LICENSE
+COPY --from=fireflyframework-agentic  /fireflyframework_agentic /build/fireflyframework-agentic/fireflyframework_agentic
 
 # Stage the project manifests for layer caching. README.md is required
 # by hatchling because pyproject.toml declares ``readme = "README.md"``.
