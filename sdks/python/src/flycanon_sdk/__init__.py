@@ -4,10 +4,27 @@ Repository service."""
 
 from __future__ import annotations
 
-from flycanon_sdk._client import CanonClient
-from flycanon_sdk._errors import CanonAPIError, CanonConnectionError
+from flycanon_sdk._client import AgentSurface, CanonClient
+from flycanon_sdk._errors import (
+    AgentCannotMint,
+    AgentScopeDenied,
+    AgentTokenExpired,
+    AgentWorkspaceNotInAllowlist,
+    CanonAPIError,
+    CanonConnectionError,
+    CanonError,
+    FieldError,
+    InvalidAgentToken,
+    MissingAgentToken,
+    MissingIdempotencyKey,
+    ValidationError,
+)
 from flycanon_sdk._models import (
+    CANON_WORKSPACES_TOPIC,
     AcceptCandidateRequest,
+    AgentTokenCreated,
+    AgentTokenMintRequest,
+    AgentTokenSummary,
     AnswerRequest,
     AnswerResponse,
     AuditEvent,
@@ -78,12 +95,28 @@ from flycanon_sdk._models import (
     TopConsumersReport,
     UpdateKnowledgeRequest,
     VersionInfo,
+    WorkspaceCreate,
+    WorkspaceCreated,
+    WorkspaceDeleted,
+    WorkspaceSpec,
+    WorkspaceSummary,
+    WorkspaceUpdate,
+    WorkspaceUpdated,
 )
 
-__version__ = "26.5.5"
+__version__ = "26.6.0"
 
 __all__ = [
+    "CANON_WORKSPACES_TOPIC",
     "AcceptCandidateRequest",
+    "AgentCannotMint",
+    "AgentScopeDenied",
+    "AgentSurface",
+    "AgentTokenCreated",
+    "AgentTokenExpired",
+    "AgentTokenMintRequest",
+    "AgentTokenSummary",
+    "AgentWorkspaceNotInAllowlist",
     "AnswerRequest",
     "AnswerResponse",
     "AuditEvent",
@@ -97,6 +130,7 @@ __all__ = [
     "CanonAPIError",
     "CanonClient",
     "CanonConnectionError",
+    "CanonError",
     "CandidateRecord",
     "CandidateStats",
     "CandidatesPage",
@@ -116,11 +150,13 @@ __all__ = [
     "CreateKnowledgeRequest",
     "CreateRelationRequest",
     "CreateTaxonomyNodeRequest",
+    "FieldError",
     "GraphEdge",
     "GraphNode",
     "Hit",
     "IngestJob",
     "IngestJobEvent",
+    "InvalidAgentToken",
     "JobStats",
     "KnowledgeDiff",
     "KnowledgeFieldChange",
@@ -132,6 +168,8 @@ __all__ = [
     "KnowledgeVersion",
     "LatencyReport",
     "LatencyRow",
+    "MissingAgentToken",
+    "MissingIdempotencyKey",
     "ProblemDetails",
     "ProposeCandidateRequest",
     "Provenance",
@@ -151,11 +189,19 @@ __all__ = [
     "SubmitSourceJsonPayload",
     "SuggestionsResponse",
     "SupersedeKnowledgeRequest",
-    "TopConsumerRow",
-    "TopConsumersReport",
     "TaxonomyNode",
     "TaxonomyTree",
+    "TopConsumerRow",
+    "TopConsumersReport",
     "UpdateKnowledgeRequest",
+    "ValidationError",
     "VersionInfo",
+    "WorkspaceCreate",
+    "WorkspaceCreated",
+    "WorkspaceDeleted",
+    "WorkspaceSpec",
+    "WorkspaceSummary",
+    "WorkspaceUpdate",
+    "WorkspaceUpdated",
     "__version__",
 ]

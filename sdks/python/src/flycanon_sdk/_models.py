@@ -9,9 +9,20 @@ codebase without the framework dependency tree.
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
+
+# ----------------------------------------------------------------------
+# 26.6 unification constants
+# ----------------------------------------------------------------------
+
+#: Topic name for workspace lifecycle events. Mirrors
+#: :attr:`flycanon.config.Settings.workspace_topic`. Consumers
+#: subscribing to ``WorkspaceCreated`` / ``WorkspaceUpdated`` /
+#: ``WorkspaceDeleted`` (see :mod:`flycanon.interfaces.dtos.workspace_event`)
+#: bind to this topic.
+CANON_WORKSPACES_TOPIC: str = "canon.workspaces.v1"
 
 
 class ProblemDetails(BaseModel):
@@ -653,3 +664,206 @@ class CorpusStats(BaseModel):
     chunks: ChunkStats
     ingest_jobs: JobStats
     cost: CostStreamStats
+
+
+# ----------------------------------------------------------------------
+# 26.6 unification -- Workspace CRUD DTOs
+# ----------------------------------------------------------------------
+
+
+class WorkspaceCreate(BaseModel):
+    """Request body for ``POST /api/v1/workspaces``.
+
+    ``id`` is caller-chosen (slug, ``<= 64`` chars); the tenant scope
+    comes from the ``X-Tenant-Id`` header so a caller cannot create a
+    workspace under another tenant.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    id: str = Field(min_length=1, max_length=64)
+    name: str = Field(min_length=1, max_length=255)
+    status: str = "active"
+    scope: list[Any] | None = None
+    sme_roster: list[Any] | None = None
+    retention_days: int | None = Field(default=None, ge=1)
+    jurisdiction: str | None = Field(default=None, max_length=64)
+
+
+class WorkspaceUpdate(BaseModel):
+    """Request body for ``PATCH /api/v1/workspaces/{id}``.
+
+    Every field is optional; only fields present in the payload are
+    applied server-side.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    name: str | None = Field(default=None, min_length=1, max_length=255)
+    status: str | None = None
+    scope: list[Any] | None = None
+    sme_roster: list[Any] | None = None
+    retention_days: int | None = Field(default=None, ge=1)
+    jurisdiction: str | None = Field(default=None, max_length=64)
+
+
+class WorkspaceSpec(BaseModel):
+    """Canonical workspace shape returned by ``GET /api/v1/workspaces/{id}``.
+
+    Mirrors :class:`flycanon.interfaces.dtos.workspace.WorkspaceSpec` --
+    the ``scope`` / ``sme_roster`` fields are the JSON shapes as
+    stored (the row columns are suffixed ``_json``, but the wire
+    DTO uses the plain names).
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    id: str
+    tenant_id: str
+    name: str
+    status: str
+    scope: list[Any] | None = None
+    sme_roster: list[Any] | None = None
+    retention_days: int | None = None
+    jurisdiction: str | None = None
+    created_at: datetime
+    updated_at: datetime
+    closed_at: datetime | None = None
+
+
+class WorkspaceSummary(BaseModel):
+    """Compact row shape from ``GET /api/v1/workspaces`` -- omits
+    ``scope`` + ``sme_roster`` details."""
+
+    model_config = ConfigDict(frozen=True)
+
+    id: str
+    tenant_id: str
+    name: str
+    status: str
+    retention_days: int | None = None
+    jurisdiction: str | None = None
+    created_at: datetime
+    updated_at: datetime
+    closed_at: datetime | None = None
+
+
+# ----------------------------------------------------------------------
+# 26.6 unification -- Agent token CRUD DTOs
+# ----------------------------------------------------------------------
+
+
+class AgentTokenMintRequest(BaseModel):
+    """Request body for ``POST /api/v1/agent-tokens``.
+
+    ``workspace_allowlist`` is optional -- ``None`` means the token
+    can be used in any workspace under the tenant. ``scopes``
+    defaults to ``["*"]`` (all scopes); the verify path treats
+    ``"*"`` as a wildcard.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    name: str = Field(min_length=1, max_length=128)
+    workspace_allowlist: list[str] | None = None
+    scopes: list[str] = Field(default_factory=lambda: ["*"])
+    rate_limit_rpm: int | None = Field(default=None, ge=1, le=10_000)
+    expires_at: datetime | None = None
+
+
+class AgentTokenSummary(BaseModel):
+    """Token surface as listed back to user-tier callers -- secret omitted.
+
+    Mirrors :class:`flycanon.interfaces.dtos.agent_token.AgentTokenSummaryDto`.
+    Every read path through ``GET /api/v1/agent-tokens`` returns
+    this shape; the raw token is only available on
+    :class:`AgentTokenCreated` (mint response).
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    id: str
+    name: str
+    prefix: str
+    workspace_allowlist: list[str] | None
+    scopes: list[str]
+    rate_limit_rpm: int | None
+    expires_at: datetime | None
+    created_at: datetime
+    created_by: str
+    revoked_at: datetime | None
+    last_used_at: datetime | None
+
+
+class AgentTokenCreated(AgentTokenSummary):
+    """Mint response: includes the full ``token`` ONCE.
+
+    Subsequent reads only ever expose ``prefix`` -- the secret hash
+    is stored server-side and never returned. Callers MUST capture
+    ``token`` at mint time; there is no recovery path.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    token: str
+
+
+# ----------------------------------------------------------------------
+# 26.6 unification -- Workspace lifecycle event DTOs
+# ----------------------------------------------------------------------
+
+
+class _WorkspaceEventBase(BaseModel):
+    """Shared fields for every workspace lifecycle event."""
+
+    model_config = ConfigDict(frozen=True)
+
+    tenant_id: str = Field(min_length=1, max_length=64)
+    workspace_id: str = Field(min_length=1, max_length=64)
+    occurred_at: datetime
+
+
+class WorkspaceCreated(_WorkspaceEventBase):
+    """A new workspace row landed in ``canon_workspaces``.
+
+    Emitted from ``POST /api/v1/workspaces``. Payload mirrors the
+    wire :class:`WorkspaceSpec` so consumers can rebuild a cache
+    row directly from the event body.
+    """
+
+    event_type: Literal["workspace.created"] = "workspace.created"
+    name: str = Field(min_length=1, max_length=255)
+    scope: list[Any] | None = None
+    sme_roster: list[Any] | None = None
+    retention_days: int | None = None
+    jurisdiction: str | None = None
+
+
+class WorkspaceUpdated(_WorkspaceEventBase):
+    """An existing workspace row was sparsely patched.
+
+    Emitted from ``PATCH /api/v1/workspaces/{id}``. The event
+    carries the **post-update** row state (not just the patched
+    fields) so consumers can replace cached rows wholesale.
+    """
+
+    event_type: Literal["workspace.updated"] = "workspace.updated"
+    name: str = Field(min_length=1, max_length=255)
+    scope: list[Any] | None = None
+    sme_roster: list[Any] | None = None
+    retention_days: int | None = None
+    jurisdiction: str | None = None
+
+
+class WorkspaceDeleted(_WorkspaceEventBase):
+    """A workspace was closed (flycanon's terminal lifecycle state).
+
+    Emitted from ``POST /api/v1/workspaces/{id}:close``. flycanon
+    has no hard-delete route -- closing is the terminal transition;
+    the row is preserved for audit. The event name ``workspace.deleted``
+    matches the canonical lifecycle vocabulary so downstream
+    consumers don't have to special-case flycanon's soft-delete
+    semantics.
+    """
+
+    event_type: Literal["workspace.deleted"] = "workspace.deleted"
