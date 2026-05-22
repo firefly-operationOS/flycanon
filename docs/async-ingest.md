@@ -34,7 +34,7 @@ caller --POST /api/v1/sources?mode=async--> 201 { id, status: "queued" }
                                        |
        canon_ingest_job_events: normalising → finished | failed
                                        |
-caller <--SSE on /api/v1/jobs/{id}/stream-- frames as they're written
+caller <--SSE on /api/v1/ingest-jobs/{id}/stream-- frames as they're written
 ```
 
 ## Endpoints
@@ -42,9 +42,9 @@ caller <--SSE on /api/v1/jobs/{id}/stream-- frames as they're written
 | Method | Path | Description |
 |--------|------|-------------|
 | `POST` | `/api/v1/sources?mode=async` | Enqueue. Same `SubmitSourceJsonPayload` body as the sync POST. Optional `?callback_url=…` fires a webhook on terminal state. Returns the `IngestJob` row (`id`, `status: "queued"`). |
-| `GET`  | `/api/v1/jobs` | Paginated job list. Query: `status` (csv), `limit`, `offset`. |
-| `GET`  | `/api/v1/jobs/{id}` | Job header -- `status`, `attempts`, `source_id` (on success), `error_code` / `error_message` (on failure), `started_at`, `finished_at`. |
-| `GET`  | `/api/v1/jobs/{id}/stream` | Server-Sent Events feed of progress events. Resume with `?after_id=N`. |
+| `GET`  | `/api/v1/ingest-jobs` | Paginated job list. Query: `status` (csv), `limit`, `offset`. (Renamed from `/api/v1/jobs` in Plan 4.) |
+| `GET`  | `/api/v1/ingest-jobs/{id}` | Job header -- `status`, `attempts`, `source_id` (on success), `error_code` / `error_message` (on failure), `started_at`, `finished_at`. |
+| `GET`  | `/api/v1/ingest-jobs/{id}/stream` | Server-Sent Events feed of progress events. Resume with `?after_id=N`. |
 
 ## Status values
 

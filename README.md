@@ -72,14 +72,14 @@ object that carries, for every interaction:
 | **Grounded RAG answers**    | `AnswerResponse` with the answer + citation list (same enriched `Hit` shape — filename / title / kind / section / page populated), `model`, `elapsed_ms`. `POST /api/v1/query:stream` emits the same payload as Server-Sent Events. A grounded "I don't know" is `answer == ""` with empty citations — flycanon never hallucinates. |
 | **Conversations**           | Multi-turn threads at `/api/v1/conversations/...` with rolling summary + last-N-turn context windowing. Each turn returns the same enriched citation set as `/query`; `:suggest` proposes 3-5 grounded follow-up questions. |
 | **Provenance**              | Resolved citation graph for one knowledge version plus the source summaries it touches plus the version chain of its item.                     |
-| **Async ingest jobs**       | `IngestJob` row + SSE event stream for any large or bulk ingest. Status / stage / progress / source id / RFC 7807 error envelope all surface through `GET /api/v1/jobs/{id}` and `GET /api/v1/jobs/{id}/stream` (cursor-resumable). |
+| **Async ingest jobs**       | `IngestJob` row + SSE event stream for any large or bulk ingest. Status / stage / progress / source id / RFC 7807 error envelope all surface through `GET /api/v1/ingest-jobs/{id}` and `GET /api/v1/ingest-jobs/{id}/stream` (cursor-resumable). |
 | **Knowledge quality**       | `GET /api/v1/knowledge:stale` returns per-item staleness scores (cosine vs fresh sources, 6h cached); `POST /api/v1/knowledge:detect-conflicts` runs an LLM-judged pairwise conflict scan, queues confirmed conflicts as candidates, and auto-creates the matching `conflicts_with` edges. |
 | **PII guardrail**           | Configurable regex scanner with four policies (`disabled` / `warn` / `redact` / `reject`). Runs on every intake path (initial submit, bulk, async, replace). `reject` returns RFC 7807 + `findings[]` so callers can surface a precise diagnostic. |
 | **Billing + cost stream**   | `/api/v1/billing` aggregates spend; `/events` drills into per-call breadcrumbs (correlation id, subject, latency); `/summary` returns 24h / 7d / 30d snapshots; `/top` and `/by-subject` answer "who" and "where did it go"; `/latency` returns p50 / p95 / p99 from the same cost-event stream. |
 | **Corpus inventory**        | `GET /api/v1/stats` -- one-shot snapshot covering sources (by kind + status + bytes), knowledge items (by status + domain), versions, candidates, chunks (embedded coverage), ingest jobs (by status + avg attempts), and the cost headline (24h / 30d). |
 | **Append-only audit log**   | Every mutation (`/api/v1/audit`) with correlation id, actor, payload, and W3C trace context.                                                   |
 | **EDA topics**              | Three durable topics published via the Postgres outbox: `flycanon.ingest`, `flycanon.knowledge`, `flycanon.audit`.                              |
-| **RFC 7807 error envelope** | Every non-2xx response is a ProblemDetails payload with a stable `code` field for branching.                                                   |
+| **RFC 7807 error envelope** | Every non-2xx response is a `ProblemDetail` (singular) payload from `flycanon.web.conventions` with a stable `code` field for branching. `type` URI base: `https://firefly.dev/problems/...`. |
 | **OpenAPI 3.1**             | Multi-paragraph DTO descriptions mixing business and technical context, served live at `/openapi.json` (Swagger UI at `/docs`, ReDoc at `/redoc`). |
 
 ---
@@ -153,7 +153,7 @@ Rank Fusion over the two channels.
 | Concern                                                          | Endpoint(s)                                |
 | ---------------------------------------------------------------- | ------------------------------------------ |
 | Source intake (any format, bytes / base64 / URL)                 | `POST /api/v1/sources`                     |
-| Bulk + async intake (jobs + SSE progress)                        | `POST /api/v1/sources:bulk`, `:async`, `GET /api/v1/jobs/{id}/stream` |
+| Bulk + async intake (jobs + SSE progress)                        | `POST /api/v1/sources:bulk`, `:async`, `GET /api/v1/ingest-jobs/{id}/stream` |
 | Source re-ingest (preserves the row id)                          | `PUT /api/v1/sources/{id}`                 |
 | Source lookup / pagination                                       | `GET /api/v1/sources[/{id}]`               |
 | Knowledge-item lifecycle (draft / published / superseded / retired) | `/api/v1/knowledge/...`                 |

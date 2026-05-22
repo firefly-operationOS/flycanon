@@ -54,22 +54,45 @@ All notable changes to **flycanon** are documented here.
   by default. `promote_tenant_to_partition()` /
   `demote_tenant_from_partition()` for hot-tenant operators.
 
+### BREAKING -- Plan 4 (Phase 4) conventions adoption + controller wiring
+
+- **Headers required everywhere.** Every `/api/v1/*` call (except
+  `/api/v1/version`) now requires `X-Tenant-Id` + `X-Workspace-Id`.
+  Missing -> `400 missing_tenant_context`.
+- **Error envelope flipped.** `title` is now human-readable; new
+  `code` field carries the machine identifier; `type` URI base
+  `https://firefly.dev/problems/...` (was `https://flycanon.dev/...`).
+  Media type `application/problem+json`.
+- **`/api/v1/jobs/*` -> `/api/v1/ingest-jobs/*`** -- 3 sub-routes
+  renamed.
+- **`actor` partitioning proxy retired.** `actor` stays as audit
+  metadata on every row; queries/groupings now use
+  `(tenant_id, workspace_id)`. Billing endpoints no longer accept
+  `actor` Query param.
+- **New `/api/v1/workspaces` CRUD** -- create/list/get/patch/close
+  on `canon_workspaces` (table from Plan 2).
+- **`canon_sources.content_sha256` unique constraint widened** to
+  `(tenant_id, workspace_id, content_sha256)`. Same content can
+  coexist in multiple workspaces.
+- **Entity-level `'default'` defaults dropped** -- services now
+  pass real `tenant_id` + `workspace_id` from `TenantContext`.
+  Migration `0011` drops the column-level `server_default` too.
+- **RetrievalService callers now operational** -- Plan 3 had
+  `/api/v1/search`, `/api/v1/query`, `/api/v1/query/stream`
+  returning 400 because their callers didn't pass scope. Plan 4
+  wires the threading.
+
+### Removed
+
+- **Legacy `flycanon.web.problem_handlers`** -- superseded by
+  `flycanon.web.conventions.register_exception_handlers`.
+- **Legacy `flycanon.interfaces.dtos.error.ProblemDetails`** (plural)
+  -- superseded by `flycanon.web.conventions.ProblemDetail` (singular).
+- **Billing actor Query param + actor filter on cost queries** --
+  partitioning moves to tenant/workspace.
+
 ### Deferred / not yet shipped
 
-- **CRUD controller `/api/v1/workspaces`** -- needs
-  `require_tenant_context()` from the conventions module. Plan 4.
-- **Service-layer scope threading** -- services still rely on the
-  `'default'` server default for `tenant_id` + `workspace_id`.
-  Plan 4 wires real values.
-- **Widened unique constraints** (e.g.
-  `canon_sources.content_sha256` -> composite) -- Plan 4 (coupled
-  with service-layer adoption).
-- **`actor` field retirement** -- Plan 4.
-- **Wiring scope from request headers into RetrievalService** --
-  Plan 4 (conventions adoption). Today `/api/v1/search` /
-  `/api/v1/query` / `/api/v1/query/stream` return 400 because
-  their callers don't yet pass `tenant_id` / `workspace_id`.
-  This is the intentional fail-closed surface of Plan 3.
 - **Embedding cache key** -- spec section 4.3 forward-looking;
   no cache exists yet.
 - **Live testcontainer tests for `partition_admin`** -- pure

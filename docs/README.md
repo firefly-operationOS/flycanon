@@ -113,7 +113,7 @@ Where to read about each topic that spans multiple documents:
 | EDA / typed event envelopes            | [eda-events.md](eda-events.md)                                                                | [architecture.md § DI wiring](architecture.md#di-wiring)                            |
 | Append-only audit log                  | [api-reference.md § /audit](api-reference.md#audit)                                            | [architecture.md § Data model](architecture.md#data-model)                         |
 | W3C trace context                      | [architecture.md § Cross-cutting concerns](architecture.md#cross-cutting-concerns)            | [api-reference.md](api-reference.md)                                               |
-| RFC 7807 error envelope                | [payload-reference.md § ProblemDetails](payload-reference.md)                                 | [api-reference.md § Error responses](api-reference.md#error-responses)              |
+| RFC 7807 error envelope                | [payload-reference.md § ProblemDetail](payload-reference.md)                                  | [api-reference.md § Error responses](api-reference.md#error-responses)              |
 | Multi-replica concurrency safety       | [concurrency.md](concurrency.md)                                                              | [async-ingest.md § Concurrency safety](async-ingest.md#concurrency-safety)          |
 
 ---

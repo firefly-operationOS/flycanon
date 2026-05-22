@@ -13,25 +13,30 @@ truth -- the OpenAPI doc at `/openapi.json` is generated from the
 Pydantic models in
 [`flycanon.interfaces.dtos`](../src/flycanon/interfaces/dtos/).
 
-## ProblemDetails (RFC 7807)
+## ProblemDetail (RFC 7807)
 
-Every non-2xx response is a problem document:
+Every non-2xx response is a problem document produced by
+`flycanon.web.conventions.ProblemDetail` (Plan 4 envelope; replaces
+the legacy plural `ProblemDetails`):
 
 ```json
 {
-  "type": "https://flycanon.dev/problems/knowledge-item-not-found",
+  "type": "https://firefly.dev/problems/knowledge_item_not_found",
+  "code": "knowledge_item_not_found",
   "title": "Knowledge item not found",
   "status": 404,
-  "code": "knowledge_item_not_found",
   "detail": "knowledge item 'abc' not found",
-  "extensions": { "item_id": "abc" }
+  "instance": "/api/v1/knowledge/abc",
+  "correlation_id": "01HV...",
+  "errors": []
 }
 ```
 
-`code` is the stable identifier SDKs branch on. The full table of
-codes (and the HTTP status they map to) lives in the exception
-advice
-[`web/advice/exception_advice.py`](../src/flycanon/web/advice/exception_advice.py).
+`code` is the stable identifier SDKs branch on; `title` is the
+human-readable label and `detail` is the free-form message. The
+`type` URI base is `https://firefly.dev/problems/...`. The full
+table of codes (and the HTTP status they map to) lives in
+[`web/conventions/exceptions.py`](../src/flycanon/web/conventions/exceptions.py).
 
 ## Source intake
 
@@ -363,7 +368,7 @@ Same body as `POST /api/v1/sources`. Response:
 { "job_id": "job-...", "status": "queued" }
 ```
 
-### `GET /api/v1/jobs/{id}`
+### `GET /api/v1/ingest-jobs/{id}`
 
 ```json
 {
@@ -379,7 +384,7 @@ Same body as `POST /api/v1/sources`. Response:
 }
 ```
 
-### `GET /api/v1/jobs/{id}/stream`
+### `GET /api/v1/ingest-jobs/{id}/stream`
 
 Server-Sent Events. See [async-ingest.md](async-ingest.md) for the
 frame format. Reconnect with `?cursor=N` to resume.
@@ -416,7 +421,9 @@ frame format. Reconnect with `?cursor=N` to resume.
 
 ### `GET /api/v1/billing`
 
-Query: `group_by` (csv), `actor`, `since`, `until`.
+Query: `group_by` (csv), `since`, `until`. Scope is supplied by the
+`X-Tenant-Id` + `X-Workspace-Id` headers (Plan 4); the legacy
+`actor` Query param is retired.
 
 ```json
 {

@@ -304,3 +304,97 @@ beans are declared. It registers:
 * **Security**: optional static API keys via `FLYCANON_API_KEYS`. The
   OAuth2 resource-server stack inherited from pyfly is available
   (set `pyfly.security.oauth2.resource-server.enabled=true`).
+
+## Conventions adoption (Plan 4)
+
+All `/api/v1/*` requests except `/api/v1/version` require:
+
+- `X-Tenant-Id` header (slug grammar: `^[a-z0-9][a-z0-9_-]{0,63}$`)
+- `X-Workspace-Id` header (same grammar)
+
+Missing -> `400 missing_tenant_context`. The
+`require_tenant_context()` FastAPI dependency from
+`flycanon.web.conventions` is wired into every controller; the
+resolved `TenantContext` flows down through service signatures into
+repositories and the retrieval layer.
+
+### Error envelope
+
+flycanon now emits the RFC 7807 envelope from
+`flycanon.web.conventions.ProblemDetail`:
+
+```json
+{
+  "type": "https://firefly.dev/problems/<code>",
+  "code": "<snake_case_machine_code>",
+  "title": "<human-readable label>",
+  "status": <int>,
+  "detail": "<message>",
+  "instance": "<path>",
+  "correlation_id": "<uuid>",
+  "errors": []
+}
+```
+
+Media type `application/problem+json`. Programmatic clients dispatch
+on `code` (stable slug); `title` and `detail` are translation-friendly
+but not contract. The legacy `flycanon.interfaces.dtos.error.ProblemDetails`
+(plural) and `flycanon.web.problem_handlers` are deleted -- the
+`flycanon.web.conventions.register_exception_handlers()` registrar
+installs handlers at boot.
+
+### Workspace CRUD
+
+`canon_workspaces` (Plan 2) is the canonical workspace store. CRUD
+lives at `/api/v1/workspaces`:
+
+- `POST /api/v1/workspaces` -- create
+- `GET /api/v1/workspaces` -- list within tenant
+- `GET /api/v1/workspaces/{id}` -- fetch
+- `PATCH /api/v1/workspaces/{id}` -- update (sparse)
+- `POST /api/v1/workspaces/{id}:close` -- close (idempotent;
+  sets `status=closed` + `closed_at`)
+
+All five endpoints require the standard headers. The lifecycle
+states (`draft` / `active` / `closed` / `handed_off`) match the
+`WorkspaceStatus` enum from Plan 2.
+
+### `actor` retirement
+
+`actor` is no longer used for partitioning. Tenant + workspace come
+from headers via `TenantContext`. `actor` remains as audit metadata
+on rows (who/what created the row) -- `ctx.actor` is the canonical
+source; the field stays on `canon_audit_events` and
+`canon_cost_events` as a free-form caller identifier. Billing
+endpoints no longer accept an `actor` Query param; aggregations
+group by `(tenant_id, workspace_id)` instead.
+
+### `/api/v1/jobs/*` -> `/api/v1/ingest-jobs/*`
+
+The ingest-job inspection routes are renamed for clarity (parallel
+to flyradar's `/api/v1/discovery-jobs/*`). Three sub-routes moved:
+
+- `GET /api/v1/jobs` -> `GET /api/v1/ingest-jobs`
+- `GET /api/v1/jobs/{id}` -> `GET /api/v1/ingest-jobs/{id}`
+- `GET /api/v1/jobs/{id}/stream` -> `GET /api/v1/ingest-jobs/{id}/stream`
+
+The async-enqueue path (`POST /api/v1/sources?mode=async`) is
+unchanged.
+
+### RetrievalService scope threading (operational again)
+
+`RetrievalService.search()` requires `tenant_id` + `workspace_id`
+from `TenantContext`. The `/api/v1/search`, `/api/v1/query`, and
+`/api/v1/query/stream` endpoints -- which Plan 3 left fail-closed
+because their callers didn't pass scope -- are now operational
+again. Scope flows from request headers through `SearchService` /
+`AnswerService` into the retrieval layer.
+
+### Service-layer scope + widened constraints
+
+Services no longer rely on the `'default'` column-level
+`server_default` for `tenant_id` + `workspace_id`. Migration `0011`
+drops those defaults and widens the
+`canon_sources.content_sha256` unique constraint to
+`(tenant_id, workspace_id, content_sha256)` -- the same content
+can now coexist in multiple workspaces and dedup is workspace-local.

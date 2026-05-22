@@ -32,7 +32,8 @@ Every cost event carries:
 | `input_tokens` / `output_tokens` / `total_tokens` | Token counters captured from the agent's usage block. |
 | `cost_usd`       | Decimal (6-place) USD spent. Serialised as a string in JSON to preserve precision. |
 | `latency_ms`     | End-to-end latency of the call. |
-| `actor`          | Caller identity (a v1 proxy for tenant before multi-tenancy lands). |
+| `actor`          | Caller identity -- audit metadata only since Plan 4 (partitioning moved to `(tenant_id, workspace_id)` on the headers). |
+| `tenant_id` / `workspace_id` | Scope columns supplied by `X-Tenant-Id` + `X-Workspace-Id` on every cost-recording call. Aggregations group on this pair. |
 | `correlation_id` | W3C correlation id from the originating request -- pivot back to the audit log. |
 | `subject_kind` / `subject_id` | Optional breadcrumb: `source`/`source_id`, `knowledge_item`/`item_id`, etc. Powers `/by-subject`. |
 | `occurred_at`    | UTC timestamp. |
@@ -41,8 +42,10 @@ Every cost event carries:
 
 ### `GET /api/v1/billing` -- aggregated report
 
-Query: `group_by` (csv of `date` / `model` / `agent_name` / `actor`),
-`actor`, `since`, `until`.
+Query: `group_by` (csv of `date` / `model` / `agent_name`),
+`since`, `until`. Scope is supplied via the `X-Tenant-Id` +
+`X-Workspace-Id` headers (Plan 4); the legacy `actor` Query param
+is retired.
 
 ```json
 {
@@ -63,8 +66,8 @@ Query: `group_by` (csv of `date` / `model` / `agent_name` / `actor`),
 
 ### `GET /api/v1/billing/events` -- per-call drill-down
 
-Query: `actor`, `agent_name`, `since`, `until`, `limit` (1-500),
-`offset`.
+Query: `agent_name`, `since`, `until`, `limit` (1-500), `offset`.
+Scope is supplied via the request headers (Plan 4).
 
 ```json
 {
@@ -109,21 +112,22 @@ Three windows always populated (zero rows when no data, not 404):
     "cost_usd": "4.21",
     "top_model": "anthropic:claude-sonnet-4-6",
     "top_model_cost_usd": "3.82",
-    "top_actor": "u-1",
-    "top_actor_cost_usd": "1.95"
+    "top_workspace_id": "ws-eu",
+    "top_workspace_cost_usd": "1.95"
   },
   "last_7d":  { /* ... */ },
   "last_30d": { /* ... */ }
 }
 ```
 
-`top_actor` is omitted when the caller narrows the query to a
-specific `actor` -- the answer would be trivially that actor.
+The summary is always scoped to the tenant + workspace from the
+request headers; the legacy `top_actor` field is retired.
 
 ### `GET /api/v1/billing/top` -- top-N consumers
 
-Query: `dimension` (one of `model` / `agent_name` / `actor`), `since`,
-`until`, `limit` (1-100, default 10).
+Query: `dimension` (one of `model` / `agent_name`), `since`,
+`until`, `limit` (1-100, default 10). Scope is supplied via the
+request headers (Plan 4 -- `actor` is no longer a valid dimension).
 
 ```json
 {
@@ -163,8 +167,8 @@ here.
 
 ### `GET /api/v1/billing/latency` -- p50 / p95 / p99
 
-Query: `group_by` (csv of `model` / `agent_name` / `actor`), `since`,
-`until`.
+Query: `group_by` (csv of `model` / `agent_name`), `since`,
+`until`. Scope is supplied via the request headers (Plan 4).
 
 ```json
 {

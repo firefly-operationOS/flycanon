@@ -12,11 +12,26 @@ The OpenAPI document is the canonical source -- visit `/openapi.json`
 or the Swagger UI at `/docs` on a running instance. This page is the
 human-readable catalogue.
 
+## Required headers
+
+Every `/api/v1/*` request **except** `/api/v1/version` requires the
+tenant-context headers (Plan 4 conventions adoption):
+
+| Header | Grammar | Notes |
+|--------|---------|-------|
+| `X-Tenant-Id` | `^[a-z0-9][a-z0-9_-]{0,63}$` | Identifies the calling tenant. |
+| `X-Workspace-Id` | same | Workspace within the tenant. |
+
+Missing or malformed headers -> `400 missing_tenant_context`
+(RFC 7807 envelope; see _Error responses_ below). The
+`X-Correlation-Id` / `X-Request-Id` propagation headers from pyfly
+are unchanged.
+
 ## Sources
 
 | Method | Path | Description |
 |--------|------|-------------|
-| `POST` | `/api/v1/sources` | Submit a source. Body: `SubmitSourceJsonPayload` (base64 bytes via `content_base64` **or** `uri` to fetch). Default sync 201 returns `SourceRecord`; add `?mode=async` for the queued path (returns `IngestJob`, see `/api/v1/jobs/{id}`). Optional `?callback_url=…` fires a webhook on terminal state. Same-content submissions dedup on `content_sha256`. |
+| `POST` | `/api/v1/sources` | Submit a source. Body: `SubmitSourceJsonPayload` (base64 bytes via `content_base64` **or** `uri` to fetch). Default sync 201 returns `SourceRecord`; add `?mode=async` for the queued path (returns `IngestJob`, see `/api/v1/ingest-jobs/{id}`). Optional `?callback_url=…` fires a webhook on terminal state. Same-content submissions dedup on `(tenant_id, workspace_id, content_sha256)`. |
 | `POST` | `/api/v1/sources:bulk` | Bulk-submit an array of sources. Returns per-item `BulkSourceResult`s. |
 | `PUT`  | `/api/v1/sources/{id}` | Replace an existing source's content in place. Body: `SubmitSourceJsonPayload`. |
 | `GET`  | `/api/v1/sources` | Paginated list. Query: `status`, `kind` (csv), `limit`, `offset`. |
@@ -71,22 +86,44 @@ human-readable catalogue.
 
 ## Async ingest jobs
 
+Renamed in Plan 4 (was `/api/v1/jobs/*`) to parallel flyradar's
+`/api/v1/discovery-jobs/*`.
+
 | Method | Path | Description |
 |--------|------|-------------|
-| `GET`  | `/api/v1/jobs` | Paginated list. Query: `status` (csv), `limit`, `offset`. |
-| `GET`  | `/api/v1/jobs/{id}` | Job header — `status`, `attempts`, `source_id` once succeeded, `error_code`/`error_message` on failure. |
-| `GET`  | `/api/v1/jobs/{id}/stream` | Server-Sent Events feed of job events (cursor-based; resume with `?after_id=N`). |
+| `GET`  | `/api/v1/ingest-jobs` | Paginated list. Query: `status` (csv), `limit`, `offset`. |
+| `GET`  | `/api/v1/ingest-jobs/{id}` | Job header — `status`, `attempts`, `source_id` once succeeded, `error_code`/`error_message` on failure. |
+| `GET`  | `/api/v1/ingest-jobs/{id}/stream` | Server-Sent Events feed of job events (cursor-based; resume with `?after_id=N`). |
+
+## Workspaces
+
+CRUD over `canon_workspaces` (Plan 2 table). All five endpoints
+require the standard tenant headers; list / get / update / close
+scope by `X-Tenant-Id`.
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `POST` | `/api/v1/workspaces` | Create. Body: `WorkspaceCreate`. Returns `WorkspaceSummary`. |
+| `GET`  | `/api/v1/workspaces` | List within tenant. Query: `status`, `limit`, `offset`. |
+| `GET`  | `/api/v1/workspaces/{id}` | Fetch one. 404 → `resource_not_found`. |
+| `PATCH` | `/api/v1/workspaces/{id}` | Sparse update. Body: `WorkspaceUpdate`. |
+| `POST` | `/api/v1/workspaces/{id}:close` | Close (idempotent; sets `status=closed` + `closed_at`). |
 
 ## Billing
 
+Billing endpoints scope by `(tenant_id, workspace_id)` from the
+request headers; the legacy `actor` Query param is retired (Plan 4).
+`actor` remains as a column on `canon_cost_events` for audit /
+forensics, but it no longer partitions queries.
+
 | Method | Path | Description |
 |--------|------|-------------|
-| `GET`  | `/api/v1/billing` | Aggregated cost report. Query: `group_by` (csv of `date`/`model`/`agent_name`/`actor`), `actor`, `since`, `until`. |
-| `GET`  | `/api/v1/billing/events` | Per-call drill-down (correlation id + subject + latency). Query: `actor`, `agent_name`, `since`, `until`, `limit` (1-500), `offset`. |
-| `GET`  | `/api/v1/billing/summary` | Rolling-window snapshot (24h / 7d / 30d) with top model + top actor per window. Query: `actor`. |
-| `GET`  | `/api/v1/billing/top` | Top-N consumers by cost. Query: `dimension` (`model` / `agent_name` / `actor`), `since`, `until`, `limit` (1-100). |
+| `GET`  | `/api/v1/billing` | Aggregated cost report. Query: `group_by` (csv of `date`/`model`/`agent_name`), `since`, `until`. |
+| `GET`  | `/api/v1/billing/events` | Per-call drill-down (correlation id + subject + latency). Query: `agent_name`, `since`, `until`, `limit` (1-500), `offset`. |
+| `GET`  | `/api/v1/billing/summary` | Rolling-window snapshot (24h / 7d / 30d) with top model per window. |
+| `GET`  | `/api/v1/billing/top` | Top-N consumers by cost. Query: `dimension` (`model` / `agent_name`), `since`, `until`, `limit` (1-100). |
 | `GET`  | `/api/v1/billing/by-subject` | Cost attribution per `(subject_kind, subject_id)`. Query: `subject_kind`, `since`, `until`, `limit` (1-200). |
-| `GET`  | `/api/v1/billing/latency` | p50 / p95 / p99 latency per group. Query: `group_by` (csv of `model` / `agent_name` / `actor`), `since`, `until`. |
+| `GET`  | `/api/v1/billing/latency` | p50 / p95 / p99 latency per group. Query: `group_by` (csv of `model` / `agent_name`), `since`, `until`. |
 
 ## Inventory
 
@@ -124,31 +161,37 @@ human-readable catalogue.
 ## Error responses
 
 Every 4xx / 5xx response is an RFC 7807
-`application/problem+json` document. The shape:
+`application/problem+json` document produced by
+`flycanon.web.conventions.ProblemDetail` (the Plan 4 envelope; the
+legacy `flycanon.interfaces.dtos.error.ProblemDetails` plural is
+deleted). The shape:
 
 ```json
 {
-  "type": "https://flycanon.dev/problems/<slug>",
-  "title": "Human-readable summary",
-  "status": 409,
+  "type": "https://firefly.dev/problems/knowledge_item_already_retired",
   "code": "knowledge_item_already_retired",
+  "title": "Knowledge item already retired",
+  "status": 409,
   "detail": "knowledge item 'add55fda-…' is already retired",
-  "extensions": { "item_id": "add55fda-…" }
+  "instance": "/api/v1/knowledge/add55fda-.../:retire",
+  "correlation_id": "01HV...",
+  "errors": []
 }
 ```
 
-Programmatic clients dispatch on `code` (stable slug); the human-readable
-`title` and `detail` are translation-friendly but not API contract.
-Domain-specific extensions land under `extensions` — e.g. `item_id` for
-knowledge errors, `candidate_id` for candidate errors, `attempted_version`
-for version conflicts.
+Programmatic clients dispatch on `code` (stable snake_case slug);
+`title` is now the human-readable label and `detail` is the
+free-form message. The `type` URI base is
+`https://firefly.dev/problems/...` (was `https://flycanon.dev/...`).
+Field-level validation details land under `errors[]`.
 
 ### Status-code catalogue
 
 | Status | Code slug | When |
 |--------|-----------|------|
+| 400 | `missing_tenant_context` | `X-Tenant-Id` / `X-Workspace-Id` header missing or malformed. |
 | 400 | `invalid_request` | Pydantic validation, missing-field `ValueError` raised inside a controller helper. |
-| 404 | `resource_not_found` | Generic missing resource (knowledge item, source, conversation, candidate, job). |
+| 404 | `resource_not_found` | Generic missing resource (knowledge item, source, conversation, candidate, job, workspace). |
 | 404 | `knowledge_item_not_found` / `knowledge_version_not_found` / `candidate_not_found` | Typed not-found variants for callers that prefer the specific slug. |
 | 409 | `knowledge_item_already_retired` | `:retire` against a retired item, or losing the atomic claim against a concurrent retire. |
 | 409 | `knowledge_version_conflict` | Concurrent `PUT /knowledge/{id}` updates collided on `UNIQUE(item_id, version)`. Extensions: `attempted_version`. |
