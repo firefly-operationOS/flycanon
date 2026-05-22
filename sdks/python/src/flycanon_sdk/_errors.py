@@ -5,7 +5,7 @@ All errors that originate from the wire carry the service's stable
 ``code`` field; callers branch on ``code`` instead of parsing the
 human-readable ``detail``.
 
-The 26.6.0 unification adds typed subclasses keyed by the service's
+The 26.5.7 unification adds typed subclasses keyed by the service's
 RFC 7807 ``code`` field so callers can ``except InvalidAgentToken``
 instead of ``except CanonAPIError if err.code == "invalid_agent_token"``.
 A small registry (:data:`_CODE_REGISTRY`) maps each known code to its

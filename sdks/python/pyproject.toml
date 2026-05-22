@@ -1,6 +1,6 @@
 [project]
 name = "flycanon-sdk"
-version = "26.6.0"
+version = "26.5.7"
 description = "Async-first Python client for the flycanon Operational Knowledge Repository service."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -53,7 +53,7 @@ line-length = 110
 [tool.ruff.lint]
 select = ["E", "F", "I", "N", "UP", "B", "SIM"]
 
-# 26.6.0 unification adds typed exception classes whose names mirror
+# 26.5.7 unification adds typed exception classes whose names mirror
 # the service's RFC 7807 ``code`` field (e.g. ``MissingAgentToken``
 # for ``code=missing_agent_token``). Forcing an ``Error`` suffix
 # breaks that 1:1 mapping with the wire contract.

@@ -2,7 +2,7 @@
 
 All notable changes to **flycanon-sdk** (Python) are documented here.
 
-## [26.6.0] - 2026-05-22
+## [26.5.7] - 2026-05-22
 
 ### Added -- 12-plan unification surface (non-breaking, additive)
 
@@ -102,11 +102,11 @@ All notable changes to **flycanon-sdk** (Python) are documented here.
   `except CanonAPIError` still receive a `CanonAPIError`
   (subclass), but new callers can catch the specific subclass.
 
-- **`__version__`** bumped to `26.6.0` (was `26.5.5` -- there was
+- **`__version__`** bumped to `26.5.7` (was `26.5.5` -- there was
   a pre-existing drift between `pyproject.toml` (26.5.6) and the
   package `__version__`; this release realigns both).
 
-- **`User-Agent`** advertises `flycanon-sdk-python/26.6.0`.
+- **`User-Agent`** advertises `flycanon-sdk-python/26.5.7`.
 
 ### Internal
 
@@ -117,4 +117,4 @@ All notable changes to **flycanon-sdk** (Python) are documented here.
 
 ## [26.5.6] - 2026-05-19
 
-- Pre-26.6.0 baseline. See git history for details.
+- Pre-26.5.7 baseline. See git history for details.

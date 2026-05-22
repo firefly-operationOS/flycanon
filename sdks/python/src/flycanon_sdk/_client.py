@@ -7,7 +7,7 @@ manager to get clean connection lifecycle:
     async with CanonClient(base_url="http://localhost:8500") as client:
         ...
 
-The 26.6.0 unification adds four firefly wire-contract headers
+The 26.5.7 unification adds four firefly wire-contract headers
 (``X-Tenant-Id``, ``X-Workspace-Id``, ``X-Correlation-Id``,
 ``X-Agent-Token``) on the constructor; every outbound request
 sends whichever of those four are configured. All four are
@@ -147,7 +147,7 @@ class CanonClient:
         """
         merged_headers: dict[str, str] = {
             "Accept": "application/json",
-            "User-Agent": "flycanon-sdk-python/26.6.0",
+            "User-Agent": "flycanon-sdk-python/26.5.7",
         }
         if api_key:
             merged_headers["Authorization"] = f"Bearer {api_key}"
@@ -277,7 +277,7 @@ class CanonClient:
         return SourceRecord.model_validate(body)
 
     # ------------------------------------------------------------------
-    # Async ingest jobs (path renamed in 26.6.0: /jobs -> /ingest-jobs)
+    # Async ingest jobs (path renamed in 26.5.7: /jobs -> /ingest-jobs)
     # ------------------------------------------------------------------
 
     async def get_job(self, job_id: str) -> IngestJob:

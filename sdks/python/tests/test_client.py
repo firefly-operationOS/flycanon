@@ -509,8 +509,8 @@ async def test_answer_returns_typed_response() -> None:
 # ----------------------------------------------------------------------
 
 
-def test_sdk_version_string_is_2660() -> None:
-    assert __version__ == "26.6.0"
+def test_sdk_version_string_is_26_5_7() -> None:
+    assert __version__ == "26.5.7"
 
 
 def test_canon_workspaces_topic_constant() -> None:
@@ -535,7 +535,7 @@ async def test_constructor_headers_attached_on_every_request() -> None:
         route = mock.get("/api/v1/version").respond(
             json={
                 "service": "flycanon",
-                "version": "26.6.0",
+                "version": "26.5.7",
                 "embedding_model": "openai:text-embedding-3-small",
                 "answer_model": "anthropic:claude-sonnet-4-6",
                 "answer_fallback_model": "openai:gpt-4o",
@@ -558,7 +558,7 @@ async def test_constructor_headers_default_to_unset() -> None:
         route = mock.get("/api/v1/version").respond(
             json={
                 "service": "flycanon",
-                "version": "26.6.0",
+                "version": "26.5.7",
                 "embedding_model": "openai:text-embedding-3-small",
                 "answer_model": "anthropic:claude-sonnet-4-6",
                 "answer_fallback_model": "openai:gpt-4o",
@@ -575,12 +575,12 @@ async def test_constructor_headers_default_to_unset() -> None:
 
 
 @pytest.mark.asyncio
-async def test_user_agent_advertises_2660() -> None:
+async def test_user_agent_advertises_sdk_version() -> None:
     async with respx.mock(base_url="http://canon") as mock, CanonClient(base_url="http://canon") as client:
         route = mock.get("/api/v1/version").respond(
             json={
                 "service": "flycanon",
-                "version": "26.6.0",
+                "version": "26.5.7",
                 "embedding_model": "x",
                 "answer_model": "y",
                 "answer_fallback_model": "z",
@@ -589,7 +589,7 @@ async def test_user_agent_advertises_2660() -> None:
             }
         )
         await client.version()
-        assert "flycanon-sdk-python/26.6.0" in route.calls.last.request.headers["User-Agent"]
+        assert "flycanon-sdk-python/26.5.7" in route.calls.last.request.headers["User-Agent"]
 
 
 # ----------------------------------------------------------------------
