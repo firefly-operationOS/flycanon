@@ -14,6 +14,7 @@ from flycanon.interfaces.enums.knowledge_status import KnowledgeStatus
 from flycanon.interfaces.enums.relation_kind import RelationKind
 from flycanon.interfaces.enums.source_kind import SourceKind
 from flycanon.interfaces.enums.source_status import SourceStatus
+from flycanon.interfaces.enums.workspace_status import WorkspaceStatus
 
 __all__ = [
     "CandidateStatus",
@@ -23,4 +24,5 @@ __all__ = [
     "RelationKind",
     "SourceKind",
     "SourceStatus",
+    "WorkspaceStatus",
 ]

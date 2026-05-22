@@ -22,6 +22,7 @@ from flycanon.models.entities.knowledge_relation import KnowledgeRelationRow
 from flycanon.models.entities.knowledge_version import KnowledgeVersionRow
 from flycanon.models.entities.source import SourceRow
 from flycanon.models.entities.taxonomy_node import TaxonomyNodeRow
+from flycanon.models.entities.workspace import Workspace
 
 __all__ = [
     "AuditEventRow",
@@ -39,4 +40,5 @@ __all__ = [
     "KnowledgeVersionRow",
     "SourceRow",
     "TaxonomyNodeRow",
+    "Workspace",
 ]
