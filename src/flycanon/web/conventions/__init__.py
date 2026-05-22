@@ -1,5 +1,5 @@
 # Copyright 2026 Firefly Software Solutions Inc
-"""flyradar HTTP conventions.
+"""flycanon HTTP conventions.
 
 This package owns the wire-contract primitives both flyradar and
 flycanon agree on (per the 2026-05-21 unification spec):
@@ -14,9 +14,9 @@ flycanon agree on (per the 2026-05-21 unification spec):
 * a tenant-safe HTTPX client that auto-propagates the headers on
   outbound service-to-service calls.
 
-The mirror module ``flycanon.web.conventions`` (added in a later
-plan) MUST stay byte-for-byte equivalent in shape; changes go
-through both repos in lock-step.
+The mirror module ``flyradar.web.conventions`` is the sibling copy
+and MUST stay byte-for-byte equivalent in shape; changes go through
+both repos in lock-step.
 """
 
 from __future__ import annotations

@@ -3,17 +3,20 @@
 
 We hand-register handlers via :meth:`fastapi.FastAPI.add_exception_handler`
 because pyfly's ``@controller_advice`` scanner does not pick up
-beans in FastAPI mode (per the existing problem_handlers.py
-workaround in flycanon). One day pyfly will fix that; until then
-this module is authoritative.
+beans in FastAPI mode. The legacy ``flycanon.web.problem_handlers``
+module predates this conventions package and is the existing
+workaround; Plan 4 retires it in favor of
+``register_exception_handlers(app)``. One day pyfly will fix the
+scanner; until then this module is authoritative.
 
 In addition to the in-house :class:`FireflyHTTPException` hierarchy we
-bridge the pyfly kernel + CQRS exception classes that flyradar code
-raises (``ResourceNotFoundException``, ``InvalidRequestException``,
-``CommandProcessingException``). Without these bridges the global
-pyfly handler catches them first and renders the legacy
-``{error: {...}}`` envelope with ``application/json`` -- callers
-would see two envelopes depending on which exception fired.
+bridge the pyfly kernel + CQRS exception classes raised across
+flycanon/flyradar handler code (``ResourceNotFoundException``,
+``InvalidRequestException``, ``CommandProcessingException``).
+Without these bridges the global pyfly handler catches them first
+and renders the legacy ``{error: {...}}`` envelope with
+``application/json`` -- callers would see two envelopes depending
+on which exception fired.
 """
 
 from __future__ import annotations
