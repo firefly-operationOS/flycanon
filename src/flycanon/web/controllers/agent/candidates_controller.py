@@ -35,9 +35,11 @@ from flycanon.interfaces.dtos.candidate import (
     ProposeCandidateRequest,
 )
 from flycanon.web.controllers.agent._helpers import (
-    require_idempotency_key,
+    check_idempotency_replay,
+    store_idempotent_response,
     verify_agent_token,
 )
+from flycanon.web.conventions import IdempotencyStore
 
 logger = logging.getLogger(__name__)
 
@@ -51,9 +53,11 @@ class AgentCandidatesController:
         self,
         agent_token_service: AgentTokenService,
         commands: DefaultCommandBus,
+        idempotency_store: IdempotencyStore,
     ) -> None:
         self._agent_token_service = agent_token_service
         self._commands = commands
+        self._idempotency_store = idempotency_store
 
     @post_mapping(":propose", status_code=201)
     async def propose(
@@ -68,14 +72,30 @@ class AgentCandidatesController:
         ``400 missing_idempotency_key``. Wire shape and 4xx
         mapping mirror the user-tier
         ``POST /api/v1/candidates:propose`` byte-for-byte.
+
+        A replayed POST (same ``Idempotency-Key`` + same tenant
+        within the store TTL) returns the cached candidate list
+        re-hydrated from the stored JSON body, without re-running
+        the consolidator. This is critical for the flyradar
+        handoff path: a retried discovery must not produce
+        duplicate candidate rows in the canon.
         """
         ctx = await verify_agent_token(
             http_request,
             service=self._agent_token_service,
             scope="agent.candidates:propose",
         )
-        require_idempotency_key(http_request)
-        return await self._commands.send(
+        scope = "agent.candidates:propose"
+        cached = check_idempotency_replay(http_request, self._idempotency_store, scope)
+        # Re-hydrate each cached dict back into a
+        # :class:`CandidateRecord`. The store always persists a list
+        # for this route (propose returns the full batch). A
+        # malformed entry (shouldn't happen with the in-memory store)
+        # falls through to a dispatch by treating the cache as
+        # absent.
+        if cached is not None and isinstance(cached.body, list):
+            return [CandidateRecord.model_validate(item) for item in cached.body]
+        records = await self._commands.send(
             ProposeCandidatesCommand(
                 request=request,
                 correlation_id=get_correlation_id(),
@@ -84,6 +104,14 @@ class AgentCandidatesController:
                 actor=ctx.actor,
             )
         )
+        store_idempotent_response(
+            http_request,
+            self._idempotency_store,
+            scope,
+            status=201,
+            response=records,
+        )
+        return records
 
 
 __all__ = ["AgentCandidatesController"]

@@ -72,6 +72,10 @@ from flycanon.models.repositories import (
     TaxonomyRepository,
     WorkspaceRepository,
 )
+from flycanon.web.conventions.idempotency import (
+    IdempotencyStore,
+    InMemoryIdempotencyStore,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -155,6 +159,21 @@ class CanonCoreConfiguration:
     @bean
     def agent_token_service(self, agent_token_repository: AgentTokenRepository) -> AgentTokenService:
         return AgentTokenService(agent_token_repository)
+
+    # ------------------------------------------------------------------
+    # Replay dedup for the agent surface
+    #
+    # A singleton :class:`InMemoryIdempotencyStore` is shared by every
+    # agent controller so a replayed POST with the same
+    # ``Idempotency-Key`` returns the original response body without
+    # re-dispatching the command. In-memory is fine for MVP; a real
+    # deployment would swap in a Redis-backed implementation behind
+    # the same :class:`IdempotencyStore` Protocol.
+    # ------------------------------------------------------------------
+
+    @bean
+    def idempotency_store(self) -> IdempotencyStore:
+        return InMemoryIdempotencyStore()
 
     @bean(name="database_health")
     def database_health(self, source_repository: SourceRepository) -> SqlAlchemyHealthIndicator:

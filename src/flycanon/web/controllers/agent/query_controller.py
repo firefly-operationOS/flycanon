@@ -51,9 +51,12 @@ from flycanon.interfaces.dtos.query import (
     SearchResponse,
 )
 from flycanon.web.controllers.agent._helpers import (
+    check_idempotency_replay,
     require_idempotency_key,
+    store_idempotent_response,
     verify_agent_token,
 )
+from flycanon.web.conventions import IdempotencyStore
 
 logger = logging.getLogger(__name__)
 
@@ -76,10 +79,12 @@ class AgentQueryController:
         agent_token_service: AgentTokenService,
         queries: DefaultQueryBus,
         answer_service: AnswerService,
+        idempotency_store: IdempotencyStore,
     ) -> None:
         self._agent_token_service = agent_token_service
         self._queries = queries
         self._answer = answer_service
+        self._idempotency_store = idempotency_store
 
     @post_mapping("/query")
     async def answer(
@@ -93,20 +98,36 @@ class AgentQueryController:
         Identical wire shape to the user-tier
         ``POST /api/v1/query`` -- the only differences are the
         auth gate and the required idempotency key.
+
+        A replayed POST (same ``Idempotency-Key`` + same tenant
+        within the store TTL) returns the cached
+        :class:`AnswerResponse` re-hydrated from the stored JSON
+        body, without re-running retrieval + the LLM call.
         """
         ctx = await verify_agent_token(
             http_request,
             service=self._agent_token_service,
             scope="agent.query:run",
         )
-        require_idempotency_key(http_request)
-        return await self._queries.query(
+        scope = "agent.query:run"
+        cached = check_idempotency_replay(http_request, self._idempotency_store, scope)
+        if cached is not None:
+            return AnswerResponse.model_validate(cached.body)
+        response = await self._queries.query(
             AnswerKnowledgeQuery(
                 request=request,
                 tenant_id=ctx.tenant_id,
                 workspace_id=ctx.workspace_id,
             )
         )
+        store_idempotent_response(
+            http_request,
+            self._idempotency_store,
+            scope,
+            status=200,
+            response=response,
+        )
+        return response
 
     @post_mapping("/query/stream")
     async def stream_answer(
@@ -124,10 +145,19 @@ class AgentQueryController:
         * ``event: final`` -- terminal frame with the full answer.
 
         The generator is a verbatim copy of the user-tier
-        iterator. Token verification + idempotency check happen
-        synchronously before the streaming response is returned,
-        so authentication failures surface as a normal 4xx
-        response (not as an in-stream ``error`` frame).
+        iterator. Token verification + idempotency-header check
+        happen synchronously before the streaming response is
+        returned, so authentication failures surface as a normal
+        4xx response (not as an in-stream ``error`` frame).
+
+        Replay dedup is **intentionally skipped** for the SSE
+        endpoint -- streaming responses cannot be replayed
+        deterministically (frame ordering, hit ranking, and LLM
+        non-determinism would all need to be captured), and the
+        client is expected to handle a partial stream by reading
+        the terminal ``final`` / ``error`` frame. Only the
+        ``Idempotency-Key`` header *presence* is enforced; no
+        store interaction occurs.
         """
         ctx = await verify_agent_token(
             http_request,
@@ -216,20 +246,38 @@ class AgentQueryController:
         Identical wire shape to the user-tier
         ``POST /api/v1/search`` -- no LLM call, just BM25 + dense
         retrieval fused via RRF.
+
+        Replays under the same ``(tenant, scope, key)`` triple are
+        cached for the store TTL -- the retrieval pipeline is not
+        re-run. The replay-dedup ``scope`` is the route-specific
+        ``agent.search:run`` so a key reused on ``/query`` and
+        ``/search`` does **not** collide, even though both routes
+        share the same auth scope ``agent.query:run``.
         """
         ctx = await verify_agent_token(
             http_request,
             service=self._agent_token_service,
             scope="agent.query:run",
         )
-        require_idempotency_key(http_request)
-        return await self._queries.query(
+        scope = "agent.search:run"
+        cached = check_idempotency_replay(http_request, self._idempotency_store, scope)
+        if cached is not None:
+            return SearchResponse.model_validate(cached.body)
+        response = await self._queries.query(
             SearchKnowledgeQuery(
                 request=request,
                 tenant_id=ctx.tenant_id,
                 workspace_id=ctx.workspace_id,
             )
         )
+        store_idempotent_response(
+            http_request,
+            self._idempotency_store,
+            scope,
+            status=200,
+            response=response,
+        )
+        return response
 
 
 def _sse_frame(event: str, data: dict) -> bytes:

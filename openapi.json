@@ -5020,7 +5020,7 @@
     },
     "/api/v1/agent/candidates:propose": {
       "post": {
-        "description": "Scope: ``agent.candidates:propose``. Mandatory\n``Idempotency-Key`` header -- missing key returns\n``400 missing_idempotency_key``. Wire shape and 4xx\nmapping mirror the user-tier\n``POST /api/v1/candidates:propose`` byte-for-byte.",
+        "description": "Scope: ``agent.candidates:propose``. Mandatory\n``Idempotency-Key`` header -- missing key returns\n``400 missing_idempotency_key``. Wire shape and 4xx\nmapping mirror the user-tier\n``POST /api/v1/candidates:propose`` byte-for-byte.\n\nA replayed POST (same ``Idempotency-Key`` + same tenant\nwithin the store TTL) returns the cached candidate list\nre-hydrated from the stored JSON body, without re-running\nthe consolidator. This is critical for the flyradar\nhandoff path: a retried discovery must not produce\nduplicate candidate rows in the canon.",
         "operationId": "propose",
         "requestBody": {
           "content": {
@@ -5138,7 +5138,7 @@
     },
     "/api/v1/agent/query": {
       "post": {
-        "description": "Scope: ``agent.query:run``. Mandatory ``Idempotency-Key``.\nIdentical wire shape to the user-tier\n``POST /api/v1/query`` -- the only differences are the\nauth gate and the required idempotency key.",
+        "description": "Scope: ``agent.query:run``. Mandatory ``Idempotency-Key``.\nIdentical wire shape to the user-tier\n``POST /api/v1/query`` -- the only differences are the\nauth gate and the required idempotency key.\n\nA replayed POST (same ``Idempotency-Key`` + same tenant\nwithin the store TTL) returns the cached\n:class:`AnswerResponse` re-hydrated from the stored JSON\nbody, without re-running retrieval + the LLM call.",
         "operationId": "answer",
         "requestBody": {
           "content": {
@@ -5180,7 +5180,7 @@
     },
     "/api/v1/agent/query/stream": {
       "post": {
-        "description": "Scope: ``agent.query:run``. Mandatory ``Idempotency-Key``.\nWire format matches the user-tier\n``POST /api/v1/query/stream`` byte-for-byte:\n\n* ``event: hit``   -- one frame per retrieved citation.\n* ``event: final`` -- terminal frame with the full answer.\n\nThe generator is a verbatim copy of the user-tier\niterator. Token verification + idempotency check happen\nsynchronously before the streaming response is returned,\nso authentication failures surface as a normal 4xx\nresponse (not as an in-stream ``error`` frame).",
+        "description": "Scope: ``agent.query:run``. Mandatory ``Idempotency-Key``.\nWire format matches the user-tier\n``POST /api/v1/query/stream`` byte-for-byte:\n\n* ``event: hit``   -- one frame per retrieved citation.\n* ``event: final`` -- terminal frame with the full answer.\n\nThe generator is a verbatim copy of the user-tier\niterator. Token verification + idempotency-header check\nhappen synchronously before the streaming response is\nreturned, so authentication failures surface as a normal\n4xx response (not as an in-stream ``error`` frame).\n\nReplay dedup is **intentionally skipped** for the SSE\nendpoint -- streaming responses cannot be replayed\ndeterministically (frame ordering, hit ranking, and LLM\nnon-determinism would all need to be captured), and the\nclient is expected to handle a partial stream by reading\nthe terminal ``final`` / ``error`` frame. Only the\n``Idempotency-Key`` header *presence* is enforced; no\nstore interaction occurs.",
         "operationId": "stream_answer",
         "requestBody": {
           "content": {
@@ -5215,7 +5215,7 @@
     },
     "/api/v1/agent/search": {
       "post": {
-        "description": "Scope: ``agent.query:run``. Mandatory ``Idempotency-Key``.\nIdentical wire shape to the user-tier\n``POST /api/v1/search`` -- no LLM call, just BM25 + dense\nretrieval fused via RRF.",
+        "description": "Scope: ``agent.query:run``. Mandatory ``Idempotency-Key``.\nIdentical wire shape to the user-tier\n``POST /api/v1/search`` -- no LLM call, just BM25 + dense\nretrieval fused via RRF.\n\nReplays under the same ``(tenant, scope, key)`` triple are\ncached for the store TTL -- the retrieval pipeline is not\nre-run. The replay-dedup ``scope`` is the route-specific\n``agent.search:run`` so a key reused on ``/query`` and\n``/search`` does **not** collide, even though both routes\nshare the same auth scope ``agent.query:run``.",
         "operationId": "search",
         "requestBody": {
           "content": {
@@ -5257,7 +5257,7 @@
     },
     "/api/v1/agent/sources": {
       "post": {
-        "description": "Scope: ``agent.sources:ingest``. Mandatory\n``Idempotency-Key`` header -- missing key returns\n``400 missing_idempotency_key``. Always synchronous: the\nagent surface deliberately omits the user-tier\n``mode=async`` / ``callback_url`` toggles to keep the\ncontract minimal. Wire shape and 4xx mapping mirror the\nuser-tier ``POST /api/v1/sources`` byte-for-byte.",
+        "description": "Scope: ``agent.sources:ingest``. Mandatory\n``Idempotency-Key`` header -- missing key returns\n``400 missing_idempotency_key``. Always synchronous: the\nagent surface deliberately omits the user-tier\n``mode=async`` / ``callback_url`` toggles to keep the\ncontract minimal. Wire shape and 4xx mapping mirror the\nuser-tier ``POST /api/v1/sources`` byte-for-byte.\n\nA replayed POST (same ``Idempotency-Key`` + same tenant\nwithin the store TTL) short-circuits the command bus and\nreturns the cached :class:`SourceRecord` re-hydrated from\nthe stored JSON body. The wire response is identical to\nthe original ``201`` so flyradar's canon handoff can retry\nsafely without creating duplicate sources.",
         "operationId": "submit",
         "requestBody": {
           "content": {

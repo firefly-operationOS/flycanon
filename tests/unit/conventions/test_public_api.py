@@ -39,6 +39,10 @@ def test_public_exports() -> None:
     assert c.IdempotencyStore.__name__ == "IdempotencyStore"
     assert c.InMemoryIdempotencyStore.__name__ == "InMemoryIdempotencyStore"
     assert c.MissingIdempotencyKey.__name__ == "MissingIdempotencyKey"
+    # Added 2026-05-22 alongside StoredResponse for agent-tier
+    # replay dedup -- the agent controllers cache responses under
+    # the (tenant, scope, key) triple.
+    assert c.StoredResponse.__name__ == "StoredResponse"
     assert c.Actor.__name__ == "Actor"
     assert callable(c.actor_from_jwt_claims)
     assert callable(c.actor_from_agent_token)
@@ -53,7 +57,7 @@ def test_all_lists_every_export_and_size_locked() -> None:
     """
     import flycanon.web.conventions as c
 
-    assert len(c.__all__) == 37
+    assert len(c.__all__) == 38
     for name in c.__all__:
         assert hasattr(c, name), f"__all__ lists {name!r} but module has no such attribute"
     # Newest addition (2026-05-22): TenantContextMiddleware -- pyfly's

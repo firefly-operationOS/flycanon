@@ -197,10 +197,13 @@ class TestAgentQueryStreamErrorFrame:
         retrieval.search = AsyncMock(side_effect=RuntimeError("retrieval boom"))
         answer_service._retrieval = retrieval
 
+        from flycanon.web.conventions import InMemoryIdempotencyStore
+
         controller = AgentQueryController(
             agent_token_service=service,
             queries=AsyncMock(),
             answer_service=answer_service,
+            idempotency_store=InMemoryIdempotencyStore(),
         )
 
         agent_request = _StubRequest(

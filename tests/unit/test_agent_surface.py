@@ -47,7 +47,7 @@ from flycanon.web.controllers.agent.knowledge_controller import (
 )
 from flycanon.web.controllers.agent.query_controller import AgentQueryController
 from flycanon.web.controllers.agent.sources_controller import AgentSourcesController
-from flycanon.web.conventions import MissingIdempotencyKey
+from flycanon.web.conventions import InMemoryIdempotencyStore, MissingIdempotencyKey
 
 # ---------------------------------------------------------------------
 # Test doubles
@@ -256,12 +256,14 @@ def _sources_controller(
     *,
     commands: Any = None,
     queries: Any = None,
+    idempotency_store: Any = None,
 ) -> AgentSourcesController:
     return AgentSourcesController(
         agent_token_service=agent_token_service,
         commands=commands or _command_bus(),
         queries=queries or _query_bus(),
         url_fetcher=AsyncMock(),
+        idempotency_store=idempotency_store or InMemoryIdempotencyStore(),
     )
 
 
@@ -411,11 +413,13 @@ def _query_controller(
     *,
     queries: Any = None,
     answer_service: Any = None,
+    idempotency_store: Any = None,
 ) -> AgentQueryController:
     return AgentQueryController(
         agent_token_service=agent_token_service,
         queries=queries or _query_bus(),
         answer_service=answer_service or AsyncMock(),
+        idempotency_store=idempotency_store or InMemoryIdempotencyStore(),
     )
 
 
@@ -787,10 +791,12 @@ def _candidates_controller(
     agent_token_service: AgentTokenService,
     *,
     commands: Any = None,
+    idempotency_store: Any = None,
 ) -> AgentCandidatesController:
     return AgentCandidatesController(
         agent_token_service=agent_token_service,
         commands=commands or _command_bus(),
+        idempotency_store=idempotency_store or InMemoryIdempotencyStore(),
     )
 
 

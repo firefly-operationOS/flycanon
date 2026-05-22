@@ -48,10 +48,12 @@ from flycanon.core.services.sources import (
 from flycanon.core.services.sources.url_fetcher import UrlFetcher
 from flycanon.interfaces.dtos.source import SourceRecord
 from flycanon.web.controllers.agent._helpers import (
-    require_idempotency_key,
+    check_idempotency_replay,
+    store_idempotent_response,
     verify_agent_token,
 )
 from flycanon.web.controllers.sources_controller import SubmitSourceJsonPayload
+from flycanon.web.conventions import IdempotencyStore
 
 logger = logging.getLogger(__name__)
 
@@ -73,11 +75,13 @@ class AgentSourcesController:
         commands: DefaultCommandBus,
         queries: DefaultQueryBus,
         url_fetcher: UrlFetcher,
+        idempotency_store: IdempotencyStore,
     ) -> None:
         self._agent_token_service = agent_token_service
         self._commands = commands
         self._queries = queries
         self._url_fetcher = url_fetcher
+        self._idempotency_store = idempotency_store
 
     @post_mapping("", status_code=201)
     async def submit(
@@ -94,15 +98,31 @@ class AgentSourcesController:
         ``mode=async`` / ``callback_url`` toggles to keep the
         contract minimal. Wire shape and 4xx mapping mirror the
         user-tier ``POST /api/v1/sources`` byte-for-byte.
+
+        A replayed POST (same ``Idempotency-Key`` + same tenant
+        within the store TTL) short-circuits the command bus and
+        returns the cached :class:`SourceRecord` re-hydrated from
+        the stored JSON body. The wire response is identical to
+        the original ``201`` so flyradar's canon handoff can retry
+        safely without creating duplicate sources.
         """
         ctx = await verify_agent_token(
             http_request,
             service=self._agent_token_service,
             scope="agent.sources:ingest",
         )
-        require_idempotency_key(http_request)
+        scope = "agent.sources:ingest"
+        cached = check_idempotency_replay(http_request, self._idempotency_store, scope)
+        if cached is not None:
+            # Re-hydrate the stored JSON dict back into a
+            # :class:`SourceRecord` so the controller still emits
+            # the typed response declared by ``post_mapping``.
+            # ``cast`` narrows ``cached.body`` -- the replay write
+            # always persists a ``dict`` for this route (single
+            # record, not a list).
+            return SourceRecord.model_validate(cached.body)
         content, content_type, filename = await self._resolve_payload_content(payload)
-        return await self._commands.send(
+        record = await self._commands.send(
             SubmitSourceCommand(
                 content=content,
                 metadata=payload.metadata,
@@ -116,6 +136,14 @@ class AgentSourcesController:
                 workspace_id=ctx.workspace_id,
             )
         )
+        store_idempotent_response(
+            http_request,
+            self._idempotency_store,
+            scope,
+            status=201,
+            response=record,
+        )
+        return record
 
     @get_mapping("/{source_id}")
     async def get_source(

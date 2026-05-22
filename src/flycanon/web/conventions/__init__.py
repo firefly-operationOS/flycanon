@@ -68,6 +68,7 @@ from flycanon.web.conventions.idempotency import (
     IdempotencyStore,
     InMemoryIdempotencyStore,
     InvalidIdempotencyKeyError,
+    StoredResponse,
 )
 from flycanon.web.conventions.middleware import TenantContextMiddleware
 from flycanon.web.conventions.validation import (
@@ -119,6 +120,7 @@ __all__ = [
     "IdempotencyStore",
     "InMemoryIdempotencyStore",
     "InvalidIdempotencyKeyError",
+    "StoredResponse",
     # middleware
     "TenantContextMiddleware",
     # validation

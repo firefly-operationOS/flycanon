@@ -1,33 +1,48 @@
 # Copyright 2026 Firefly Software Solutions Inc
 """Shared helpers for the agent-tier controllers.
 
-Two helpers, both lifted from the flyradar agent surface and kept
-intentionally minimal:
+Four helpers, all kept intentionally minimal:
 
 * :func:`verify_agent_token` -- the per-route auth gate. Reads the
   ``X-Agent-Token`` header, calls :meth:`AgentTokenService.verify`
   against the resolved tenant context, and returns a fresh
   :class:`TenantContext` whose ``actor`` is the verified agent
-  actor string (``"agent:<prefix>"``). Raises one of the typed
-  :class:`FireflyHTTPException` subclasses surfaced by the service
-  (invalid token, expired token, workspace not in allowlist,
-  scope denied) -- those propagate to the global handler.
-
+  actor string (``"agent:<prefix>"``).
 * :func:`require_idempotency_key` -- mandatory-header check for
-  POST routes. Agent-tier POSTs MUST carry ``Idempotency-Key``
-  (unlike the user-tier counterparts, which allow it to default
-  to ``None``). Missing key returns ``400 missing_idempotency_key``.
+  POST routes. Agent-tier POSTs MUST carry ``Idempotency-Key``.
+  Missing key returns ``400 missing_idempotency_key``.
+* :func:`check_idempotency_replay` -- replay-dedup read. After the
+  mandatory-header check passes, this looks up the
+  ``(tenant_id, scope, key)`` tuple in the
+  :class:`IdempotencyStore`. If a non-expired entry exists, the
+  caller returns the cached response without re-dispatching the
+  command. Otherwise it falls through to dispatch.
+* :func:`store_idempotent_response` -- the corresponding write
+  surface. After a successful dispatch, the controller stashes
+  the response status + JSON body under the same triple so a
+  retry within the TTL replays the original response.
+
+The (tenant, scope) namespacing is enforced here, not in the store
+-- the store treats ``scope`` as an opaque route identifier so two
+distinct agent endpoints sharing the same ``Idempotency-Key`` do
+not collide.
 """
 
 from __future__ import annotations
 
+from typing import Any
+
+from pydantic import BaseModel
 from starlette.requests import Request
 
 from flycanon.core.services.auth.agent_token_service import AgentTokenService
 from flycanon.web.conventions import (
     HEADER_AGENT_TOKEN,
     HEADER_IDEMPOTENCY_KEY,
+    HEADER_TENANT_ID,
+    IdempotencyStore,
     MissingIdempotencyKey,
+    StoredResponse,
     TenantContext,
     tenant_context_from_request,
 )
@@ -105,4 +120,103 @@ def require_idempotency_key(http_request: Request) -> str:
     return value
 
 
-__all__ = ["require_idempotency_key", "verify_agent_token"]
+def check_idempotency_replay(
+    http_request: Request,
+    store: IdempotencyStore,
+    scope: str,
+) -> StoredResponse | None:
+    """Look up an existing response under the ``(tenant, scope, key)`` tuple.
+
+    Workflow on every agent POST:
+
+    1. Calls :func:`require_idempotency_key` so the header presence
+       gate fires before any store lookup (preserves the existing
+       400 behaviour for callers who forget the header).
+    2. Reads :data:`HEADER_TENANT_ID` from the request headers --
+       a missing tenant header would already have failed the
+       :func:`verify_agent_token` gate, so we don't re-raise here.
+       An empty string falls through and the store treats it as a
+       distinct namespace (i.e. an anonymous tenant cannot collide
+       with ``"acme"``).
+    3. Calls :meth:`IdempotencyStore.lookup` with the namespaced
+       tuple. Returns the stored response if the entry exists, is
+       not expired, and carries a recorded response body.
+
+    Returns the cached :class:`StoredResponse` if found, else
+    ``None`` so the controller falls through to dispatch.
+    Raises :class:`MissingIdempotencyKey` if the header is absent.
+    """
+    key = require_idempotency_key(http_request)
+    tenant_id = http_request.headers.get(HEADER_TENANT_ID, "")
+    return store.lookup(tenant_id=tenant_id, route=scope, key=key)
+
+
+def _to_json_body(response: Any) -> dict[str, Any] | list[Any]:
+    """Normalise a controller response into a JSON-serialisable body.
+
+    Three shapes the agent controllers actually emit:
+
+    * pydantic ``BaseModel`` -- e.g. :class:`SourceRecord`,
+      :class:`AnswerResponse`. ``model_dump(mode="json")`` produces
+      the wire-equivalent dict.
+    * ``list`` of ``BaseModel`` -- e.g. ``list[CandidateRecord]``
+      from the propose endpoint. Each item is dumped individually.
+    * raw ``dict`` / ``list`` -- the test suites' stubbed
+      handlers occasionally return strings or sentinels; those
+      are passed through unchanged so the store accepts the
+      mock contract without forcing every test fixture to switch
+      to real models.
+    """
+    if isinstance(response, BaseModel):
+        return response.model_dump(mode="json")
+    if isinstance(response, list):
+        if response and isinstance(response[0], BaseModel):
+            return [item.model_dump(mode="json") for item in response]
+        return response
+    if isinstance(response, dict):
+        return response
+    # Sentinels (strings, None) used by the existing stubbed
+    # controller tests -- wrap them in a 1-key dict so the store
+    # contract (``dict | list``) stays honest while the older test
+    # surface keeps working without a wholesale refactor.
+    return {"value": response}
+
+
+def store_idempotent_response(
+    http_request: Request,
+    store: IdempotencyStore,
+    scope: str,
+    *,
+    status: int,
+    response: Any,
+) -> None:
+    """Persist the route's response under ``(tenant, scope, key)`` for replay dedup.
+
+    Called once on the happy path after the command bus dispatch
+    succeeds. The key + tenant are pulled from the request headers
+    rather than re-validated -- the gate already ran and raising a
+    second time would mask the real dispatch result. An empty key
+    is a no-op (the store guards against this defensively).
+
+    ``response`` accepts any of the shapes the agent controllers
+    emit (pydantic ``BaseModel``, ``list[BaseModel]``, or a raw
+    JSON-serialisable container); :func:`_to_json_body` normalises
+    it for the store.
+    """
+    key = http_request.headers.get(HEADER_IDEMPOTENCY_KEY) or ""
+    tenant_id = http_request.headers.get(HEADER_TENANT_ID, "")
+    store.record_response(
+        tenant_id=tenant_id,
+        route=scope,
+        key=key,
+        status=status,
+        json_body=_to_json_body(response),
+    )
+
+
+__all__ = [
+    "check_idempotency_replay",
+    "require_idempotency_key",
+    "store_idempotent_response",
+    "verify_agent_token",
+]
