@@ -11,20 +11,25 @@ The store creates one table per service deployment
 (``canon_chunk_vectors`` by default) with the following shape::
 
     CREATE TABLE canon_chunk_vectors (
-        id          TEXT PRIMARY KEY,
-        namespace   TEXT NOT NULL DEFAULT 'default',
-        embedding   vector(<dimensions>) NOT NULL,
-        metadata    JSONB NOT NULL DEFAULT '{}'::jsonb,
-        text        TEXT NOT NULL,
-        created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+        id           TEXT PRIMARY KEY,
+        namespace    TEXT NOT NULL DEFAULT 'default',
+        tenant_id    TEXT NOT NULL DEFAULT 'default',
+        workspace_id TEXT NOT NULL DEFAULT 'default',
+        embedding    vector(<dimensions>) NOT NULL,
+        metadata     JSONB NOT NULL DEFAULT '{}'::jsonb,
+        text         TEXT NOT NULL,
+        created_at   TIMESTAMPTZ NOT NULL DEFAULT now()
     );
     CREATE INDEX canon_chunk_vectors_hnsw ON canon_chunk_vectors
         USING hnsw (embedding vector_cosine_ops);
     CREATE INDEX canon_chunk_vectors_namespace ON canon_chunk_vectors (namespace);
+    CREATE INDEX canon_chunk_vectors_scope
+        ON canon_chunk_vectors (tenant_id, workspace_id);
 
 The HNSW index gives sub-millisecond ANN over millions of rows; the
-namespace column lets the same table host multiple logical
-collections (e.g. one per tenant).
+namespace column is retained as a legacy diagnostic, and the
+``(tenant_id, workspace_id)`` composite is the canonical scope used by
+Plan 3 retrieval filters.
 
 Activated when ``FLYCANON_VECTOR_STORE=pgvector``; requires the
 ``pgvector`` extra (``uv sync --extra pgvector``) and the pgvector
@@ -88,12 +93,14 @@ class PgVectorVectorStore:
                 text(
                     f"""
                     CREATE TABLE IF NOT EXISTS {self._table} (
-                        id          TEXT PRIMARY KEY,
-                        namespace   TEXT NOT NULL DEFAULT 'default',
-                        embedding   vector({self._dim}) NOT NULL,
-                        metadata    JSONB NOT NULL DEFAULT '{{}}'::jsonb,
-                        text        TEXT NOT NULL,
-                        created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+                        id           TEXT PRIMARY KEY,
+                        namespace    TEXT NOT NULL DEFAULT 'default',
+                        tenant_id    TEXT NOT NULL DEFAULT 'default',
+                        workspace_id TEXT NOT NULL DEFAULT 'default',
+                        embedding    vector({self._dim}) NOT NULL,
+                        metadata     JSONB NOT NULL DEFAULT '{{}}'::jsonb,
+                        text         TEXT NOT NULL,
+                        created_at   TIMESTAMPTZ NOT NULL DEFAULT now()
                     )
                     """
                 )
@@ -109,6 +116,12 @@ class PgVectorVectorStore:
             )
             await conn.execute(
                 text(f"CREATE INDEX IF NOT EXISTS {self._table}_namespace ON {self._table} (namespace)")
+            )
+            await conn.execute(
+                text(
+                    f"CREATE INDEX IF NOT EXISTS {self._table}_scope "
+                    f"ON {self._table} (tenant_id, workspace_id)"
+                )
             )
 
     # ------------------------------------------------------------------
