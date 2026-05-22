@@ -125,8 +125,16 @@ jobs:
           file: ./Dockerfile
           platforms: linux/amd64,linux/arm64
           push: true
-          provenance: true
-          sbom: true
+          # provenance + sbom attestations require GitHub
+          # 'Build & Validate Attestations' which is an Enterprise /
+          # paid org feature. firefly-operationOS is on the free tier
+          # so the attestation persist call returns
+          # 'Feature not available for the firefly-operationOS
+          # organization' and fails the build. Disable both flags
+          # here; the optional attest-build-provenance step below
+          # is already wrapped with continue-on-error.
+          provenance: false
+          sbom: false
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           build-contexts: |
