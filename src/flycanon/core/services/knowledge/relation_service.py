@@ -83,6 +83,8 @@ class KnowledgeRelationService:
         from_item_id: str,
         request: CreateRelationRequest,
         *,
+        tenant_id: str,
+        workspace_id: str,
         correlation_id: str | None = None,
     ) -> KnowledgeRelationRow:
         if from_item_id == request.to_item_id:
@@ -96,6 +98,8 @@ class KnowledgeRelationService:
             raise InvalidRelationError(f"to_item_id {request.to_item_id!r} does not exist")
 
         row = KnowledgeRelationRow(
+            tenant_id=tenant_id,
+            workspace_id=workspace_id,
             from_item_id=from_item_id,
             to_item_id=request.to_item_id,
             kind=request.kind.value,
@@ -115,6 +119,8 @@ class KnowledgeRelationService:
             event_type="knowledge.relation_added",
             subject_kind="knowledge_item",
             subject_id=from_item_id,
+            tenant_id=tenant_id,
+            workspace_id=workspace_id,
             actor=request.actor,
             correlation_id=correlation_id,
             payload={
@@ -145,6 +151,8 @@ class KnowledgeRelationService:
         self,
         relation_id: str,
         *,
+        tenant_id: str,
+        workspace_id: str,
         actor: str | None = None,
         correlation_id: str | None = None,
     ) -> None:
@@ -158,6 +166,8 @@ class KnowledgeRelationService:
             event_type="knowledge.relation_removed",
             subject_kind="knowledge_item",
             subject_id=relation.from_item_id,
+            tenant_id=tenant_id,
+            workspace_id=workspace_id,
             actor=actor,
             correlation_id=correlation_id,
             payload={

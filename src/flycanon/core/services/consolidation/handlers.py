@@ -39,7 +39,10 @@ class ProposeCandidatesHandler(CommandHandler[ProposeCandidatesCommand, list[Can
 
     async def do_handle(self, command: ProposeCandidatesCommand) -> list[CandidateRecord]:
         rows = await self._candidates.propose_from_source(
-            command.request, correlation_id=command.correlation_id
+            command.request,
+            tenant_id=command.tenant_id or "default",
+            workspace_id=command.workspace_id or "default",
+            correlation_id=command.correlation_id,
         )
         return [to_candidate_record(r) for r in rows]
 
@@ -63,7 +66,11 @@ class AcceptCandidateHandler(CommandHandler[AcceptCandidateCommand, CandidateRec
 
     async def do_handle(self, command: AcceptCandidateCommand) -> CandidateRecord:
         row = await self._candidates.accept(
-            command.candidate_id, command.request, correlation_id=command.correlation_id
+            command.candidate_id,
+            command.request,
+            tenant_id=command.tenant_id or "default",
+            workspace_id=command.workspace_id or "default",
+            correlation_id=command.correlation_id,
         )
         return to_candidate_record(row)
 
@@ -87,7 +94,11 @@ class RejectCandidateHandler(CommandHandler[RejectCandidateCommand, CandidateRec
 
     async def do_handle(self, command: RejectCandidateCommand) -> CandidateRecord:
         row = await self._candidates.reject(
-            command.candidate_id, command.request, correlation_id=command.correlation_id
+            command.candidate_id,
+            command.request,
+            tenant_id=command.tenant_id or "default",
+            workspace_id=command.workspace_id or "default",
+            correlation_id=command.correlation_id,
         )
         return to_candidate_record(row)
 

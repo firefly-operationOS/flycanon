@@ -40,12 +40,14 @@ def test_ingest_markdown_emits_chunks_with_section_path(fixtures_dir):
     bytes_ = (fixtures_dir / "sample.md").read_bytes()
     source = SourceRow(
         id="src-1",
+        tenant_id="default",
+        workspace_id="default",
         kind=SourceKind.markdown.value,
         status=SourceStatus.pending.value,
         content_sha256="",
         content_bytes=0,
     )
-    result = _service().ingest(source=source, content=bytes_)
+    result = _service().ingest(source=source, content=bytes_, tenant_id="default", workspace_id="default")
     assert result.source.status == SourceStatus.ingested.value
     assert result.source.n_chunks > 0
     assert all(chunk.source_id == "src-1" for chunk in result.chunks)
@@ -59,12 +61,19 @@ def test_ingest_unknown_kind_falls_through_to_universal_loader():
     # is ingested rather than rejected.
     source = SourceRow(
         id="src-1",
+        tenant_id="default",
+        workspace_id="default",
         kind=SourceKind.unknown.value,
         status=SourceStatus.pending.value,
         content_sha256="",
         content_bytes=0,
     )
-    result = _service().ingest(source=source, content=b"hello world\n\nsecond paragraph")
+    result = _service().ingest(
+        source=source,
+        content=b"hello world\n\nsecond paragraph",
+        tenant_id="default",
+        workspace_id="default",
+    )
     assert result.source.status == SourceStatus.ingested.value
     assert result.source.n_chunks > 0
 
@@ -72,10 +81,12 @@ def test_ingest_unknown_kind_falls_through_to_universal_loader():
 def test_ingest_raises_empty_source_on_no_content():
     source = SourceRow(
         id="src-1",
+        tenant_id="default",
+        workspace_id="default",
         kind=SourceKind.text.value,
         status=SourceStatus.pending.value,
         content_sha256="",
         content_bytes=0,
     )
     with pytest.raises(EmptySource):
-        _service().ingest(source=source, content=b"")
+        _service().ingest(source=source, content=b"", tenant_id="default", workspace_id="default")

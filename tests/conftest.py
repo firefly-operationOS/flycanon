@@ -66,3 +66,18 @@ async def repositories(engine, session_factory):
 @pytest.fixture
 def fixtures_dir() -> Path:
     return Path(__file__).parent / "fixtures"
+
+
+@pytest.fixture
+def scope() -> dict[str, str]:
+    """Canonical (tenant_id, workspace_id) for unit-test fixtures.
+
+    Plan 4 tightened ``canon_*`` rows so every entity carries a
+    non-null ``tenant_id`` + ``workspace_id``. The legacy "default"
+    fallback that the server defaults supplied is no longer applied
+    at the DB layer -- service-layer callers now MUST pass scope
+    kwargs explicitly. Unit tests don't care which scope they sit
+    under, so this fixture supplies a stable ``("default", "default")``
+    pair every test can spread into a service call.
+    """
+    return {"tenant_id": "default", "workspace_id": "default"}

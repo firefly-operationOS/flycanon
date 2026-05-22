@@ -53,12 +53,22 @@ class AuditService:
         event_type: str,
         subject_kind: str,
         subject_id: str,
+        tenant_id: str,
+        workspace_id: str,
         actor: str | None = None,
         correlation_id: str | None = None,
         payload: dict[str, Any] | None = None,
     ) -> AuditEventRow:
-        """Append one audit row and broadcast it on ``flycanon.audit``."""
+        """Append one audit row and broadcast it on ``flycanon.audit``.
+
+        ``tenant_id`` + ``workspace_id`` are required: post-Plan 4 the
+        ``canon_audit_events`` row carries the scope at the column
+        level so aggregation queries can filter on the indexed columns
+        without unpacking ``payload_json``.
+        """
         row = AuditEventRow(
+            tenant_id=tenant_id,
+            workspace_id=workspace_id,
             event_type=event_type,
             subject_kind=subject_kind,
             subject_id=subject_id,
@@ -79,6 +89,8 @@ class AuditService:
                 event_type=self._settings.audit_event,
                 payload={
                     "id": row.id,
+                    "tenant_id": row.tenant_id,
+                    "workspace_id": row.workspace_id,
                     "event_type": row.event_type,
                     "subject_kind": row.subject_kind,
                     "subject_id": row.subject_id,

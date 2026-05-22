@@ -57,6 +57,8 @@ class ReplaceSourceHandler(CommandHandler[ReplaceSourceCommand, SourceRecord]):
             source_id=command.source_id,
             request=request,
             content=command.content,
+            tenant_id=command.tenant_id or "default",
+            workspace_id=command.workspace_id or "default",
             filename=command.filename,
             content_type=command.content_type,
             actor=command.actor,

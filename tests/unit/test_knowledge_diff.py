@@ -38,6 +38,8 @@ async def _seed(
 ):
     item = KnowledgeItemRow(
         id=item_id,
+        tenant_id="default",
+        workspace_id="default",
         status=status,
         current_version=version,
         title=title,
@@ -46,6 +48,8 @@ async def _seed(
         tags_json=list(tags or []),
     )
     v = KnowledgeVersionRow(
+        tenant_id="default",
+        workspace_id="default",
         knowledge_item_id=item_id,
         version=version,
         status=status,
@@ -62,6 +66,8 @@ async def _seed(
     for source_id, chunk_id, page in citations or []:
         rows.append(
             CitationRow(
+                tenant_id="default",
+                workspace_id="default",
                 knowledge_version_id=stored.id,
                 chunk_id=chunk_id,
                 source_id=source_id,

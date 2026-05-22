@@ -36,6 +36,8 @@ class CreateTaxonomyNodeHandler(CommandHandler[CreateTaxonomyNodeCommand, Taxono
     async def do_handle(self, command: CreateTaxonomyNodeCommand) -> TaxonomyNode:
         row = await self._taxonomy.add_node(
             command.request,
+            tenant_id=command.tenant_id or "default",
+            workspace_id=command.workspace_id or "default",
             actor=command.actor,
             correlation_id=command.correlation_id,
         )

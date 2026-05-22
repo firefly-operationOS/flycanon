@@ -10,7 +10,7 @@ from flycanon.core.services.audit import AuditService
 
 
 @pytest.mark.asyncio
-async def test_record_persists_even_without_publisher(repositories):
+async def test_record_persists_even_without_publisher(repositories, scope):
     audit = AuditService(
         repository=repositories["audit"],
         event_publisher=None,
@@ -22,6 +22,7 @@ async def test_record_persists_even_without_publisher(repositories):
         subject_id="abc",
         actor="tester",
         payload={"n_chunks": 3},
+        **scope,
     )
     assert row.event_type == "source.ingested"
     rows, total = await repositories["audit"].list_events(subject_id="abc")
@@ -30,7 +31,7 @@ async def test_record_persists_even_without_publisher(repositories):
 
 
 @pytest.mark.asyncio
-async def test_publish_failure_does_not_abort_audit(repositories):
+async def test_publish_failure_does_not_abort_audit(repositories, scope):
     class FailingPublisher:
         async def publish(self, **_):
             raise RuntimeError("broker down")
@@ -46,6 +47,7 @@ async def test_publish_failure_does_not_abort_audit(repositories):
         subject_id="ki-1",
         actor=None,
         payload={},
+        **scope,
     )
     # The audit row is still in the table; the broker failure was
     # logged and swallowed.

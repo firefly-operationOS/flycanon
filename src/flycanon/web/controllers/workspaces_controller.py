@@ -94,9 +94,7 @@ class WorkspacesController:
             # Belt-and-suspenders: the insert just succeeded so the
             # read-after-write must hit. If it doesn't, something
             # below the repo is broken -- surface it loudly.
-            raise RuntimeError(
-                f"workspace {body.id!r} inserted but not readable -- check repository wiring"
-            )
+            raise RuntimeError(f"workspace {body.id!r} inserted but not readable -- check repository wiring")
         return _to_spec(saved)
 
     @get_mapping("")

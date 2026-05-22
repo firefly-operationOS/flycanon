@@ -111,6 +111,8 @@ class IntakeService:
         *,
         request: SubmitSourceRequest,
         content: bytes,
+        tenant_id: str,
+        workspace_id: str,
         filename: str | None = None,
         content_type: str | None = None,
         actor: str | None = None,
@@ -129,6 +131,8 @@ class IntakeService:
 
         source = SourceRow(
             id=str(uuid.uuid4()),
+            tenant_id=tenant_id,
+            workspace_id=workspace_id,
             kind=primary_kind.value,
             status=SourceStatus.pending.value,
             filename=filename,
@@ -140,7 +144,12 @@ class IntakeService:
         )
 
         try:
-            result = self._ingestion.ingest(source=source, content=merged_content)
+            result = self._ingestion.ingest(
+                source=source,
+                content=merged_content,
+                tenant_id=tenant_id,
+                workspace_id=workspace_id,
+            )
         except Exception as exc:
             source.status = SourceStatus.failed.value
             source.error_code = getattr(exc, "code", "ingestion_failed")
@@ -221,6 +230,8 @@ class IntakeService:
             event_type="source.ingested",
             subject_kind="source",
             subject_id=result.source.id,
+            tenant_id=tenant_id,
+            workspace_id=workspace_id,
             actor=actor,
             correlation_id=correlation_id,
             payload={
@@ -246,6 +257,8 @@ class IntakeService:
         source_id: str,
         request: SubmitSourceRequest,
         content: bytes,
+        tenant_id: str,
+        workspace_id: str,
         filename: str | None = None,
         content_type: str | None = None,
         actor: str | None = None,
@@ -304,6 +317,8 @@ class IntakeService:
         # (preserving its id + created_at + audit history).
         scratch = SourceRow(
             id=existing.id,
+            tenant_id=tenant_id,
+            workspace_id=workspace_id,
             kind=primary_kind.value,
             status=SourceStatus.pending.value,
             filename=filename or existing.filename,
@@ -317,7 +332,12 @@ class IntakeService:
                 **merged_metadata,
             },
         )
-        result = self._ingestion.ingest(source=scratch, content=merged_content)
+        result = self._ingestion.ingest(
+            source=scratch,
+            content=merged_content,
+            tenant_id=tenant_id,
+            workspace_id=workspace_id,
+        )
 
         # Per-format metadata extraction (identical to submit()).
         primary_artifact = artifacts[0] if artifacts else None
@@ -368,6 +388,8 @@ class IntakeService:
             event_type="source.replaced",
             subject_kind="source",
             subject_id=updated_row.id,
+            tenant_id=tenant_id,
+            workspace_id=workspace_id,
             actor=actor,
             correlation_id=correlation_id,
             payload={

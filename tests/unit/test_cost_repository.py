@@ -26,8 +26,12 @@ async def _seed(
     cost_usd: str = "0.001500",
     actor: str = "u1",
     occurred_at: datetime | None = None,
+    tenant_id: str = "default",
+    workspace_id: str = "default",
 ):
     row = CostEventRow(
+        tenant_id=tenant_id,
+        workspace_id=workspace_id,
         agent_name=agent_name,
         model=model,
         input_tokens=input_tokens,
@@ -63,9 +67,13 @@ class TestAggregation:
 
     @pytest.mark.asyncio
     async def test_group_by_actor_filters(self, cost_repo):
-        await _seed(cost_repo, actor="alice", cost_usd="0.05")
-        await _seed(cost_repo, actor="bob", cost_usd="0.10")
-        rows = await cost_repo.aggregate(group_by=["actor"], actor="alice")
+        """Post-Plan 4 the actor proxy was retired -- the repo no
+        longer groups by actor, and ``aggregate`` doesn't accept an
+        ``actor`` kwarg. Aggregation partitions on tenant + workspace
+        (the real scope keys). Verify the cross-tenant filter narrows
+        correctly."""
+        await _seed(cost_repo, actor="alice", cost_usd="0.05", tenant_id="t-a")
+        await _seed(cost_repo, actor="bob", cost_usd="0.10", tenant_id="t-b")
+        rows = await cost_repo.aggregate(group_by=["model"], tenant_id="t-a")
         assert len(rows) == 1
-        assert rows[0]["actor"] == "alice"
         assert Decimal(rows[0]["cost_usd"]) == Decimal("0.05")

@@ -51,32 +51,35 @@ def knowledge(repositories, audit, settings):
 
 
 @pytest.mark.asyncio
-async def test_create_publishes_version_one(knowledge):
+async def test_create_publishes_version_one(knowledge, scope):
     version = await knowledge.create(
         CreateKnowledgeRequest(
             title="First canonical statement",
             body="The body of the canonical statement.",
             domain=Domain.process,
             jurisdiction=Jurisdiction.GLOBAL,
-        )
+        ),
+        **scope,
     )
     assert version.version == 1
     assert version.status == KnowledgeStatus.published.value
 
 
 @pytest.mark.asyncio
-async def test_update_appends_new_version_supersedes_previous(knowledge, repositories):
+async def test_update_appends_new_version_supersedes_previous(knowledge, repositories, scope):
     version = await knowledge.create(
         CreateKnowledgeRequest(
             title="Statement",
             body="initial body",
             domain=Domain.process,
-        )
+        ),
+        **scope,
     )
     item_id = version.knowledge_item_id
     updated = await knowledge.update(
         item_id,
         UpdateKnowledgeRequest(body="updated body"),
+        **scope,
     )
     assert updated.version == 2
     assert updated.body == "updated body"
@@ -87,27 +90,35 @@ async def test_update_appends_new_version_supersedes_previous(knowledge, reposit
 
 
 @pytest.mark.asyncio
-async def test_retire_blocks_further_updates(knowledge):
+async def test_retire_blocks_further_updates(knowledge, scope):
     version = await knowledge.create(
         CreateKnowledgeRequest(
             title="Statement",
             body="body",
             domain=Domain.process,
-        )
+        ),
+        **scope,
     )
     item_id = version.knowledge_item_id
-    await knowledge.retire(item_id, RetireKnowledgeRequest(reason="superseded by policy change"))
+    await knowledge.retire(item_id, RetireKnowledgeRequest(reason="superseded by policy change"), **scope)
     with pytest.raises(KnowledgeItemAlreadyRetired):
-        await knowledge.update(item_id, UpdateKnowledgeRequest(body="x"))
+        await knowledge.update(item_id, UpdateKnowledgeRequest(body="x"), **scope)
 
 
 @pytest.mark.asyncio
-async def test_supersede_points_to_target(knowledge):
-    a = await knowledge.create(CreateKnowledgeRequest(title="A", body="a body", domain=Domain.process))
-    b = await knowledge.create(CreateKnowledgeRequest(title="B", body="b body", domain=Domain.process))
+async def test_supersede_points_to_target(knowledge, scope):
+    a = await knowledge.create(
+        CreateKnowledgeRequest(title="A", body="a body", domain=Domain.process),
+        **scope,
+    )
+    b = await knowledge.create(
+        CreateKnowledgeRequest(title="B", body="b body", domain=Domain.process),
+        **scope,
+    )
     superseded = await knowledge.supersede(
         a.knowledge_item_id,
         SupersedeKnowledgeRequest(superseded_by_item_id=b.knowledge_item_id),
+        **scope,
     )
     assert superseded.status == KnowledgeStatus.superseded.value
     assert superseded.superseded_by_item_id == b.knowledge_item_id

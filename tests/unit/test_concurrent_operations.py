@@ -34,6 +34,12 @@ from flycanon.models.entities.candidate import CandidateRow
 from flycanon.models.entities.ingest_job import IngestJobRow
 from flycanon.models.entities.knowledge_item import KnowledgeItemRow
 
+# Plan 4: every canon_* row carries a non-null scope. Tests use the
+# "default" / "default" pair since the scenarios under test don't
+# exercise multi-tenant isolation -- that's covered by the dedicated
+# pg-isolation suite (test_pgvector_scope_isolation.py et al.).
+_SCOPE: dict[str, str] = {"tenant_id": "default", "workspace_id": "default"}
+
 
 @pytest.fixture
 def jobs(repositories):
@@ -53,7 +59,7 @@ def knowledge(repositories):
 class TestIngestJobAtomicClaim:
     @pytest.mark.asyncio
     async def test_mark_running_claims_queued_job(self, jobs):
-        await jobs.add(IngestJobRow(id="job-1", status="queued"))
+        await jobs.add(IngestJobRow(id="job-1", status="queued", tenant_id="default", workspace_id="default"))
         claimed = await jobs.mark_running("job-1")
         assert claimed is not None
         assert claimed.status == "running"
@@ -65,7 +71,7 @@ class TestIngestJobAtomicClaim:
         """The second worker to call ``mark_running`` sees the row has
         left ``queued`` and short-circuits -- the atomic UPDATE returns
         zero rows, which the repo maps to ``None``."""
-        await jobs.add(IngestJobRow(id="job-2", status="queued"))
+        await jobs.add(IngestJobRow(id="job-2", status="queued", tenant_id="default", workspace_id="default"))
         first = await jobs.mark_running("job-2")
         assert first is not None
 
@@ -77,7 +83,9 @@ class TestIngestJobAtomicClaim:
 
     @pytest.mark.asyncio
     async def test_mark_running_returns_none_when_terminal(self, jobs):
-        await jobs.add(IngestJobRow(id="job-3", status="succeeded"))
+        await jobs.add(
+            IngestJobRow(id="job-3", status="succeeded", tenant_id="default", workspace_id="default")
+        )
         # The first claim attempt observes a terminal state and refuses.
         assert await jobs.mark_running("job-3") is None
 
@@ -90,7 +98,7 @@ class TestIngestJobAtomicClaim:
         """After ``mark_failed`` resets the job, a fresh ``mark_running``
         finds the row outside ``queued`` and refuses; the existing
         ``started_at`` is preserved either way."""
-        await jobs.add(IngestJobRow(id="job-4", status="queued"))
+        await jobs.add(IngestJobRow(id="job-4", status="queued", tenant_id="default", workspace_id="default"))
         first = await jobs.mark_running("job-4")
         original_started = first.started_at
         # A retry would only run if the worker explicitly transitions
@@ -105,7 +113,7 @@ class TestIngestJobAtomicClaim:
         """A running row whose lease is still fresh stays held by the
         original worker -- the lease window protects the claim against
         an over-eager second worker."""
-        await jobs.add(IngestJobRow(id="job-5", status="queued"))
+        await jobs.add(IngestJobRow(id="job-5", status="queued", tenant_id="default", workspace_id="default"))
         first = await jobs.mark_running("job-5", lease_seconds=600)
         assert first is not None
         # Same call again: the row is at ``running`` with ``started_at``
@@ -128,6 +136,8 @@ class TestIngestJobAtomicClaim:
                 status="running",
                 attempts=1,
                 started_at=stale,
+                tenant_id="default",
+                workspace_id="default",
             )
         )
         reclaimed = await jobs.mark_running("job-stale", lease_seconds=600)
@@ -149,9 +159,21 @@ class TestIngestJobAtomicClaim:
         leave fresh ``running`` rows alone."""
         fresh = datetime.now(UTC) - timedelta(seconds=10)
         stale = datetime.now(UTC) - timedelta(minutes=30)
-        await jobs.add(IngestJobRow(id="fresh-1", status="running", started_at=fresh))
-        await jobs.add(IngestJobRow(id="stale-1", status="running", started_at=stale))
-        await jobs.add(IngestJobRow(id="stale-2", status="running", started_at=stale))
+        await jobs.add(
+            IngestJobRow(
+                id="fresh-1", status="running", started_at=fresh, tenant_id="default", workspace_id="default"
+            )
+        )
+        await jobs.add(
+            IngestJobRow(
+                id="stale-1", status="running", started_at=stale, tenant_id="default", workspace_id="default"
+            )
+        )
+        await jobs.add(
+            IngestJobRow(
+                id="stale-2", status="running", started_at=stale, tenant_id="default", workspace_id="default"
+            )
+        )
         # 600s lease: fresh-1 stays, stale-1 + stale-2 demoted to queued.
         ids = await jobs.reclaim_stuck(lease_seconds=600)
         assert sorted(ids) == ["stale-1", "stale-2"]
@@ -172,6 +194,8 @@ class TestConflictCandidateDedup:
     @pytest.mark.asyncio
     async def test_find_matches_metadata_breadcrumb(self, candidates):
         row = CandidateRow(
+            tenant_id="default",
+            workspace_id="default",
             status="proposed",
             source_id="ki-1",
             title="Conflict: A vs B",
@@ -194,6 +218,8 @@ class TestConflictCandidateDedup:
         ``source_id`` must not be picked up as a dedup hit; only the
         detector's ``metadata.kind=conflict_detection`` rows count."""
         row = CandidateRow(
+            tenant_id="default",
+            workspace_id="default",
             status="proposed",
             source_id="ki-1",
             title="Manual proposal",
@@ -207,6 +233,8 @@ class TestConflictCandidateDedup:
     @pytest.mark.asyncio
     async def test_find_ignores_other_to_item_id(self, candidates):
         row = CandidateRow(
+            tenant_id="default",
+            workspace_id="default",
             status="proposed",
             source_id="ki-1",
             title="Conflict: A vs C",
@@ -233,6 +261,8 @@ class TestCandidateClaimDecision:
     async def test_first_caller_claims_the_decision(self, candidates):
         row = CandidateRow(
             id="cand-claim-1",
+            tenant_id="default",
+            workspace_id="default",
             status="proposed",
             source_id="src-1",
             title="t",
@@ -254,6 +284,8 @@ class TestCandidateClaimDecision:
     async def test_second_caller_observes_none(self, candidates):
         row = CandidateRow(
             id="cand-claim-2",
+            tenant_id="default",
+            workspace_id="default",
             status="proposed",
             source_id="src-1",
             title="t",
@@ -273,6 +305,8 @@ class TestCandidateClaimDecision:
         the row -- the DB's WHERE clause is the arbiter."""
         row = CandidateRow(
             id="cand-claim-3",
+            tenant_id="default",
+            workspace_id="default",
             status="proposed",
             source_id="src-1",
             title="t",
@@ -293,6 +327,8 @@ class TestCandidateClaimDecision:
     async def test_finalise_attaches_pointers(self, candidates):
         row = CandidateRow(
             id="cand-fin-1",
+            tenant_id="default",
+            workspace_id="default",
             status="proposed",
             source_id="src-1",
             title="t",
@@ -323,6 +359,8 @@ class TestKnowledgeClaimStatusTransition:
     async def test_supersede_first_caller_wins(self, knowledge):
         item = KnowledgeItemRow(
             id="ki-sup-1",
+            tenant_id="default",
+            workspace_id="default",
             status="published",
             current_version=1,
             title="t",
@@ -344,6 +382,8 @@ class TestKnowledgeClaimStatusTransition:
     async def test_supersede_second_caller_observes_none(self, knowledge):
         item = KnowledgeItemRow(
             id="ki-sup-2",
+            tenant_id="default",
+            workspace_id="default",
             status="published",
             current_version=1,
             title="t",
@@ -374,6 +414,8 @@ class TestKnowledgeClaimStatusTransition:
     async def test_retire_refuses_already_retired(self, knowledge):
         item = KnowledgeItemRow(
             id="ki-ret-1",
+            tenant_id="default",
+            workspace_id="default",
             status="retired",
             current_version=1,
             title="t",
@@ -513,12 +555,15 @@ class TestKnowledgeRetireServiceConcurrency:
                 body="body",
                 domain=Domain.process,
                 jurisdiction=Jurisdiction.GLOBAL,
-            )
+            ),
+            **_SCOPE,
         )
         item_id = version.knowledge_item_id
         results = await asyncio.gather(
-            knowledge_service.retire(item_id, RetireKnowledgeRequest(reason="alice", actor="alice")),
-            knowledge_service.retire(item_id, RetireKnowledgeRequest(reason="bob", actor="bob")),
+            knowledge_service.retire(
+                item_id, RetireKnowledgeRequest(reason="alice", actor="alice"), **_SCOPE
+            ),
+            knowledge_service.retire(item_id, RetireKnowledgeRequest(reason="bob", actor="bob"), **_SCOPE),
             return_exceptions=True,
         )
         winners = [r for r in results if not isinstance(r, Exception)]
@@ -545,17 +590,20 @@ class TestKnowledgeSupersedeServiceConcurrency:
         a = await knowledge_service.create(
             CreateKnowledgeRequest(
                 title="A", body="a", domain=Domain.process, jurisdiction=Jurisdiction.GLOBAL
-            )
+            ),
+            **_SCOPE,
         )
         b = await knowledge_service.create(
             CreateKnowledgeRequest(
                 title="B", body="b", domain=Domain.process, jurisdiction=Jurisdiction.GLOBAL
-            )
+            ),
+            **_SCOPE,
         )
         c = await knowledge_service.create(
             CreateKnowledgeRequest(
                 title="C", body="c", domain=Domain.process, jurisdiction=Jurisdiction.GLOBAL
-            )
+            ),
+            **_SCOPE,
         )
         item_id = a.knowledge_item_id
         target_b = b.knowledge_item_id
@@ -565,10 +613,12 @@ class TestKnowledgeSupersedeServiceConcurrency:
             knowledge_service.supersede(
                 item_id,
                 SupersedeKnowledgeRequest(superseded_by_item_id=target_b, actor="alice"),
+                **_SCOPE,
             ),
             knowledge_service.supersede(
                 item_id,
                 SupersedeKnowledgeRequest(superseded_by_item_id=target_c, actor="bob"),
+                **_SCOPE,
             ),
             return_exceptions=True,
         )
@@ -604,6 +654,8 @@ class TestCandidateAcceptServiceConcurrency:
         # plant the row the way propose_from_source would.)
         candidate = CandidateRow(
             id="cand-svc-1",
+            tenant_id="default",
+            workspace_id="default",
             status=CandidateStatus.proposed.value,
             source_id="src-1",
             title="Proposed canonical statement",
@@ -618,10 +670,12 @@ class TestCandidateAcceptServiceConcurrency:
             candidate_service.accept(
                 "cand-svc-1",
                 AcceptCandidateRequest(actor="alice", publish=True),
+                **_SCOPE,
             ),
             candidate_service.accept(
                 "cand-svc-1",
                 AcceptCandidateRequest(actor="bob", publish=True),
+                **_SCOPE,
             ),
             return_exceptions=True,
         )
@@ -641,6 +695,8 @@ class TestCandidateAcceptServiceConcurrency:
     async def test_concurrent_reject_one_winner(self, candidate_service, repositories):
         candidate = CandidateRow(
             id="cand-svc-2",
+            tenant_id="default",
+            workspace_id="default",
             status=CandidateStatus.proposed.value,
             source_id="src-2",
             title="t",
@@ -650,8 +706,12 @@ class TestCandidateAcceptServiceConcurrency:
         await repositories["candidate"].add_many([candidate])
 
         results = await asyncio.gather(
-            candidate_service.reject("cand-svc-2", RejectCandidateRequest(reason="alice", actor="alice")),
-            candidate_service.reject("cand-svc-2", RejectCandidateRequest(reason="bob", actor="bob")),
+            candidate_service.reject(
+                "cand-svc-2", RejectCandidateRequest(reason="alice", actor="alice"), **_SCOPE
+            ),
+            candidate_service.reject(
+                "cand-svc-2", RejectCandidateRequest(reason="bob", actor="bob"), **_SCOPE
+            ),
             return_exceptions=True,
         )
         winners = [r for r in results if not isinstance(r, Exception)]
@@ -673,25 +733,27 @@ class TestRelationServiceTypedConflict:
         a = await knowledge_service.create(
             CreateKnowledgeRequest(
                 title="A", body="a", domain=Domain.process, jurisdiction=Jurisdiction.GLOBAL
-            )
+            ),
+            **_SCOPE,
         )
         b = await knowledge_service.create(
             CreateKnowledgeRequest(
                 title="B", body="b", domain=Domain.process, jurisdiction=Jurisdiction.GLOBAL
-            )
+            ),
+            **_SCOPE,
         )
         req = CreateRelationRequest(
             to_item_id=b.knowledge_item_id,
             kind=RelationKind.related,
             actor="alice",
         )
-        await relation_service.add(a.knowledge_item_id, req)
+        await relation_service.add(a.knowledge_item_id, req, **_SCOPE)
         # Second add with the same (from, to, kind) hits the UNIQUE
         # constraint. The narrowed IntegrityError catch is what makes
         # this surface as RelationConflictError rather than the raw
         # SQLAlchemy exception.
         with pytest.raises(RelationConflictError):
-            await relation_service.add(a.knowledge_item_id, req)
+            await relation_service.add(a.knowledge_item_id, req, **_SCOPE)
 
 
 # ---------------------------------------------------------------------------
@@ -723,7 +785,7 @@ class TestLeasePoachingGuard:
 
     @pytest.mark.asyncio
     async def test_mark_succeeded_blocked_when_lease_poached(self, jobs):
-        await jobs.add(IngestJobRow(id="job-lease-1", status="queued"))
+        await jobs.add(IngestJobRow(id="job-lease-1", status="queued", **_SCOPE))
         # Worker A claims.
         first = await jobs.mark_running("job-lease-1", lease_seconds=600)
         assert first is not None
@@ -736,6 +798,7 @@ class TestLeasePoachingGuard:
                 status="running",
                 attempts=1,
                 started_at=datetime.now(UTC) - timedelta(minutes=30),
+                **_SCOPE,
             )
         )
         poached = await jobs.mark_running("job-lease-2", lease_seconds=600)
@@ -780,6 +843,7 @@ class TestLeasePoachingGuard:
                 status="running",
                 attempts=2,
                 started_at=datetime.now(UTC),
+                **_SCOPE,
             )
         )
         # Stale attempts -> guard refuses.
@@ -812,6 +876,7 @@ class TestLeasePoachingGuard:
                 status="running",
                 attempts=1,
                 started_at=datetime.now(UTC),
+                **_SCOPE,
             )
         )
         result = await jobs.mark_succeeded("job-legacy", source_id="src", content_sha256="abc")
@@ -834,17 +899,20 @@ class TestKnowledgeVersionConflictServiceConcurrency:
                 body="initial body",
                 domain=Domain.process,
                 jurisdiction=Jurisdiction.GLOBAL,
-            )
+            ),
+            **_SCOPE,
         )
         item_id = version.knowledge_item_id
         results = await asyncio.gather(
             knowledge_service.update(
                 item_id,
                 UpdateKnowledgeRequest(body="alice update", actor="alice"),
+                **_SCOPE,
             ),
             knowledge_service.update(
                 item_id,
                 UpdateKnowledgeRequest(body="bob update", actor="bob"),
+                **_SCOPE,
             ),
             return_exceptions=True,
         )
@@ -895,6 +963,7 @@ class TestConversationSummaryRaceFree:
                 turn_index=i,
                 question=f"q{i}",
                 answer=f"a{i}",
+                **_SCOPE,
             )
             for i in range(5)
         ]
@@ -916,6 +985,7 @@ class TestConversationSummaryRaceFree:
                 turn_index=i,
                 question=f"q{i}",
                 answer=f"a{i}",
+                **_SCOPE,
             )
             for i in range(20)
         ]
@@ -935,5 +1005,3 @@ class TestConversationSummaryRaceFree:
         )
 
         assert ConversationService._summary_from_turns([]) is None
-
-

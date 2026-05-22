@@ -30,6 +30,9 @@ def stats_service(repositories):
     )
 
 
+_SCOPE: dict[str, str] = {"tenant_id": "default", "workspace_id": "default"}
+
+
 async def _seed_corpus(repositories) -> None:
     """Deposit a tiny but representative corpus across every counter."""
 
@@ -41,6 +44,7 @@ async def _seed_corpus(repositories) -> None:
         content_bytes=1024,
         n_chunks=2,
         metadata_json={},
+        **_SCOPE,
     )
     src2 = SourceRow(
         id="src-2",
@@ -51,6 +55,7 @@ async def _seed_corpus(repositories) -> None:
         n_chunks=0,
         metadata_json={},
         error_code="parse_failed",
+        **_SCOPE,
     )
     async with repositories["source"]._session_factory() as session:
         session.add_all([src1, src2])
@@ -65,6 +70,7 @@ async def _seed_corpus(repositories) -> None:
         jurisdiction="GLOBAL",
         tags_json=[],
         metadata_json={},
+        **_SCOPE,
     )
     async with repositories["knowledge"]._session_factory() as session:
         session.add(item)
@@ -82,6 +88,7 @@ async def _seed_corpus(repositories) -> None:
         jurisdiction="GLOBAL",
         tags_json=[],
         metadata_json={},
+        **_SCOPE,
     )
     async with repositories["knowledge"]._session_factory() as session:
         session.add(version)
@@ -98,6 +105,7 @@ async def _seed_corpus(repositories) -> None:
         tags_json=[],
         citations_json=[],
         metadata_json={},
+        **_SCOPE,
     )
     async with repositories["candidate"]._session_factory() as session:
         session.add(cand)
@@ -114,6 +122,7 @@ async def _seed_corpus(repositories) -> None:
         embedding_model="dummy",
         embedding=[0.1, 0.2],
         metadata_json={},
+        **_SCOPE,
     )
     # NOTE: ``embedding=None`` is explicitly omitted (not set as a
     # kwarg) because the JSON column treats ``None`` as a JSON ``null``
@@ -129,6 +138,7 @@ async def _seed_corpus(repositories) -> None:
         char_start=6,
         char_end=11,
         metadata_json={},
+        **_SCOPE,
     )
     async with repositories["chunk"]._session_factory() as session:
         session.add_all([chunk_embedded, chunk_pending])
@@ -140,12 +150,14 @@ async def _seed_corpus(repositories) -> None:
         source_id="src-1",
         attempts=1,
         metadata_json={},
+        **_SCOPE,
     )
     job_failed = IngestJobRow(
         id="job-2",
         status="failed",
         attempts=3,
         metadata_json={},
+        **_SCOPE,
     )
     async with repositories["ingest_job"]._session_factory() as session:
         session.add_all([job_ok, job_failed])
@@ -159,6 +171,7 @@ async def _seed_corpus(repositories) -> None:
         total_tokens=30,
         cost_usd=Decimal("0.250"),
         occurred_at=datetime.now(UTC),
+        **_SCOPE,
     )
     async with repositories["cost"]._session_factory() as session:
         session.add(cost_recent)

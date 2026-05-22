@@ -61,13 +61,25 @@ class CostService:
         input_tokens: int,
         output_tokens: int,
         cost_usd: float | Decimal,
+        tenant_id: str = "default",
+        workspace_id: str = "default",
         latency_ms: int | None = None,
         actor: str | None = None,
         correlation_id: str | None = None,
         subject_kind: str | None = None,
         subject_id: str | None = None,
     ) -> CostEventRow:
+        """Persist one cost event.
+
+        ``tenant_id`` + ``workspace_id`` default to ``"default"`` so the
+        ``agent.completed`` observability hook keeps working without
+        thread-local context propagation; production callers that
+        already have a request scope (the agent-tier wrappers) thread
+        the real values through.
+        """
         row = CostEventRow(
+            tenant_id=tenant_id,
+            workspace_id=workspace_id,
             agent_name=agent_name,
             model=model,
             input_tokens=int(input_tokens or 0),

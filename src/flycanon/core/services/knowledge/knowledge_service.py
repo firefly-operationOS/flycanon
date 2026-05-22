@@ -80,6 +80,8 @@ class KnowledgeService:
         self,
         request: CreateKnowledgeRequest,
         *,
+        tenant_id: str,
+        workspace_id: str,
         originating_candidate_id: str | None = None,
         correlation_id: str | None = None,
     ) -> KnowledgeVersionRow:
@@ -89,6 +91,8 @@ class KnowledgeService:
 
         item = KnowledgeItemRow(
             id=item_id,
+            tenant_id=tenant_id,
+            workspace_id=workspace_id,
             status=status.value,
             current_version=1,
             title=request.title,
@@ -99,6 +103,8 @@ class KnowledgeService:
             metadata_json=dict(request.metadata),
         )
         version = KnowledgeVersionRow(
+            tenant_id=tenant_id,
+            workspace_id=workspace_id,
             knowledge_item_id=item_id,
             version=1,
             status=status.value,
@@ -114,12 +120,21 @@ class KnowledgeService:
         )
         await self._repository.upsert_item(item)
         stored_version = await self._repository.add_version(version)
-        await self._repository.add_citations(_citations_for(stored_version.id, request.citations))
+        await self._repository.add_citations(
+            _citations_for(
+                stored_version.id,
+                request.citations,
+                tenant_id=tenant_id,
+                workspace_id=workspace_id,
+            )
+        )
 
         await self._audit.record(
             event_type=f"knowledge.{status.value}",
             subject_kind="knowledge_item",
             subject_id=item_id,
+            tenant_id=tenant_id,
+            workspace_id=workspace_id,
             actor=request.actor,
             correlation_id=correlation_id,
             payload={"version": 1, "domain": request.domain.value, "title": request.title},
@@ -147,6 +162,8 @@ class KnowledgeService:
         item_id: str,
         request: UpdateKnowledgeRequest,
         *,
+        tenant_id: str,
+        workspace_id: str,
         originating_candidate_id: str | None = None,
         correlation_id: str | None = None,
     ) -> KnowledgeVersionRow:
@@ -163,6 +180,8 @@ class KnowledgeService:
         new_version = item.current_version + 1
         new_status = KnowledgeStatus.published if request.publish else KnowledgeStatus.draft
         new = KnowledgeVersionRow(
+            tenant_id=tenant_id,
+            workspace_id=workspace_id,
             knowledge_item_id=item_id,
             version=new_version,
             status=new_status.value,
@@ -188,7 +207,14 @@ class KnowledgeService:
             # re-read + retry cleanly instead of seeing a 500.
             raise KnowledgeVersionConflict(item_id, new_version) from exc
         citations = request.citations if request.citations is not None else []
-        await self._repository.add_citations(_citations_for(stored_version.id, citations))
+        await self._repository.add_citations(
+            _citations_for(
+                stored_version.id,
+                citations,
+                tenant_id=tenant_id,
+                workspace_id=workspace_id,
+            )
+        )
 
         # Update the pointers: bump the item, mark the previous version
         # as superseded.
@@ -210,6 +236,8 @@ class KnowledgeService:
             event_type="knowledge.updated",
             subject_kind="knowledge_item",
             subject_id=item_id,
+            tenant_id=tenant_id,
+            workspace_id=workspace_id,
             actor=request.actor,
             correlation_id=correlation_id,
             payload={
@@ -244,6 +272,8 @@ class KnowledgeService:
         item_id: str,
         request: SupersedeKnowledgeRequest,
         *,
+        tenant_id: str,
+        workspace_id: str,
         correlation_id: str | None = None,
     ) -> KnowledgeItemRow:
         item = await self._repository.get_item(item_id)
@@ -285,6 +315,8 @@ class KnowledgeService:
             event_type="knowledge.superseded",
             subject_kind="knowledge_item",
             subject_id=item_id,
+            tenant_id=tenant_id,
+            workspace_id=workspace_id,
             actor=request.actor,
             correlation_id=correlation_id,
             payload={
@@ -310,6 +342,8 @@ class KnowledgeService:
         item_id: str,
         request: RetireKnowledgeRequest,
         *,
+        tenant_id: str,
+        workspace_id: str,
         correlation_id: str | None = None,
     ) -> KnowledgeItemRow:
         item = await self._repository.get_item(item_id)
@@ -337,6 +371,8 @@ class KnowledgeService:
             event_type="knowledge.retired",
             subject_kind="knowledge_item",
             subject_id=item_id,
+            tenant_id=tenant_id,
+            workspace_id=workspace_id,
             actor=request.actor,
             correlation_id=correlation_id,
             payload={"reason": request.reason},
@@ -392,11 +428,19 @@ class KnowledgeService:
             )
 
 
-def _citations_for(version_id: str, citations: Iterable[Citation]) -> list[CitationRow]:
+def _citations_for(
+    version_id: str,
+    citations: Iterable[Citation],
+    *,
+    tenant_id: str,
+    workspace_id: str,
+) -> list[CitationRow]:
     rows: list[CitationRow] = []
     for citation in citations:
         rows.append(
             CitationRow(
+                tenant_id=tenant_id,
+                workspace_id=workspace_id,
                 knowledge_version_id=version_id,
                 chunk_id=citation.chunk_id,
                 source_id=citation.source_id,

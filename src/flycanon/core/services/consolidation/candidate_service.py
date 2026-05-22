@@ -82,6 +82,8 @@ class CandidateService:
         self,
         request: ProposeCandidateRequest,
         *,
+        tenant_id: str,
+        workspace_id: str,
         correlation_id: str | None = None,
     ) -> list[CandidateRow]:
         source = await self._sources.get(request.source_id)
@@ -106,6 +108,8 @@ class CandidateService:
                 source=source,
                 proposal=proposal,
                 actor=request.actor,
+                tenant_id=tenant_id,
+                workspace_id=workspace_id,
             )
             for proposal in output.candidates
         ]
@@ -115,6 +119,8 @@ class CandidateService:
                 event_type="candidate.proposed",
                 subject_kind="candidate",
                 subject_id=row.id,
+                tenant_id=tenant_id,
+                workspace_id=workspace_id,
                 actor=request.actor,
                 correlation_id=correlation_id,
                 payload={
@@ -144,6 +150,8 @@ class CandidateService:
         candidate_id: str,
         request: AcceptCandidateRequest,
         *,
+        tenant_id: str,
+        workspace_id: str,
         correlation_id: str | None = None,
     ) -> CandidateRow:
         # Atomic claim BEFORE the LLM-heavy / knowledge-item write so
@@ -182,6 +190,8 @@ class CandidateService:
                     actor=request.actor,
                     metadata={"originating_candidate_id": candidate.id},
                 ),
+                tenant_id=tenant_id,
+                workspace_id=workspace_id,
                 originating_candidate_id=candidate.id,
                 correlation_id=correlation_id,
             )
@@ -202,6 +212,8 @@ class CandidateService:
                     actor=request.actor,
                     metadata={"originating_candidate_id": candidate.id},
                 ),
+                tenant_id=tenant_id,
+                workspace_id=workspace_id,
                 originating_candidate_id=candidate.id,
                 correlation_id=correlation_id,
             )
@@ -220,6 +232,8 @@ class CandidateService:
             event_type="candidate.accepted",
             subject_kind="candidate",
             subject_id=candidate_id,
+            tenant_id=tenant_id,
+            workspace_id=workspace_id,
             actor=request.actor,
             correlation_id=correlation_id,
             payload={
@@ -242,6 +256,8 @@ class CandidateService:
         candidate_id: str,
         request: RejectCandidateRequest,
         *,
+        tenant_id: str,
+        workspace_id: str,
         correlation_id: str | None = None,
     ) -> CandidateRow:
         existing = await self._candidates.get(candidate_id)
@@ -266,6 +282,8 @@ class CandidateService:
             event_type="candidate.rejected",
             subject_kind="candidate",
             subject_id=candidate_id,
+            tenant_id=tenant_id,
+            workspace_id=workspace_id,
             actor=request.actor,
             correlation_id=correlation_id,
             payload={"reason": request.reason},
@@ -336,6 +354,8 @@ def _proposal_to_row(
     source: SourceRow,
     proposal: CandidateProposal,
     actor: str | None,
+    tenant_id: str,
+    workspace_id: str,
 ) -> CandidateRow:
     citations_json = [
         {
@@ -346,6 +366,8 @@ def _proposal_to_row(
         for citation in proposal.citations
     ]
     return CandidateRow(
+        tenant_id=tenant_id,
+        workspace_id=workspace_id,
         status=CandidateStatus.proposed.value,
         source_id=source.id,
         title=proposal.title,

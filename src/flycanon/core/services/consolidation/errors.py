@@ -35,9 +35,7 @@ class CandidateAlreadyDecided(ConsolidationError):
     title = "Candidate already decided"
 
     def __init__(self, candidate_id: str, candidate_status: str) -> None:
-        super().__init__(
-            f"candidate {candidate_id!r} is already {candidate_status!r}; cannot re-decide"
-        )
+        super().__init__(f"candidate {candidate_id!r} is already {candidate_status!r}; cannot re-decide")
         self.candidate_id = candidate_id
         # ``status`` on the base class is the HTTP status ClassVar;
         # the per-instance candidate-state lives on ``candidate_status``.

@@ -36,6 +36,8 @@ async def _seed_item_with_citation(
 ) -> KnowledgeVersionRow:
     item = KnowledgeItemRow(
         id=item_id,
+        tenant_id="default",
+        workspace_id="default",
         status=status,
         current_version=current_version or version,
         title="t",
@@ -44,6 +46,8 @@ async def _seed_item_with_citation(
         tags_json=list(tags or []),
     )
     v = KnowledgeVersionRow(
+        tenant_id="default",
+        workspace_id="default",
         knowledge_item_id=item_id,
         version=version,
         status=status,
@@ -56,7 +60,15 @@ async def _seed_item_with_citation(
     await repo.upsert_item(item)
     stored = await repo.add_version(v)
     await repo.add_citations(
-        [CitationRow(knowledge_version_id=stored.id, chunk_id=chunk_id, source_id="src-1")]
+        [
+            CitationRow(
+                tenant_id="default",
+                workspace_id="default",
+                knowledge_version_id=stored.id,
+                chunk_id=chunk_id,
+                source_id="src-1",
+            )
+        ]
     )
     return stored
 
@@ -103,6 +115,8 @@ class TestLookupPublishedCitationsForChunks:
         )
         # v2 (current) cites a different chunk.
         v2 = KnowledgeVersionRow(
+            tenant_id="default",
+            workspace_id="default",
             knowledge_item_id="k-1",
             version=2,
             status="published",
@@ -114,7 +128,15 @@ class TestLookupPublishedCitationsForChunks:
         )
         stored = await repo.add_version(v2)
         await repo.add_citations(
-            [CitationRow(knowledge_version_id=stored.id, chunk_id="ch-new", source_id="src-1")]
+            [
+                CitationRow(
+                    tenant_id="default",
+                    workspace_id="default",
+                    knowledge_version_id=stored.id,
+                    chunk_id="ch-new",
+                    source_id="src-1",
+                )
+            ]
         )
         result = await repo.lookup_published_citations_for_chunks(["ch-old", "ch-new"])
         # Only the live citation resolves.

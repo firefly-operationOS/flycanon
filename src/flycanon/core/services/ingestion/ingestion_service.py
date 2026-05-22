@@ -58,6 +58,8 @@ class IngestionService:
         *,
         source: SourceRow,
         content: bytes | str,
+        tenant_id: str,
+        workspace_id: str,
     ) -> IngestionResult:
         bytes_content = content.encode("utf-8") if isinstance(content, str) else content
 
@@ -80,6 +82,8 @@ class IngestionService:
 
         chunks: list[KnowledgeChunkRow] = [
             KnowledgeChunkRow(
+                tenant_id=tenant_id,
+                workspace_id=workspace_id,
                 source_id=source.id,
                 index_in_source=chunk.index_in_source,
                 total_chunks=chunk.total_chunks,

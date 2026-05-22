@@ -32,7 +32,7 @@ async def test_seed_inserts_one_root_per_domain(repositories):
 
 
 @pytest.mark.asyncio
-async def test_add_node_inherits_parent_depth(repositories):
+async def test_add_node_inherits_parent_depth(repositories, scope):
     audit = AuditService(
         repository=repositories["audit"],
         event_publisher=None,
@@ -56,6 +56,7 @@ async def test_add_node_inherits_parent_depth(repositories):
             description="Contract templates and clauses.",
         ),
         actor="tester",
+        **scope,
     )
     assert child.depth == 1
     assert child.parent_id == legal.id

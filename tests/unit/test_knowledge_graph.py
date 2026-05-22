@@ -33,6 +33,8 @@ async def _seed_item_with_version(
     await repo.upsert_item(
         KnowledgeItemRow(
             id=item_id,
+            tenant_id="default",
+            workspace_id="default",
             status=status,
             current_version=1,
             title=title,
@@ -43,6 +45,8 @@ async def _seed_item_with_version(
     )
     return await repo.add_version(
         KnowledgeVersionRow(
+            tenant_id="default",
+            workspace_id="default",
             knowledge_item_id=item_id,
             version=1,
             status=status,
@@ -73,11 +77,23 @@ class TestBuildJson:
         await _seed_item_with_version(repositories["knowledge"], item_id="legal", domain="legal")
         # ``a -depends_on-> b`` -- both in process domain.
         await repositories["relation"].add(
-            KnowledgeRelationRow(from_item_id="a", to_item_id="b", kind="depends_on")
+            KnowledgeRelationRow(
+                tenant_id="default",
+                workspace_id="default",
+                from_item_id="a",
+                to_item_id="b",
+                kind="depends_on",
+            )
         )
         # ``a -related-> legal`` -- target outside the process filter.
         await repositories["relation"].add(
-            KnowledgeRelationRow(from_item_id="a", to_item_id="legal", kind="related")
+            KnowledgeRelationRow(
+                tenant_id="default",
+                workspace_id="default",
+                from_item_id="a",
+                to_item_id="legal",
+                kind="related",
+            )
         )
         # Filter to process domain only.
         from flycanon.interfaces.enums import Domain
@@ -95,6 +111,8 @@ class TestBuildJson:
         await repositories["source"].add(
             SourceRow(
                 id="s1",
+                tenant_id="default",
+                workspace_id="default",
                 kind="markdown",
                 status="ingested",
                 content_sha256="sha",
@@ -104,11 +122,15 @@ class TestBuildJson:
         await repositories["knowledge"].add_citations(
             [
                 CitationRow(
+                    tenant_id="default",
+                    workspace_id="default",
                     knowledge_version_id=version.id,
                     source_id="s1",
                     chunk_id="c1",
                 ),
                 CitationRow(
+                    tenant_id="default",
+                    workspace_id="default",
                     knowledge_version_id=version.id,
                     source_id="s1",
                     chunk_id="c2",
@@ -130,7 +152,13 @@ class TestBuildMermaid:
         await _seed_item_with_version(repositories["knowledge"], item_id="a")
         await _seed_item_with_version(repositories["knowledge"], item_id="b")
         await repositories["relation"].add(
-            KnowledgeRelationRow(from_item_id="a", to_item_id="b", kind="depends_on")
+            KnowledgeRelationRow(
+                tenant_id="default",
+                workspace_id="default",
+                from_item_id="a",
+                to_item_id="b",
+                kind="depends_on",
+            )
         )
         m = await graph_service.build_mermaid(include_sources=False)
         # First line is the orientation header.

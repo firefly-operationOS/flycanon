@@ -119,6 +119,8 @@ class KnowledgeQualityController:
         """
         ctx: TenantContext = tenant_context_from_request(http_request)
         result = await self._conflicts.detect(
+            tenant_id=ctx.tenant_id,
+            workspace_id=ctx.workspace_id,
             domain=request.domain,
             min_similarity=request.min_similarity,
             max_items=request.max_items,

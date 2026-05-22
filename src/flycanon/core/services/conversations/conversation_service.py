@@ -98,22 +98,24 @@ class ConversationService:
         # that opened the conversation, not a scope key. Plan 4 wires
         # it from the request context (``ctx.actor``) so the body
         # surface no longer carries it.
+        scope_tenant = tenant_id or "default"
+        scope_workspace = workspace_id or "default"
         row = ConversationRow(
             id=str(uuid.uuid4()),
+            tenant_id=scope_tenant,
+            workspace_id=scope_workspace,
             title=request.title,
             actor=actor,
             model=request.model or self._settings.answer_model,
             metadata_json=dict(request.metadata or {}),
         )
-        if tenant_id is not None:
-            row.tenant_id = tenant_id
-        if workspace_id is not None:
-            row.workspace_id = workspace_id
         stored = await self._repository.add(row)
         await self._audit.record(
             event_type="conversation.created",
             subject_kind="conversation",
             subject_id=stored.id,
+            tenant_id=scope_tenant,
+            workspace_id=scope_workspace,
             actor=actor,
             correlation_id=correlation_id,
             payload={"title": request.title, "model": stored.model},
@@ -174,6 +176,8 @@ class ConversationService:
         turn_stored: ConversationTurnRow | None = None
         for attempt in range(3):
             turn_row = ConversationTurnRow(
+                tenant_id=conversation.tenant_id,
+                workspace_id=conversation.workspace_id,
                 conversation_id=conversation_id,
                 turn_index=await self._repository.next_turn_index(conversation_id),
                 question=request.question,
@@ -211,6 +215,8 @@ class ConversationService:
             event_type="conversation.turn_appended",
             subject_kind="conversation",
             subject_id=conversation_id,
+            tenant_id=conversation.tenant_id,
+            workspace_id=conversation.workspace_id,
             actor=conversation.actor,
             correlation_id=correlation_id,
             payload={

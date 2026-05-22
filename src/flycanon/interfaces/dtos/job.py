@@ -3,9 +3,9 @@
 
 The async submit path (``POST /api/v1/sources?mode=async``) returns
 an :class:`IngestJob` with ``status=queued`` and a job id. The
-caller polls ``GET /api/v1/jobs/{id}`` for the terminal state, or
-opens the SSE stream at ``GET /api/v1/jobs/{id}/stream`` for live
-progress.
+caller polls ``GET /api/v1/ingest-jobs/{id}`` for the terminal
+state, or opens the SSE stream at
+``GET /api/v1/ingest-jobs/{id}/stream`` for live progress.
 """
 
 from __future__ import annotations
@@ -122,7 +122,7 @@ class IngestJobEvent(BaseModel):
 
 
 class IngestJobsPage(BaseModel):
-    """Paged view of recent ingest jobs (``GET /api/v1/jobs``)."""
+    """Paged view of recent ingest jobs (``GET /api/v1/ingest-jobs``)."""
 
     items: list[IngestJob] = Field(description="One row per job in the requested page.")
     total: int = Field(ge=0, description="Total jobs matching the filter (before pagination).")

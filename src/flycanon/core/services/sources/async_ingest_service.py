@@ -81,6 +81,8 @@ class AsyncIngestService:
     ) -> IngestJobRow:
         """Persist a job row + broadcast the IngestSourceRequested event."""
         job_id = str(uuid.uuid4())
+        scope_tenant = tenant_id or "default"
+        scope_workspace = workspace_id or "default"
         # Bytes ride on the row as base64 inside ``metadata_json``.
         # That keeps the worker decoupled from a separate blob store
         # for v1; production deploys that need 100-MB intakes should
@@ -96,6 +98,8 @@ class AsyncIngestService:
         }
         row = IngestJobRow(
             id=job_id,
+            tenant_id=scope_tenant,
+            workspace_id=scope_workspace,
             status="queued",
             filename=filename,
             content_type=content_type,
@@ -105,20 +109,20 @@ class AsyncIngestService:
             callback_url=callback_url,
             metadata_json=payload,
         )
-        if tenant_id is not None:
-            row.tenant_id = tenant_id
-        if workspace_id is not None:
-            row.workspace_id = workspace_id
         stored = await self._repository.add(row)
         await self._repository.append_event(
             stored.id,
             stage="queued",
             message="job queued -- waiting for worker pickup",
+            tenant_id=scope_tenant,
+            workspace_id=scope_workspace,
         )
         await self._audit.record(
             event_type="ingest.queued",
             subject_kind="ingest_job",
             subject_id=stored.id,
+            tenant_id=scope_tenant,
+            workspace_id=scope_workspace,
             actor=actor,
             correlation_id=correlation_id,
             payload={
@@ -226,11 +230,17 @@ class AsyncIngestService:
             )
 
             await self._repository.append_event(
-                job_id, stage="normalising", message="binary normalise + load"
+                job_id,
+                stage="normalising",
+                message="binary normalise + load",
+                tenant_id=job.tenant_id,
+                workspace_id=job.workspace_id,
             )
             source = await self._intake.submit(
                 request=request,
                 content=content,
+                tenant_id=job.tenant_id,
+                workspace_id=job.workspace_id,
                 filename=job.filename,
                 content_type=job.content_type,
                 actor=job.actor,
@@ -245,6 +255,8 @@ class AsyncIngestService:
                     "n_chunks": source.n_chunks,
                     "content_sha256": source.content_sha256,
                 },
+                tenant_id=job.tenant_id,
+                workspace_id=job.workspace_id,
             )
             finalised = await self._repository.mark_succeeded(
                 job_id,
@@ -266,6 +278,8 @@ class AsyncIngestService:
                 event_type="ingest.succeeded",
                 subject_kind="ingest_job",
                 subject_id=job_id,
+                tenant_id=job.tenant_id,
+                workspace_id=job.workspace_id,
                 actor=job.actor,
                 correlation_id=job.correlation_id,
                 payload={
@@ -291,6 +305,8 @@ class AsyncIngestService:
                 stage="failed",
                 message=str(exc),
                 payload={"code": code},
+                tenant_id=job.tenant_id,
+                workspace_id=job.workspace_id,
             )
             failed = await self._repository.mark_failed(
                 job_id,
@@ -312,6 +328,8 @@ class AsyncIngestService:
                 event_type="ingest.failed",
                 subject_kind="ingest_job",
                 subject_id=job_id,
+                tenant_id=job.tenant_id,
+                workspace_id=job.workspace_id,
                 actor=job.actor,
                 correlation_id=job.correlation_id,
                 payload={"code": str(code), "message": str(exc)},

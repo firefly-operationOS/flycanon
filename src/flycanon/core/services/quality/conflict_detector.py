@@ -85,6 +85,8 @@ class ConflictDetector:
     async def detect(
         self,
         *,
+        tenant_id: str,
+        workspace_id: str,
         domain: str | None = None,
         min_similarity: float = 0.85,
         max_items: int = 50,
@@ -163,6 +165,8 @@ class ConflictDetector:
                 from_item=items_by_id[pair.from_id],
                 to_item=items_by_id[pair.to_id],
                 actor=actor,
+                tenant_id=tenant_id,
+                workspace_id=workspace_id,
             )
             candidate_ids.append(row.id)
             conflicts_found += 1
@@ -171,7 +175,13 @@ class ConflictDetector:
             # immediately. We swallow the conflict-exists case --
             # the relation already covers it.
             if self._relations is not None:
-                rel = await self._link_relation(pair=pair, judgment=judgment, actor=actor)
+                rel = await self._link_relation(
+                    pair=pair,
+                    judgment=judgment,
+                    actor=actor,
+                    tenant_id=tenant_id,
+                    workspace_id=workspace_id,
+                )
                 if rel is not None:
                     relation_ids.append(rel)
 
@@ -179,6 +189,8 @@ class ConflictDetector:
             event_type="knowledge.conflict_scan",
             subject_kind="knowledge",
             subject_id="*",
+            tenant_id=tenant_id,
+            workspace_id=workspace_id,
             actor=actor,
             correlation_id=correlation_id,
             payload={
@@ -242,8 +254,12 @@ class ConflictDetector:
         from_item: KnowledgeItemRow,
         to_item: KnowledgeItemRow,
         actor: str | None,
+        tenant_id: str,
+        workspace_id: str,
     ) -> CandidateRow:
         row = CandidateRow(
+            tenant_id=tenant_id,
+            workspace_id=workspace_id,
             status="proposed",
             source_id=from_item.id,  # reuse the source slot to anchor
             title=f"Conflict: {from_item.title} vs {to_item.title}",
@@ -278,6 +294,8 @@ class ConflictDetector:
         pair: _ConflictPair,
         judgment: ConflictJudgment,
         actor: str | None,
+        tenant_id: str,
+        workspace_id: str,
     ) -> str | None:
         """Materialise the ``conflicts_with`` edge for the pair.
 
@@ -297,6 +315,8 @@ class ConflictDetector:
                     note=(judgment.reasoning or "")[:2000] or None,
                     actor=actor,
                 ),
+                tenant_id=tenant_id,
+                workspace_id=workspace_id,
             )
             return row.id
         except Exception as exc:  # noqa: BLE001

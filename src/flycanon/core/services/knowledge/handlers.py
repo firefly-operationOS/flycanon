@@ -75,6 +75,8 @@ class CreateKnowledgeHandler(CommandHandler[CreateKnowledgeCommand, KnowledgeVer
     async def do_handle(self, command: CreateKnowledgeCommand) -> KnowledgeVersion:
         version_row = await self._service.create(
             command.request,
+            tenant_id=command.tenant_id or "default",
+            workspace_id=command.workspace_id or "default",
             correlation_id=command.correlation_id,
         )
         citations = await self._repository.list_citations(version_row.id)
@@ -107,6 +109,8 @@ class UpdateKnowledgeHandler(CommandHandler[UpdateKnowledgeCommand, KnowledgeVer
         version_row = await self._service.update(
             command.item_id,
             command.request,
+            tenant_id=command.tenant_id or "default",
+            workspace_id=command.workspace_id or "default",
             correlation_id=command.correlation_id,
         )
         citations = await self._repository.list_citations(version_row.id)
@@ -134,6 +138,8 @@ class SupersedeKnowledgeHandler(CommandHandler[SupersedeKnowledgeCommand, Knowle
         row = await self._service.supersede(
             command.item_id,
             command.request,
+            tenant_id=command.tenant_id or "default",
+            workspace_id=command.workspace_id or "default",
             correlation_id=command.correlation_id,
         )
         return to_knowledge_item(row)
@@ -160,6 +166,8 @@ class RetireKnowledgeHandler(CommandHandler[RetireKnowledgeCommand, KnowledgeIte
         row = await self._service.retire(
             command.item_id,
             command.request,
+            tenant_id=command.tenant_id or "default",
+            workspace_id=command.workspace_id or "default",
             correlation_id=command.correlation_id,
         )
         return to_knowledge_item(row)
@@ -320,6 +328,8 @@ class AddKnowledgeRelationHandler(CommandHandler[AddKnowledgeRelationCommand, Kn
         row = await self._relations.add(
             command.from_item_id,
             command.request,
+            tenant_id=command.tenant_id or "default",
+            workspace_id=command.workspace_id or "default",
             correlation_id=command.correlation_id,
         )
         return to_knowledge_relation(row)
@@ -344,6 +354,8 @@ class RemoveKnowledgeRelationHandler(CommandHandler[RemoveKnowledgeRelationComma
     async def do_handle(self, command: RemoveKnowledgeRelationCommand) -> None:
         await self._relations.remove(
             command.relation_id,
+            tenant_id=command.tenant_id or "default",
+            workspace_id=command.workspace_id or "default",
             actor=command.actor,
             correlation_id=command.correlation_id,
         )

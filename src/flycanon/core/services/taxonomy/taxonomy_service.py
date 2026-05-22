@@ -51,6 +51,8 @@ class TaxonomyService:
         self,
         request: CreateTaxonomyNodeRequest,
         *,
+        tenant_id: str,
+        workspace_id: str,
         actor: str | None = None,
         correlation_id: str | None = None,
     ) -> TaxonomyNodeRow:
@@ -61,6 +63,8 @@ class TaxonomyService:
                 raise TaxonomyNotFound(request.parent_id)
             parent_depth = parent.depth + 1
         node = TaxonomyNodeRow(
+            tenant_id=tenant_id,
+            workspace_id=workspace_id,
             parent_id=request.parent_id,
             slug=request.slug,
             label=request.label,
@@ -73,6 +77,8 @@ class TaxonomyService:
             event_type="taxonomy.node_added",
             subject_kind="taxonomy",
             subject_id=stored.id,
+            tenant_id=tenant_id,
+            workspace_id=workspace_id,
             actor=actor,
             correlation_id=correlation_id,
             payload={
@@ -87,7 +93,9 @@ class TaxonomyService:
         """Ensure one root node exists per :class:`Domain` value.
 
         Returns the number of root nodes inserted. Idempotent --
-        safe to call on every boot.
+        safe to call on every boot. Seeded rows land under the
+        ``("default", "default")`` scope: roots are a system-level
+        registry shared across tenants, not per-tenant taxonomy.
         """
         existing = {row.slug for row in await self._repository.list_all() if row.parent_id is None}
         inserted = 0
@@ -95,6 +103,8 @@ class TaxonomyService:
             if domain.value in existing:
                 continue
             node = TaxonomyNodeRow(
+                tenant_id="default",
+                workspace_id="default",
                 parent_id=None,
                 slug=domain.value,
                 label=_pretty_label(domain.value),

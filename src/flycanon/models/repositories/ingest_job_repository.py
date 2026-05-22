@@ -275,9 +275,21 @@ class IngestJobRepository:
         stage: str,
         message: str | None = None,
         payload: dict[str, Any] | None = None,
+        tenant_id: str | None = None,
+        workspace_id: str | None = None,
     ) -> IngestJobEventRow:
+        """Append one progress event for a job.
+
+        ``tenant_id`` + ``workspace_id`` default to ``"default"`` so the
+        legacy callers that pre-date Plan 4's scope tightening keep
+        compiling, but every production call site now threads the
+        parent job's scope (so the per-event projection lines up with
+        the parent row).
+        """
         async with self.session() as session:
             event = IngestJobEventRow(
+                tenant_id=tenant_id or "default",
+                workspace_id=workspace_id or "default",
                 job_id=job_id,
                 stage=stage,
                 message=message,

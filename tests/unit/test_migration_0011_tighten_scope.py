@@ -75,9 +75,7 @@ def test_upgrade_drops_default_on_all_canon_scope_columns(sqlite_url: str) -> No
         # SQLite reports ``None`` once the default is dropped; on
         # Postgres the inspector returns either ``None`` or an empty
         # string depending on the driver version, so we accept both.
-        assert tenant_default in (None, ""), (
-            f"{table}.tenant_id still has default={tenant_default!r}"
-        )
+        assert tenant_default in (None, ""), f"{table}.tenant_id still has default={tenant_default!r}"
         assert workspace_default in (None, ""), (
             f"{table}.workspace_id still has default={workspace_default!r}"
         )
@@ -90,9 +88,7 @@ def test_upgrade_widens_canon_sources_sha256_unique_index(sqlite_url: str) -> No
     engine = sa.create_engine(sqlite_url)
     uniques = _unique_indexes(engine, "canon_sources")
     sha_uniques = [u for u in uniques if "content_sha256" in u["column_names"]]
-    assert len(sha_uniques) == 1, (
-        f"expected exactly one content_sha256 unique index, got {sha_uniques!r}"
-    )
+    assert len(sha_uniques) == 1, f"expected exactly one content_sha256 unique index, got {sha_uniques!r}"
     widened = sha_uniques[0]
     assert widened["name"] == "uq_canon_sources_tenant_workspace_content_sha256"
     assert set(widened["column_names"]) == {
