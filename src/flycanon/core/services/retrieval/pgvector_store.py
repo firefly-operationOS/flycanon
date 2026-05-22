@@ -48,6 +48,32 @@ from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker, create_async
 logger = logging.getLogger(__name__)
 
 
+# Plan 3 default for ``hnsw.ef_search``. The HNSW index builder picks a
+# small candidate-list size by default (~40); 200 trades ~2ms of extra
+# query time for recall that's competitive with brute force. ``SET LOCAL``
+# scopes the bump to a single transaction, so other workloads on the same
+# connection pool are unaffected.
+_HNSW_EF_SEARCH = 200
+
+# Default widening factor for the post-fetch ANN window. The query pulls
+# ``top_k * widening_factor`` candidates from the ANN index so that the
+# downstream cross-encoder / RRF reranker can rescore a wider pool and
+# the trim happens server-side instead of in Python.
+_DEFAULT_WIDENING_FACTOR = 5
+
+
+def _scope_namespace(tenant_id: str, workspace_id: str) -> str:
+    """Canonical ``t/<tenant>/w/<workspace>`` namespace string.
+
+    Kept as a backstop while the framework's
+    :class:`VectorStoreProtocol` still threads ``namespace`` everywhere
+    -- the new scope columns are the authoritative filter, but mirroring
+    them onto ``namespace`` keeps diagnostics and any non-scope-aware
+    caller working.
+    """
+    return f"t/{tenant_id}/w/{workspace_id}"
+
+
 class PgVectorVectorStore:
     """Backend-agnostic VectorStoreProtocol implementation over pgvector."""
 
@@ -132,23 +158,51 @@ class PgVectorVectorStore:
         self,
         documents: list[Any],
         namespace: str = "default",
+        *,
+        tenant_id: str = "default",
+        workspace_id: str = "default",
     ) -> None:
+        """Persist documents with scope columns + canonical namespace.
+
+        ``tenant_id`` / ``workspace_id`` are the authoritative scope --
+        the legacy ``namespace`` argument is preserved for callers that
+        haven't been migrated to the scoped API yet but is overridden
+        whenever the canonical ``t/<tenant>/w/<workspace>`` template
+        applies.
+        """
         factory = await self._ensure_engine()
-        rows = [_doc_to_row(doc, namespace) for doc in documents]
+        scope_namespace = _scope_namespace(tenant_id, workspace_id)
+        rows = [
+            _doc_to_row(
+                doc,
+                namespace=scope_namespace if namespace == "default" else namespace,
+                tenant_id=tenant_id,
+                workspace_id=workspace_id,
+            )
+            for doc in documents
+        ]
         if not rows:
             return
         async with factory() as session, session.begin():
             # Bulk upsert via INSERT ... ON CONFLICT (id) DO UPDATE.
+            # All values are parametrized; only the table identifier is
+            # interpolated (it's controlled by configuration, not user
+            # input).
             await session.execute(
                 text(
                     f"""
-                        INSERT INTO {self._table} (id, namespace, embedding, metadata, text)
-                        VALUES (:id, :namespace, :embedding, CAST(:metadata AS jsonb), :text)
+                        INSERT INTO {self._table}
+                            (id, namespace, tenant_id, workspace_id, embedding, metadata, text)
+                        VALUES
+                            (:id, :namespace, :tenant_id, :workspace_id,
+                             :embedding, CAST(:metadata AS jsonb), :text)
                         ON CONFLICT (id) DO UPDATE
-                        SET namespace = EXCLUDED.namespace,
-                            embedding = EXCLUDED.embedding,
-                            metadata  = EXCLUDED.metadata,
-                            text      = EXCLUDED.text
+                        SET namespace    = EXCLUDED.namespace,
+                            tenant_id    = EXCLUDED.tenant_id,
+                            workspace_id = EXCLUDED.workspace_id,
+                            embedding    = EXCLUDED.embedding,
+                            metadata     = EXCLUDED.metadata,
+                            text         = EXCLUDED.text
                         """
                 ),
                 rows,
@@ -160,42 +214,73 @@ class PgVectorVectorStore:
         top_k: int = 5,
         namespace: str = "default",
         filters: list[Any] | None = None,
+        *,
+        tenant_id: str = "default",
+        workspace_id: str = "default",
+        widening_factor: int = _DEFAULT_WIDENING_FACTOR,
     ) -> list[Any]:
+        """ANN search filtered to ``(tenant_id, workspace_id)`` scope.
+
+        The query runs inside an explicit transaction that bumps
+        ``hnsw.ef_search`` for higher recall, then filters on the
+        scope columns. ``LIMIT`` is widened server-side by
+        ``widening_factor`` (default 5) so that the downstream
+        cross-encoder / RRF reranker can rescore a larger pool;
+        the result list is trimmed to ``top_k`` before returning.
+        """
         from fireflyframework_agentic.vectorstores.types import SearchResult, VectorDocument
 
         factory = await self._ensure_engine()
         embedding_literal = _vector_literal(query_embedding)
-        async with factory() as session:
+        widened_limit = max(1, top_k * widening_factor)
+        async with factory() as session, session.begin():
+            # ``SET LOCAL`` is per-transaction and only valid on
+            # Postgres. The pgvector adapter is Postgres-only at
+            # construction time (we import the ``pgvector`` extra
+            # in ``__init__``), so the dialect check below is
+            # belt-and-suspenders for tests that swap in a SQLite
+            # engine via monkeypatching.
+            dialect = session.bind.dialect.name if session.bind is not None else ""
+            if dialect == "postgresql":
+                await session.execute(text(f"SET LOCAL hnsw.ef_search = {_HNSW_EF_SEARCH}"))
             result = await session.execute(
                 text(
                     f"""
                     SELECT id, namespace, metadata, text,
                            1 - (embedding <=> :query_embedding) AS score
                     FROM {self._table}
-                    WHERE namespace = :namespace
+                    WHERE tenant_id = :tenant_id
+                      AND workspace_id = :workspace_id
                     ORDER BY embedding <=> :query_embedding
-                    LIMIT :top_k
+                    LIMIT :limit
                     """
                 ),
                 {
                     "query_embedding": embedding_literal,
-                    "namespace": namespace,
-                    "top_k": top_k,
+                    "tenant_id": tenant_id,
+                    "workspace_id": workspace_id,
+                    "limit": widened_limit,
                 },
             )
-            return [
-                SearchResult(
-                    document=VectorDocument(
-                        id=str(row.id),
-                        text=row.text,
-                        embedding=None,
-                        metadata=dict(row.metadata or {}),
-                        namespace=row.namespace,
-                    ),
-                    score=float(row.score),
-                )
-                for row in result
-            ]
+            rows = result.all()
+
+        hits = [
+            SearchResult(
+                document=VectorDocument(
+                    id=str(row.id),
+                    text=row.text,
+                    embedding=None,
+                    metadata=dict(row.metadata or {}),
+                    namespace=row.namespace,
+                ),
+                score=float(row.score),
+            )
+            for row in rows
+        ]
+        # Trim post-fetch -- the SQL ``LIMIT`` widens the candidate
+        # pool for the downstream reranker; here we cap to the
+        # caller's requested top_k.
+        return hits[:top_k]
 
     async def search_text(
         self,
@@ -203,19 +288,38 @@ class PgVectorVectorStore:
         top_k: int = 5,
         namespace: str = "default",
         filters: list[Any] | None = None,
+        *,
+        tenant_id: str = "default",
+        workspace_id: str = "default",
     ) -> list[Any]:
         raise NotImplementedError(
             "pgvector adapter requires a precomputed embedding; use search(query_embedding=...) instead."
         )
 
-    async def delete(self, ids: list[str], namespace: str = "default") -> None:
+    async def delete(
+        self,
+        ids: list[str],
+        namespace: str = "default",
+        *,
+        tenant_id: str = "default",
+        workspace_id: str = "default",
+    ) -> None:
         if not ids:
             return
         factory = await self._ensure_engine()
         async with factory() as session, session.begin():
             await session.execute(
-                text(f"DELETE FROM {self._table} WHERE namespace = :namespace AND id = ANY(:ids)"),
-                {"namespace": namespace, "ids": list(ids)},
+                text(
+                    f"DELETE FROM {self._table} "
+                    f"WHERE tenant_id = :tenant_id "
+                    f"  AND workspace_id = :workspace_id "
+                    f"  AND id = ANY(:ids)"
+                ),
+                {
+                    "tenant_id": tenant_id,
+                    "workspace_id": workspace_id,
+                    "ids": list(ids),
+                },
             )
 
     async def close(self) -> None:
@@ -225,7 +329,13 @@ class PgVectorVectorStore:
             self._factory = None
 
 
-def _doc_to_row(doc: Any, namespace: str) -> dict[str, Any]:
+def _doc_to_row(
+    doc: Any,
+    *,
+    namespace: str,
+    tenant_id: str,
+    workspace_id: str,
+) -> dict[str, Any]:
     import json
 
     embedding = list(doc.embedding or [])
@@ -234,6 +344,8 @@ def _doc_to_row(doc: Any, namespace: str) -> dict[str, Any]:
     return {
         "id": str(doc.id),
         "namespace": getattr(doc, "namespace", None) or namespace,
+        "tenant_id": tenant_id,
+        "workspace_id": workspace_id,
         "embedding": _vector_literal(embedding),
         "metadata": json.dumps(dict(getattr(doc, "metadata", {}) or {})),
         "text": getattr(doc, "text", "") or "",
