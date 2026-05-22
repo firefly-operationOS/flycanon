@@ -175,14 +175,34 @@ class InMemoryIdempotencyStore(IdempotencyStore):
       is the index the agent controllers read on every POST to
       decide whether to short-circuit the command bus.
 
+    Both indexes are FIFO-capped at ``max_entries`` (default 100k).
+    When a write would push past the cap, the oldest inserted entry
+    is evicted. Python's ``dict`` preserves insertion order since 3.7
+    so ``next(iter(...))`` gives the oldest key in O(1). Without this
+    cap the dicts would grow unbounded across the 1h TTL window,
+    which matters under sustained high write QPS (e.g., a busy ingest
+    agent doing 50 writes per second over 24h would otherwise leak
+    ~4M entries into the dict).
+
     The two indexes are deliberately independent: a writer can use
     either API without polluting the other. Production swaps both
     behind a Redis-backed implementation; the in-memory variant is
     test/dev only.
     """
 
+    max_entries: int = 100_000
     _entries: dict[tuple[str, str, str, str], IdempotencyEntry] = field(default_factory=dict)
     _replays: dict[tuple[str, str, str], IdempotencyEntry] = field(default_factory=dict)
+
+    def _enforce_replays_cap(self) -> None:
+        while len(self._replays) >= self.max_entries:
+            # ``next(iter(dict))`` returns the oldest inserted key (dict
+            # preserves insertion order since Python 3.7).
+            self._replays.pop(next(iter(self._replays)), None)
+
+    def _enforce_entries_cap(self) -> None:
+        while len(self._entries) >= self.max_entries:
+            self._entries.pop(next(iter(self._entries)), None)
 
     def get(
         self,
@@ -199,6 +219,7 @@ class InMemoryIdempotencyStore(IdempotencyStore):
         return entry
 
     def put(self, entry: IdempotencyEntry) -> None:
+        self._enforce_entries_cap()
         self._entries[(entry.tenant_id, entry.workspace_id, entry.route, entry.key.value)] = entry
 
     def lookup(
@@ -263,4 +284,5 @@ class InMemoryIdempotencyStore(IdempotencyStore):
             response_status=status,
             response_json=json_body,
         )
+        self._enforce_replays_cap()
         self._replays[(tenant_id, route, key)] = entry
