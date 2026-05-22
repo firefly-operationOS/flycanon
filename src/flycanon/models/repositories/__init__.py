@@ -19,6 +19,7 @@ from flycanon.models.repositories.knowledge_repository import KnowledgeRepositor
 from flycanon.models.repositories.relation_repository import RelationRepository
 from flycanon.models.repositories.source_repository import SourceRepository
 from flycanon.models.repositories.taxonomy_repository import TaxonomyRepository
+from flycanon.models.repositories.workspace_repository import WorkspaceRepository
 
 __all__ = [
     "AuditRepository",
@@ -31,4 +32,5 @@ __all__ = [
     "RelationRepository",
     "SourceRepository",
     "TaxonomyRepository",
+    "WorkspaceRepository",
 ]

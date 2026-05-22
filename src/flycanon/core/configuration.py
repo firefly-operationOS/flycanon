@@ -68,6 +68,7 @@ from flycanon.models.repositories import (
     RelationRepository,
     SourceRepository,
     TaxonomyRepository,
+    WorkspaceRepository,
 )
 
 logger = logging.getLogger(__name__)
@@ -136,6 +137,10 @@ class CanonCoreConfiguration:
     @bean
     def cost_repository(self, settings: CanonSettings) -> CostRepository:
         return CostRepository.from_url(settings.database_url)
+
+    @bean
+    def workspace_repository(self, settings: CanonSettings) -> WorkspaceRepository:
+        return WorkspaceRepository.from_url(settings.database_url)
 
     @bean(name="database_health")
     def database_health(self, source_repository: SourceRepository) -> SqlAlchemyHealthIndicator:
