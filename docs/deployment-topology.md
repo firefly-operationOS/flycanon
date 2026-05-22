@@ -342,6 +342,60 @@ contract; flycanon mirrors the same pattern.
 
 ---
 
+## 3a. Framework dependency pinning
+
+Both services compose with the sibling `fireflyframework-pyfly` and
+`fireflyframework-agentic` repositories at build time (image build
++ wheel install) and via path sources during local development. The
+exact upstream refs are pinned in every CI workflow file under the
+`env:` block:
+
+```yaml
+env:
+  PYFLY_REF: v26.05.05
+  AGENTIC_REF: v26.05.11
+```
+
+**Why pinned, not `main`:** the framework repos move at a different
+cadence than the consumers. A pydantic-ai or transitive bump on
+`fireflyframework-agentic@main` can rupture uv's resolution graph
+(e.g., agentic 26.05.21 upgraded pydantic-ai 1.75 -> 1.99, which on
+the Python 3.14 + Windows marker split has no satisfiable mistralai
+version). Pinning the framework refs to known-good release tags
+makes the image build deterministic between local dev and CI.
+
+**Bumping a framework dep:**
+
+1. Test locally first. Pull the new framework tag, copy into
+   `vendor/`, run the docker build:
+   ```bash
+   cd /Users/ancongui/Development/fireflyframework/fireflyframework-pyfly
+   git fetch --tags && git checkout v26.05.06
+   cd /Users/ancongui/Development/firefly-operationOS/flycanon
+   rm -rf vendor && mkdir vendor
+   cp -r ../../fireflyframework/fireflyframework-pyfly vendor/pyfly
+   cp -r ../../fireflyframework/fireflyframework-agentic vendor/fireflyframework-agentic
+   docker buildx build --build-context pyfly=./vendor/pyfly \
+     --build-context fireflyframework-agentic=./vendor/fireflyframework-agentic \
+     --tag flycanon:test --file Dockerfile .
+   ```
+2. If the local build succeeds, bump `PYFLY_REF` and/or `AGENTIC_REF`
+   in every workflow file (`.github/workflows/{pr-gate,docker-publish,publish-sdks}.yaml`).
+3. Bump the version constraints in `pyproject.toml` if you need
+   features from the new tag (e.g. `pyfly[...]>=26.5.6`).
+4. Commit + push; watch the docker-publish run via
+   `gh run watch --exit-status` to confirm the multi-arch build
+   completes.
+
+**`requires-python` upper bound:** flycanon caps
+`requires-python = ">=3.13,<3.14"` so uv's multi-platform resolver
+doesn't try to satisfy Python 3.14 markers that the build never
+ships under. Don't raise the upper bound without first verifying
+the entire transitive dep graph resolves under that Python version
+(particularly the pydantic-ai + mistralai chain).
+
+---
+
 ## 4. Migration ordering
 
 Both services use Alembic; migrations live under `migrations/` in each
