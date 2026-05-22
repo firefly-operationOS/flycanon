@@ -36,6 +36,20 @@ backed by the durable Postgres outbox by default
 | `CandidateAccepted`       | `candidate_id`, `materialised_knowledge_item_id`, `materialised_version` |
 | `CandidateRejected`       | `candidate_id`, `reason` |
 
+## canon.workspaces.v1
+
+Workspace lifecycle events emitted by the `/api/v1/workspaces` CRUD
+controller. Consumers (e.g., flyradar's workspace cache) subscribe
+to keep a local read-through cache fresh without polling. Schema and
+field detail in
+[payload-reference.md -> Workspace lifecycle events](payload-reference.md#workspace-lifecycle-events).
+
+| Event type | Emitted from | Payload beyond `(tenant_id, workspace_id, occurred_at)` |
+|------------|--------------|---------------------------------------------------------|
+| `workspace.created`  | `POST /api/v1/workspaces`            | `name`, `scope`, `sme_roster`, `retention_days`, `jurisdiction` |
+| `workspace.updated`  | `PATCH /api/v1/workspaces/{id}`      | `name`, `scope`, `sme_roster`, `retention_days`, `jurisdiction` (post-update row state) |
+| `workspace.deleted`  | `POST /api/v1/workspaces/{id}:close` | -- (semantic: workspace closed; the row is preserved with `status=closed`) |
+
 ## flycanon.audit
 
 A mirror of every mutation. Each event carries the full

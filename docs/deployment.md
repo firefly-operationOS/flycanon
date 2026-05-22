@@ -148,6 +148,45 @@ typically prefer migrating as a separate step (`RUN_MIGRATIONS=false`
 in the long-running containers, plus a one-shot `migrate` Job /
 Container right before the API rollout).
 
+### RLS roles
+
+Migration `0013_rls_policies` emits `ALTER TABLE ... FORCE ROW LEVEL
+SECURITY` on every `canon_*` table. The application connection must
+**not** be a Postgres superuser (FORCE-RLS does not apply to
+superusers), and the migration runner / background workers must
+**bypass** the policy or they would see zero rows. Provision two
+roles before pointing `FLYCANON_DATABASE_URL` at the cluster:
+
+```sql
+-- Admin role: runs migrations + cross-workspace workers
+-- (consolidation re-embed sweep, retention reaper, EDA ingest worker).
+CREATE ROLE flycanon_admin LOGIN PASSWORD 'change-me' BYPASSRLS;
+GRANT ALL PRIVILEGES ON DATABASE flycanon TO flycanon_admin;
+GRANT ALL ON SCHEMA public TO flycanon_admin;
+
+-- App role: request-path engine. NO BYPASSRLS, NOT a superuser.
+-- RLS policies filter by the per-session GUCs that
+-- `install_tenant_guc_hook()` sets on each transaction.
+CREATE ROLE flycanon_app LOGIN PASSWORD 'change-me';
+GRANT CONNECT ON DATABASE flycanon TO flycanon_app;
+GRANT USAGE ON SCHEMA public TO flycanon_app;
+GRANT SELECT, INSERT, UPDATE, DELETE
+  ON ALL TABLES IN SCHEMA public TO flycanon_app;
+GRANT USAGE, SELECT
+  ON ALL SEQUENCES IN SCHEMA public TO flycanon_app;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public
+  GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO flycanon_app;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public
+  GRANT USAGE, SELECT ON SEQUENCES TO flycanon_app;
+```
+
+Wire `FLYCANON_DATABASE_URL` at `flycanon_app` for the `serve` role
+and at `flycanon_admin` for the `migrate` + `worker` roles. See
+[architecture.md -> Row-level security](architecture.md#deployment-requirement)
+for the rationale; the integration suite
+(`tests/integration/test_rls_isolation.py`) exercises the
+`BYPASSRLS` vs. `app_user` contract end-to-end.
+
 ### BM25 projection
 
 The default `pgvector` backend is **Postgres-native** for both

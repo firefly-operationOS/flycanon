@@ -264,21 +264,33 @@ curl -fsS http://localhost:8500/api/v1/stats | jq .
 ## 6. Agent surface (mint -> use)
 
 The `/api/v1/agent/*` routes are gated by an `X-Agent-Token` header
-instead of an operator JWT. Mint one (user-tier), capture the secret
-ONCE, then call the agent endpoints:
+instead of an operator JWT. Real deployments don't mint tokens
+against the `default/default` scope -- create a real workspace
+first, then mint against it.
 
 ```bash
-# 1. Mint a token (user-tier).
+# 1. Create a tenant-scoped workspace.
+curl -fsS -X POST http://localhost:8500/api/v1/workspaces \
+  -H "X-Tenant-Id: acme" -H "X-Workspace-Id: ws-first" \
+  -H "Content-Type: application/json" \
+  -d '{
+        "id": "ws-first",
+        "name": "Acme onboarding",
+        "scope": "onboarding"
+      }' | jq .
+# Subsequent requests against acme/ws-first carry both headers.
+
+# 2. Mint an agent token bound to that scope (user-tier).
 curl -fsS -X POST http://localhost:8500/api/v1/agent-tokens \
-  -H "X-Tenant-Id: default" -H "X-Workspace-Id: default" \
+  -H "X-Tenant-Id: acme" -H "X-Workspace-Id: ws-first" \
   -H "Content-Type: application/json" \
   -d '{"name":"ci-runner","scopes":["agent.sources:ingest","agent.query:run"]}'
 # Response includes "token": "agt_<8hex>_<32hex>" ONCE -- store it.
 
-# 2. Use it on the agent surface.
+# 3. Use it on the agent surface.
 AGENT_TOKEN="agt_..."
 curl -fsS -X POST http://localhost:8500/api/v1/agent/query \
-  -H "X-Tenant-Id: default" -H "X-Workspace-Id: default" \
+  -H "X-Tenant-Id: acme" -H "X-Workspace-Id: ws-first" \
   -H "X-Agent-Token: $AGENT_TOKEN" \
   -H "Idempotency-Key: $(uuidgen)" \
   -H "Content-Type: application/json" \

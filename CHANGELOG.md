@@ -212,9 +212,6 @@ All notable changes to **flycanon** are documented here.
 - **Load + pen-test** -- the unification spec's Phase 4 validation
   pass ("5k/50k/500k chunks across 10/100/1000 tenants" +
   pen-test RLS gates).
-- **Constant-time hash compare on agent token verify** +
-  **`last_used_at` write deduplication** -- both flagged in Plan 5
-  review; must be back-ported to flyradar in lock-step.
 - **Rate limiting**: `rate_limit_rpm` on agent tokens is stored
   but not enforced.
 - **Knowledge create/update via agent**: deliberately excluded per
