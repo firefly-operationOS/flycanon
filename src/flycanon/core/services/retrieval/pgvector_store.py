@@ -149,6 +149,48 @@ class PgVectorVectorStore:
                     f"ON {self._table} (tenant_id, workspace_id)"
                 )
             )
+            # Install Postgres RLS policies in-band with table creation so
+            # the table is never reachable from the application without
+            # tenant/workspace scoping -- closes the deploy-ordering gap
+            # where migration ``0013_rls_policies`` runs before the
+            # PgvectorStore boots for the first time on a fresh deploy
+            # (the migration's ``IF EXISTS`` guard no-ops in that case).
+            #
+            # The DO block is idempotent (skips if the policy already
+            # exists) and soft-fails on insufficient_privilege so a
+            # non-admin boot logs a warning instead of crashing.
+            await conn.execute(
+                text(
+                    f"""
+                    DO $$
+                    BEGIN
+                        IF NOT EXISTS (
+                            SELECT 1 FROM pg_policies
+                            WHERE schemaname = 'public'
+                              AND tablename = '{self._table}'
+                              AND policyname = 'tenant_workspace_isolation'
+                        ) THEN
+                            BEGIN
+                                EXECUTE 'ALTER TABLE {self._table} ENABLE ROW LEVEL SECURITY';
+                                EXECUTE 'ALTER TABLE {self._table} FORCE ROW LEVEL SECURITY';
+                                EXECUTE $POLICY$
+                                    CREATE POLICY tenant_workspace_isolation ON {self._table}
+                                      USING (
+                                        tenant_id = current_setting('app.tenant_id', true)
+                                        AND workspace_id = current_setting('app.workspace_id', true)
+                                      )
+                                $POLICY$;
+                            EXCEPTION WHEN insufficient_privilege THEN
+                                RAISE WARNING
+                                    'Insufficient privilege to apply RLS on %; install via admin role.',
+                                    '{self._table}';
+                            END;
+                        END IF;
+                    END
+                    $$;
+                    """
+                )
+            )
 
     # ------------------------------------------------------------------
     # VectorStoreProtocol surface

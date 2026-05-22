@@ -380,60 +380,61 @@ def test_canon_agent_tokens_tenant_only_policy(
 
 # ---------------------------------------------------------------------------
 # Runtime-created table: canon_chunk_vectors. The 0013 migration's
-# DO block guards with ``IF EXISTS``; on a fresh container the table
-# doesn't exist when the migration runs, so production relies on
-# PgvectorStore creating the table at boot AND a follow-up trigger
-# applying the policy. For this test we mimic that flow: create the
-# table, then re-run the policy DDL the same way the migration would.
+# DO block guards with ``IF EXISTS`` -- on a fresh container the table
+# doesn't exist when the migration runs, so it no-ops. Production now
+# relies on ``PgVectorVectorStore._initialise_schema`` installing the
+# policy in-band with the CREATE TABLE on first boot; this test exercises
+# that real bootstrap path end-to-end.
 # ---------------------------------------------------------------------------
 
 
 def test_canon_chunk_vectors_runtime_table_isolation(
+    pg_container,  # type: PostgresContainer -- import is guarded by skip
     pg_admin_engine: sa.Engine,
     pg_app_engine: sa.Engine,
 ) -> None:
-    """Boot the pgvector table at runtime, install the policy, verify isolation."""
-    with pg_admin_engine.begin() as conn:
-        # Mimic PgvectorStore._initialise_schema -- minimal version.
-        conn.execute(sa.text("CREATE EXTENSION IF NOT EXISTS vector"))
-        conn.execute(
-            sa.text(
-                """
-                CREATE TABLE IF NOT EXISTS canon_chunk_vectors (
-                    id           TEXT PRIMARY KEY,
-                    namespace    TEXT NOT NULL DEFAULT 'default',
-                    tenant_id    TEXT NOT NULL DEFAULT 'default',
-                    workspace_id TEXT NOT NULL DEFAULT 'default',
-                    embedding    vector(3) NOT NULL,
-                    metadata     JSONB NOT NULL DEFAULT '{}'::jsonb,
-                    text         TEXT NOT NULL,
-                    created_at   TIMESTAMPTZ NOT NULL DEFAULT now()
-                )
-                """
-            )
-        )
+    """Boot the pgvector table via the real store, verify RLS is enforced."""
+    import asyncio
 
-        # Apply the same policy DDL the migration would have run if the
-        # table had existed at migration time. The DO block in 0013 is
-        # exactly this shape; we inline it here so production-style
-        # bootstrap (table-first, policy-second) is exercised.
-        conn.execute(sa.text("ALTER TABLE canon_chunk_vectors ENABLE ROW LEVEL SECURITY"))
-        conn.execute(sa.text("ALTER TABLE canon_chunk_vectors FORCE ROW LEVEL SECURITY"))
-        conn.execute(
-            sa.text(
-                """
-                CREATE POLICY tenant_workspace_isolation ON canon_chunk_vectors
-                  USING (
-                    tenant_id = current_setting('app.tenant_id', true)
-                    AND workspace_id = current_setting('app.workspace_id', true)
-                  )
-                """
-            )
+    from flycanon.core.services.retrieval.pgvector_store import PgVectorVectorStore
+
+    # Drive the production bootstrap path -- ``_initialise_schema``
+    # both creates the table AND installs the RLS policy (the fix
+    # under test). We run it once and dispose; the policy survives
+    # the engine going away.
+    #
+    # The PostgresContainer hands back a ``+psycopg2`` URL but
+    # PgVectorVectorStore expects ``+asyncpg``; coerce explicitly
+    # to avoid the store's helper mangling ``+psycopg2`` into
+    # ``+asyncpg2``.
+    container_url = pg_container.get_connection_url()
+    if container_url.startswith("postgresql+psycopg2"):
+        async_url = container_url.replace("postgresql+psycopg2", "postgresql+asyncpg", 1)
+    elif container_url.startswith("postgresql://"):
+        async_url = container_url.replace("postgresql://", "postgresql+asyncpg://", 1)
+    else:
+        async_url = container_url
+
+    async def _bootstrap() -> None:
+        store = PgVectorVectorStore(
+            database_url=async_url,
+            dimension=3,
         )
-        # Make sure ``app_user`` can read/write it now that it exists.
+        try:
+            await store._ensure_engine()
+        finally:
+            await store.close()
+
+    asyncio.run(_bootstrap())
+
+    # The runtime-created table needs an explicit grant for app_user
+    # (the conftest ALTER DEFAULT PRIVILEGES only covers tables created
+    # AFTER it ran, but the bootstrap above ran inside this test, so
+    # we re-issue the grant defensively).
+    with pg_admin_engine.begin() as conn:
         conn.execute(sa.text("GRANT ALL ON canon_chunk_vectors TO app_user"))
 
-        # Seed two scopes.
+        # Seed two scopes (admin role -- bypasses RLS).
         conn.execute(
             sa.text(
                 """
