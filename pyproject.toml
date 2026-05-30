@@ -141,6 +141,18 @@ pinecone = [
 requires = ["hatchling>=1.18"]
 build-backend = "hatchling.build"
 
+[tool.uv]
+# fireflyframework-agentic depends on pydantic-ai>=1.99, whose transitive
+# ``pydantic-ai-slim[mistral]`` drags in ``mistralai>=2.0.0`` -- which exists
+# on PyPI only as pre-releases (2.x rc builds) and forces in
+# ``opentelemetry-semantic-conventions==0.60b1``. flycanon never uses the
+# mistral provider, so pin mistralai to the stable 1.x line to keep the
+# resolver on stable wheels. Drop once mistralai 2.x reaches stable or
+# pydantic-ai stops requesting it.
+override-dependencies = [
+    "mistralai>=1.0.0,<2.0.0",
+]
+
 [tool.uv.sources]
 # Sibling-repo path sources -- mirror what the rest of operationOS does
 # so both services boot from a fresh local checkout without needing the
