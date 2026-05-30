@@ -20,14 +20,14 @@ dependencies = [
     "pyfly[fastapi,observability,security,data-relational,postgresql,eda,redis,client,scheduling,cli]>=26.5.4",
 
     # GenAI metaframework -- FireflyAgent over pydantic-ai, the binary
-    # normalisation stack (``[binary]`` -> ``content.binary``), MarkItDown
-    # (multi-format text intake) and the OpenAI embeddings provider.
-    # flycanon vendors its own hybrid retrieval -- StoredChunk / ChunkHit /
-    # HybridRetriever / reciprocal_rank_fusion live in
-    # ``core/services/retrieval/fusion.py`` -- so it no longer depends on
-    # the framework's removed ``rag`` module, and the ``corpus-search``
-    # extra (which bundled sqlite-vec + sqlglot) is gone.
-    "fireflyframework-agentic[rest,security,redis,markitdown,openai-embeddings,binary]>=26.5.11",
+    # normalisation stack (``[binary]`` -> ``content.binary``) and the
+    # OpenAI embeddings provider. flycanon vendors its own hybrid retrieval
+    # -- StoredChunk / ChunkHit / HybridRetriever / reciprocal_rank_fusion
+    # live in ``core/services/retrieval/fusion.py`` -- so it no longer
+    # depends on the framework's removed ``rag`` module (the ``corpus-search``
+    # extra that bundled sqlite-vec + sqlglot is gone). Document intake uses
+    # flycanon's own per-format SourceLoaders -- no Microsoft MarkItDown.
+    "fireflyframework-agentic[rest,security,redis,openai-embeddings,binary]>=26.5.11",
 
     # Source intake -- the high-fidelity per-format SourceLoaders. Binary
     # normalisation (HEIC / SVG / TIFF rasterisation, archive + email
@@ -37,18 +37,21 @@ dependencies = [
     # that are flycanon-specific:
     #
     # * ``python-docx`` -- :class:`DocxLoader` (Heading1-9 detection) + metadata.
-    # * ``python-pptx`` -- PPTX metadata + native text extraction.
-    # * ``openpyxl``    -- XLSX metadata + cell extraction.
+    # * ``python-pptx`` -- :class:`PptxLoader` (one section per slide) + metadata.
+    # * ``openpyxl``    -- :class:`XlsxLoader` (one section per sheet) + metadata.
     # * ``pypdf``       -- lightweight page count on the loader path.
     # * ``pymupdf``     -- :class:`PdfLoader` text + per-page rendering for
     #   image-only PDFs (PyMuPDF first, Tesseract OCR fallback).
-    # * ``beautifulsoup4`` + ``lxml`` -- :class:`HtmlLoader`.
+    # * ``beautifulsoup4`` + ``lxml`` -- :class:`HtmlLoader` + :class:`XmlLoader`.
+    # * ``striprtf``    -- :class:`RtfLoader` (pure-Python RTF -> text).
+    # * ``odfpy``       -- :class:`OdfLoader` (ODT / ODS / ODP -> text).
     # * ``Pillow``      -- raster handling for :class:`ImageLoader`.
     # * ``pytesseract`` -- :class:`ImageLoader` OCR. The runtime Dockerfile
     #   installs the ``tesseract`` binary + the common European language
     #   packs (``-spa``, ``-eng``, ``-fra``, ...).
     # * ``langdetect``  -- best-effort language detection on extracted text
     #   for the metadata extractor.
+    # CSV / TSV / JSON loaders use only the stdlib.
     "python-docx>=1.1",
     "python-pptx>=1.0",
     "openpyxl>=3.1",
@@ -56,6 +59,8 @@ dependencies = [
     "pymupdf>=1.24",
     "beautifulsoup4>=4.12",
     "lxml>=5.0",
+    "striprtf>=0.0.26",
+    "odfpy>=1.4.1",
     "Pillow>=11.0",
     "pytesseract>=0.3.13",
     "langdetect>=1.0.9",

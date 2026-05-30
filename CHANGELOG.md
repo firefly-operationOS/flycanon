@@ -6,6 +6,14 @@ All notable changes to **flycanon** are documented here.
 
 ### Changed -- decoupled from the framework's RAG module (26.5.7)
 
+- **Dropped the Microsoft MarkItDown dependency.** The universal
+  `MarkitdownLoader` fallback is replaced with native per-format
+  SourceLoaders: `XlsxLoader` (openpyxl), `PptxLoader` (python-pptx),
+  `CsvLoader` (CSV/TSV, stdlib), `JsonLoader` (stdlib), `XmlLoader` (lxml),
+  `RtfLoader` (striprtf) and `OdfLoader` (ODT/ODS/ODP, odfpy). The registry
+  fallback is now a plain-text `TextLoader`, so an unrecognised payload
+  degrades to UTF-8 text rather than routing through MarkItDown. Added
+  `striprtf` + `odfpy` deps; dropped the agentic `markitdown` extra.
 - **Binary normalisation moved to the framework.** The local
   `core/services/binary/` package is deleted; flycanon now consumes
   `fireflyframework_agentic.content.binary` (the unified normaliser shared

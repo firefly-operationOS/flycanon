@@ -7,13 +7,15 @@ producing a normalised representation of one source: a list of
 text under each section, and a small bit of positional metadata
 (``page``, ``order``).
 
-The :class:`MarkitdownLoader` is the universal fallback -- it handles
-DOCX, PDF, XLSX, PPTX, HTML, CSV, JSON, XML, EPUB and a handful of
-other formats by routing through the :mod:`markitdown` converter and
-then through :class:`MarkdownLoader` for section detection.
-Format-specific loaders (DocxLoader, PdfLoader, HtmlLoader) are
-preserved for the cases where we want higher-fidelity section
-detection than MarkItDown's H1-H6 inference.
+Every supported format has a dedicated, dependency-light loader with no
+Microsoft MarkItDown dependency: DOCX (python-docx), PDF (PyMuPDF +
+Tesseract OCR), HTML (BeautifulSoup), Markdown / Text, XLSX (openpyxl),
+PPTX (python-pptx), CSV / TSV (stdlib), JSON (stdlib), XML (lxml), RTF
+(striprtf), ODT / ODS / ODP (odfpy), images (Tesseract OCR) and
+transcripts (WebVTT / SRT). Multi-artifact intakes (archives, emails)
+arrive pre-merged as Markdown and are loaded by :class:`MarkdownLoader`.
+The registry's fallback is a plain UTF-8 :class:`TextLoader`, so an
+unrecognised payload degrades to text rather than failing.
 """
 
 from __future__ import annotations
@@ -28,7 +30,7 @@ from typing import Protocol
 from bs4 import BeautifulSoup
 from PIL import Image as _PILImage
 
-from flycanon.core.services.ingestion.errors import CorruptSource, EmptySource
+from flycanon.core.services.ingestion.errors import CorruptSource
 from flycanon.interfaces.enums import SourceKind
 
 logger = logging.getLogger(__name__)
@@ -422,53 +424,218 @@ class TextLoader:
         return LoadedDocument(sections=[Section(path=[], body=body, order=0)], raw_text=body)
 
 
-class MarkitdownLoader:
-    """Universal converter via the ``markitdown`` package.
+class XlsxLoader:
+    """XLSX loader on top of ``openpyxl`` -- one section per worksheet.
 
-    Handles DOCX, XLSX, PPTX, PDF, HTML, CSV, JSON, XML, EPUB, RTF
-    (with libreoffice fallback), images (text-only via OCR
-    if Azure DocumentIntelligence is configured), and plain text.
-    Outputs Markdown which we then run through :class:`MarkdownLoader`
-    for section detection -- gives uniform retrieval-grade chunks
-    across every supported format with no per-format loader.
-
-    The default ``kind`` is :data:`SourceKind.unknown` because this
-    loader is the fallback in the registry; specific kinds are
-    routed to the loader registered for them and only fall through
-    to MarkItDown when nothing more specific is available.
+    Each non-empty worksheet becomes a section whose body is the cell
+    grid rendered as tab-separated rows (blank rows dropped). Formulae
+    are read as their cached values (``data_only=True``).
     """
 
-    kind = SourceKind.unknown
+    kind = SourceKind.xlsx
 
     def load(self, content: bytes | str, *, filename: str | None = None) -> LoadedDocument:
         try:
-            from markitdown import MarkItDown
-        except ImportError as exc:
-            raise CorruptSource(
-                "markitdown",
-                f"markitdown is not installed: {exc}",
-            ) from exc
-
+            from openpyxl import load_workbook
+        except ImportError as exc:  # pragma: no cover -- runtime dep guard
+            raise CorruptSource("xlsx", f"openpyxl is not installed: {exc}") from exc
         if isinstance(content, str):
             content = content.encode("utf-8")
-
-        md = MarkItDown(enable_plugins=False)
-        stream = io.BytesIO(content)
         try:
-            result = md.convert_stream(
-                stream,
-                file_extension=_ext_for(filename),
-            )
+            workbook = load_workbook(io.BytesIO(content), read_only=True, data_only=True)
         except Exception as exc:
-            raise CorruptSource("markitdown", f"conversion failed: {exc}") from exc
-        text_content = getattr(result, "text_content", None) or getattr(result, "markdown", "")
-        if not text_content or not text_content.strip():
-            raise EmptySource()
-        document = _markdown_to_document(text_content)
-        title = getattr(result, "title", None)
-        if title and not document.title:
-            document.title = title
-        return document
+            raise CorruptSource("xlsx", str(exc)) from exc
+
+        sections: list[Section] = []
+        order = 0
+        try:
+            for sheet in workbook.worksheets:
+                rows: list[str] = []
+                for row in sheet.iter_rows(values_only=True):
+                    cells = ["" if value is None else str(value) for value in row]
+                    if any(cell.strip() for cell in cells):
+                        rows.append("\t".join(cells).rstrip())
+                body = "\n".join(rows).strip()
+                if body:
+                    sections.append(Section(path=[sheet.title], body=body, order=order))
+                    order += 1
+        finally:
+            with contextlib.suppress(Exception):
+                workbook.close()
+
+        if not sections:
+            return LoadedDocument(raw_text="")
+        return LoadedDocument(sections=sections)
+
+
+class PptxLoader:
+    """PPTX loader on top of ``python-pptx`` -- one section per slide.
+
+    Walks every shape's text frame (and table cells) per slide; the
+    coalesced text becomes the slide's section body.
+    """
+
+    kind = SourceKind.pptx
+
+    def load(self, content: bytes | str, *, filename: str | None = None) -> LoadedDocument:
+        try:
+            from pptx import Presentation
+        except ImportError as exc:  # pragma: no cover -- runtime dep guard
+            raise CorruptSource("pptx", f"python-pptx is not installed: {exc}") from exc
+        if isinstance(content, str):
+            content = content.encode("utf-8")
+        try:
+            presentation = Presentation(io.BytesIO(content))
+        except Exception as exc:
+            raise CorruptSource("pptx", str(exc)) from exc
+
+        sections: list[Section] = []
+        for index, slide in enumerate(presentation.slides):
+            lines: list[str] = []
+            for shape in slide.shapes:
+                if shape.has_text_frame:
+                    for paragraph in shape.text_frame.paragraphs:
+                        text = "".join(run.text for run in paragraph.runs).strip()
+                        if text:
+                            lines.append(text)
+                if shape.has_table:
+                    for table_row in shape.table.rows:
+                        cells = [cell.text.strip() for cell in table_row.cells]
+                        if any(cells):
+                            lines.append("\t".join(cells))
+            body = "\n".join(lines).strip()
+            if body:
+                sections.append(Section(path=[f"Slide {index + 1}"], body=body, order=index))
+        if not sections:
+            return LoadedDocument(raw_text="")
+        return LoadedDocument(sections=sections)
+
+
+class CsvLoader:
+    """Delimited-text loader (CSV / TSV) on top of the stdlib ``csv`` module.
+
+    Serves both :data:`SourceKind.csv` and :data:`SourceKind.tsv`; pass
+    ``kind`` + ``delimiter`` to bind the instance. The whole grid lands as
+    one section rendered as tab-separated rows.
+    """
+
+    def __init__(self, *, kind: SourceKind = SourceKind.csv, delimiter: str = ",") -> None:
+        self.kind = kind
+        self._delimiter = delimiter
+
+    def load(self, content: bytes | str, *, filename: str | None = None) -> LoadedDocument:
+        import csv
+
+        if isinstance(content, bytes):
+            content = content.decode("utf-8", errors="replace")
+        try:
+            rows = list(csv.reader(io.StringIO(content), delimiter=self._delimiter))
+        except csv.Error as exc:
+            raise CorruptSource(self.kind.value, str(exc)) from exc
+        lines = ["\t".join(cell.strip() for cell in row) for row in rows if any(cell.strip() for cell in row)]
+        body = "\n".join(lines).strip()
+        if not body:
+            return LoadedDocument(raw_text="")
+        return LoadedDocument(sections=[Section(path=[], body=body, order=0)], raw_text=body)
+
+
+class JsonLoader:
+    """JSON loader -- pretty-prints valid JSON; falls back to raw text.
+
+    Pretty-printing (sorted-free, indented) gives the chunker stable,
+    line-oriented structure to split on without inventing a schema.
+    """
+
+    kind = SourceKind.json_
+
+    def load(self, content: bytes | str, *, filename: str | None = None) -> LoadedDocument:
+        import json
+
+        if isinstance(content, bytes):
+            content = content.decode("utf-8", errors="replace")
+        try:
+            body = json.dumps(json.loads(content), indent=2, ensure_ascii=False)
+        except (ValueError, TypeError):
+            body = content.strip()
+        body = body.strip()
+        if not body:
+            return LoadedDocument(raw_text="")
+        return LoadedDocument(sections=[Section(path=[], body=body, order=0)], raw_text=body)
+
+
+class XmlLoader:
+    """XML loader -- extracts visible text via ``lxml`` (recovering parser).
+
+    Falls back to the raw decoded text when the document cannot be parsed
+    so malformed XML still ingests as plain text.
+    """
+
+    kind = SourceKind.xml
+
+    def load(self, content: bytes | str, *, filename: str | None = None) -> LoadedDocument:
+        raw = content.decode("utf-8", errors="replace") if isinstance(content, bytes) else content
+        body = raw.strip()
+        try:
+            from lxml import etree
+
+            root = etree.fromstring(raw.encode("utf-8"), parser=etree.XMLParser(recover=True))
+            if root is not None:
+                parts = [text.strip() for text in root.itertext() if text and text.strip()]
+                if parts:
+                    body = "\n".join(parts)
+        except Exception:  # noqa: BLE001 -- malformed XML degrades to raw text
+            pass
+        if not body:
+            return LoadedDocument(raw_text="")
+        return LoadedDocument(sections=[Section(path=[], body=body, order=0)], raw_text=body)
+
+
+class RtfLoader:
+    """RTF loader on top of ``striprtf`` (pure-Python, no LibreOffice)."""
+
+    kind = SourceKind.rtf
+
+    def load(self, content: bytes | str, *, filename: str | None = None) -> LoadedDocument:
+        try:
+            from striprtf.striprtf import rtf_to_text
+        except ImportError as exc:  # pragma: no cover -- runtime dep guard
+            raise CorruptSource("rtf", f"striprtf is not installed: {exc}") from exc
+        raw = content.decode("utf-8", errors="replace") if isinstance(content, bytes) else content
+        try:
+            body = (rtf_to_text(raw) or "").strip()
+        except Exception as exc:
+            raise CorruptSource("rtf", str(exc)) from exc
+        if not body:
+            return LoadedDocument(raw_text="")
+        return LoadedDocument(sections=[Section(path=[], body=body, order=0)], raw_text=body)
+
+
+class OdfLoader:
+    """OpenDocument loader (ODT / ODS / ODP) on top of ``odfpy``.
+
+    Extracts the visible text of the document body via
+    ``odf.teletype.extractText``. Bind the served kind via ``kind``.
+    """
+
+    def __init__(self, *, kind: SourceKind) -> None:
+        self.kind = kind
+
+    def load(self, content: bytes | str, *, filename: str | None = None) -> LoadedDocument:
+        try:
+            from odf import teletype
+            from odf.opendocument import load as odf_load
+        except ImportError as exc:  # pragma: no cover -- runtime dep guard
+            raise CorruptSource(self.kind.value, f"odfpy is not installed: {exc}") from exc
+        if isinstance(content, str):
+            content = content.encode("utf-8")
+        try:
+            document = odf_load(io.BytesIO(content))
+            body = (teletype.extractText(document.body) or "").strip()
+        except Exception as exc:
+            raise CorruptSource(self.kind.value, str(exc)) from exc
+        if not body:
+            return LoadedDocument(raw_text="")
+        return LoadedDocument(sections=[Section(path=[], body=body, order=0)], raw_text=body)
 
 
 class ImageLoader:
@@ -575,8 +742,8 @@ class LoaderRegistry:
         self._loaders: dict[SourceKind, SourceLoader] = {}
         self._fallback = fallback
 
-    def register(self, loader: SourceLoader) -> None:
-        self._loaders[loader.kind] = loader
+    def register(self, loader: SourceLoader, *, kind: SourceKind | None = None) -> None:
+        self._loaders[kind or loader.kind] = loader
 
     def set_fallback(self, loader: SourceLoader) -> None:
         self._fallback = loader
@@ -594,11 +761,13 @@ class LoaderRegistry:
 def default_registry() -> LoaderRegistry:
     """Build the registry with every shipped loader pre-installed.
 
-    High-fidelity loaders are registered for the formats where they
-    out-perform MarkItDown; everything else falls through to the
-    universal :class:`MarkitdownLoader`.
+    Every format flycanon ingests has a dedicated, non-Microsoft loader.
+    The fallback is a plain UTF-8 :class:`TextLoader`, so an unrecognised
+    payload degrades to text extraction rather than failing. Multi-artifact
+    intakes (archives, emails) arrive pre-merged as Markdown and are loaded
+    by :class:`MarkdownLoader`.
     """
-    registry = LoaderRegistry(fallback=MarkitdownLoader())
+    registry = LoaderRegistry(fallback=TextLoader())
     registry.register(DocxLoader())
     registry.register(PdfLoader())
     registry.register(HtmlLoader())
@@ -606,9 +775,20 @@ def default_registry() -> LoaderRegistry:
     registry.register(TextLoader())
     registry.register(TranscriptLoader())
     registry.register(ImageLoader())
-    # XLSX / PPTX / RTF / ODT / ODS / ODP / CSV / EPUB / JSON / XML
-    # fall through to the MarkItDown fallback -- no per-format loader
-    # required.
+    registry.register(XlsxLoader())
+    registry.register(PptxLoader())
+    registry.register(CsvLoader())
+    registry.register(CsvLoader(kind=SourceKind.tsv, delimiter="\t"))
+    registry.register(JsonLoader())
+    registry.register(XmlLoader())
+    registry.register(RtfLoader())
+    registry.register(OdfLoader(kind=SourceKind.odt))
+    registry.register(OdfLoader(kind=SourceKind.ods))
+    registry.register(OdfLoader(kind=SourceKind.odp))
+    # Multi-artifact intakes (archives, emails) are merged into one Markdown
+    # document by IntakeService before ingestion -- load with the Markdown
+    # section detector rather than the plain-text fallback.
+    registry.register(MarkdownLoader(), kind=SourceKind.archive)
     return registry
 
 
@@ -650,9 +830,3 @@ def _markdown_to_document(text: str) -> LoadedDocument:
         current_body.append(line)
     _flush()
     return LoadedDocument(sections=sections)
-
-
-def _ext_for(filename: str | None) -> str | None:
-    if not filename or "." not in filename:
-        return None
-    return "." + filename.rsplit(".", 1)[1].lower()

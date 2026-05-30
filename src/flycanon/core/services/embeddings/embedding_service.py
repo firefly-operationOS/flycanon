@@ -6,11 +6,11 @@ implementation shipped by ``fireflyframework_agentic.embeddings`` and
 exposes a single :meth:`embed` method the ingestion / query stages
 call.
 
-Provider selection is deliberately narrow at this stage -- only the
-embedders the corpus-search extra installs (OpenAI, Cohere, Google,
-Mistral, Voyage, Azure OpenAI, Bedrock, Ollama) are wired. Adding a
-new provider is a two-line change: import the class, add a branch in
-:func:`build_embedding_service`.
+Provider selection is deliberately narrow at this stage -- the embedder
+adapters exposed by ``fireflyframework_agentic.embeddings`` (OpenAI,
+Cohere, Google, Mistral, Voyage, Azure OpenAI, Bedrock, Ollama) are
+wired. Adding a new provider is a two-line change: import the class, add
+a branch in :func:`build_embedding_service`.
 """
 
 from __future__ import annotations

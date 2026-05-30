@@ -9,9 +9,9 @@ A chunk carries:
 * a serialised hint for the loader's positional bookkeeping
   (``positional``) so callers can reconstruct a citation context.
 
-The BM25 projection lives in the agentic framework's ``SqliteCorpus``
-side-table (FTS5); the row here is the system-of-record for the
-chunk's content + provenance.
+The BM25 projection lives in Postgres -- the generated ``tsv`` column on
+``canon_chunks`` queried by :class:`PostgresCorpus`; the row here is the
+system-of-record for the chunk's content + provenance.
 """
 
 from __future__ import annotations

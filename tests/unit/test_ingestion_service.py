@@ -55,9 +55,9 @@ def test_ingest_markdown_emits_chunks_with_section_path(fixtures_dir):
 
 
 def test_ingest_unknown_kind_falls_through_to_universal_loader():
-    # The default registry installs ``MarkitdownLoader`` as the
-    # fallback, so an unknown kind no longer raises -- it routes
-    # through MarkItDown like any other format. We assert the source
+    # The default registry installs a plain-text ``TextLoader`` as the
+    # fallback (no Microsoft MarkItDown), so an unknown kind does not
+    # raise -- it degrades to UTF-8 text extraction. We assert the source
     # is ingested rather than rejected.
     source = SourceRow(
         id="src-1",
