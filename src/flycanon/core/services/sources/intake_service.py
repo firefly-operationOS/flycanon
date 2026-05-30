@@ -514,7 +514,7 @@ class IntakeService:
         merged_sections: list[str] = []
         kind = SourceKind.archive
         for index, artifact in enumerate(artifacts):
-            loader = self._loaders.get(artifact.kind)
+            loader = self._loaders.get(SourceKind(artifact.kind))
             if loader is None:
                 logger.warning(
                     "intake skipping artifact kind=%s filename=%s -- no loader",

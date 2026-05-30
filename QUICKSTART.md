@@ -48,8 +48,8 @@ task health:readiness
 The intake pipeline accepts any file. It hashes the bytes
 (idempotency), sniffs the media type from the magic bytes, routes
 the payload through the binary normaliser, then parses + chunks the
-content, embeds every chunk, and indexes both the BM25 (SQLite FTS5)
-and vector (pgvector) projections.
+content, embeds every chunk, and indexes both the BM25 (Postgres
+`tsvector` + GIN) and dense vector (pgvector) projections.
 
 DOCX:
 

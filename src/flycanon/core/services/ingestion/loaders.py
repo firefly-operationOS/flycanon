@@ -494,12 +494,12 @@ class PptxLoader:
             lines: list[str] = []
             for shape in slide.shapes:
                 if shape.has_text_frame:
-                    for paragraph in shape.text_frame.paragraphs:
+                    for paragraph in shape.text_frame.paragraphs:  # pyright: ignore[reportAttributeAccessIssue]
                         text = "".join(run.text for run in paragraph.runs).strip()
                         if text:
                             lines.append(text)
                 if shape.has_table:
-                    for table_row in shape.table.rows:
+                    for table_row in shape.table.rows:  # pyright: ignore[reportAttributeAccessIssue]
                         cells = [cell.text.strip() for cell in table_row.cells]
                         if any(cells):
                             lines.append("\t".join(cells))
@@ -576,7 +576,7 @@ class XmlLoader:
         raw = content.decode("utf-8", errors="replace") if isinstance(content, bytes) else content
         body = raw.strip()
         try:
-            from lxml import etree
+            from lxml import etree  # pyright: ignore[reportAttributeAccessIssue]
 
             root = etree.fromstring(raw.encode("utf-8"), parser=etree.XMLParser(recover=True))
             if root is not None:

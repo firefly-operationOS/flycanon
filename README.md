@@ -13,7 +13,7 @@ with citations — all behind a single HTTP service.
 [![pyfly](https://img.shields.io/badge/runtime-fireflyframework--pyfly-orange)](https://github.com/fireflyframework/fireflyframework-pyfly)
 [![agentic](https://img.shields.io/badge/genai-fireflyframework--agentic-purple)](https://github.com/fireflyframework/fireflyframework-agentic)
 [![OpenAPI](https://img.shields.io/badge/api-openapi%203.1-green)](docs/api-reference.md)
-[![pgvector](https://img.shields.io/badge/default--vector--store-pgvector-336791)](docs/architecture.md#pluggable-retrieval-backends)
+[![pgvector](https://img.shields.io/badge/vector--store-pgvector--only-336791)](docs/architecture.md#retrieval-backend-pgvector-only)
 [![Version](https://img.shields.io/badge/version-26.5.6-green.svg)](#)
 [![License](https://img.shields.io/badge/license-Proprietary-lightgrey.svg)](LICENSE)
 
@@ -68,7 +68,7 @@ object that carries, for every interaction:
 | **Knowledge versions**      | Append-only revisions of a knowledge item. Citations to source chunks travel with the edge.                                                    |
 | **Knowledge graph**         | Typed edges between items (`related` / `depends_on` / `conflicts_with` / `replaces`) over `/api/v1/knowledge/{id}/relations`, plus a whole-canon view at `/api/v1/knowledge:graph` (JSON or `Accept: text/vnd.mermaid`). Conflict detection materialises `conflicts_with` edges automatically. |
 | **Candidates**              | Pre-canonical LLM proposals tied to a source. Accept / reject lifecycle materialises them into the knowledge chain.                            |
-| **Hybrid retrieval**        | `SearchResponse` with BM25 (Postgres `tsvector` + GIN by default; SQLite FTS5 when the vector backend lives elsewhere) + dense vectors fused via Reciprocal Rank Fusion (RRF), optional cross-encoder rerank (Cohere / Voyage), and optional LLM query expansion. Each hit carries `chunk_id`, `source_id`, `source_filename`, `source_title`, `source_kind`, `source_uri`, `section_path`, `page`, the matching `content`, and the fused `score` — UIs can render citation labels without a second `GET /api/v1/sources/{id}`. |
+| **Hybrid retrieval**        | `SearchResponse` with BM25 (Postgres `tsvector` + GIN) + dense vectors (`pgvector`) fused via Reciprocal Rank Fusion (RRF), optional cross-encoder rerank (Cohere / Voyage), and optional LLM query expansion. Each hit carries `chunk_id`, `source_id`, `source_filename`, `source_title`, `source_kind`, `source_uri`, `section_path`, `page`, the matching `content`, and the fused `score` — UIs can render citation labels without a second `GET /api/v1/sources/{id}`. |
 | **Grounded RAG answers**    | `AnswerResponse` with the answer + citation list (same enriched `Hit` shape — filename / title / kind / section / page populated), `model`, `elapsed_ms`. `POST /api/v1/query:stream` emits the same payload as Server-Sent Events. A grounded "I don't know" is `answer == ""` with empty citations — flycanon never hallucinates. |
 | **Conversations**           | Multi-turn threads at `/api/v1/conversations/...` with rolling summary + last-N-turn context windowing. Each turn returns the same enriched citation set as `/query`; `:suggest` proposes 3-5 grounded follow-up questions. |
 | **Provenance**              | Resolved citation graph for one knowledge version plus the source summaries it touches plus the version chain of its item.                     |
@@ -99,12 +99,12 @@ matrix before the parse / chunk / embed / index pipeline runs:
 | **PDF — Image (scanned)** | Scanned contracts, fax output, photographed pages, mobile-camera captures — pages are raster images of the original | **Phase 2 (OCR fallback):** pages under `_MIN_CHARS_PER_PAGE` rasterised by PyMuPDF at `_OCR_DPI` (200) and OCR'd via Tesseract (`pytesseract.image_to_string`) — engine selectable via `FLYCANON_PDF_OCR_ENGINE` (`tesseract` default; `docling` for layout-aware OCR with the `docling` extra). Languages default to `eng+spa`, override via `FLYCANON_OCR_LANG`. |
 | **PDF — Hybrid** | Mixed: typed body + scanned signature page, or any blend of digital and image pages | Phase 1 runs on every page; Phase 2 only fires for pages flagged as image-only. The two phases compose page-by-page. |
 | PDF — guard rail | Encrypted or corrupt PDFs                       | Rejected up-front by `PdfGuard` (lightweight `pypdf` pre-flight) with `error_code=encrypted_pdf` / `corrupt_source`.                                              |
-| Office           | DOCX / XLSX / PPTX / ODT / ODS / ODP / RTF        | `office_converter=none` (default) feeds MarkItDown directly; `gotenberg` (HTTP sidecar) or `libreoffice` (in-container `soffice`) render to PDF first.            |
+| Office           | DOCX / XLSX / PPTX / ODT / ODS / ODP / RTF        | `office_converter=none` (default) uses native per-format loaders (python-docx / openpyxl / python-pptx / odfpy / striprtf); `gotenberg` (HTTP sidecar) or `libreoffice` (in-container `soffice`) render to PDF first.            |
 | Raster images    | PNG / JPG / WEBP                                  | Pass-through to OCR (Tesseract, multi-language).                                                                                                                  |
 | Converted images | HEIC / AVIF / TIFF / SVG / BMP                    | Pillow + pillow-heif + cairosvg → PNG, then OCR.                                                                                                                  |
 | Archives         | ZIP / 7Z / TAR / TAR.GZ / TAR.BZ2 / EPUB          | Expanded recursively (capped at `binary_max_recursion_depth` and `binary_max_expanded_files`). Each child re-enters the normaliser.                               |
 | Emails           | EML / MSG                                         | Body + each attachment exposed as a separate artefact carrying `parent_artifact` ancestry.                                                                        |
-| Web              | HTML / XHTML                                      | MarkItDown.                                                                                                                                                       |
+| Web              | HTML / XHTML                                      | BeautifulSoup-backed `HtmlLoader`.                                                                                                                                |
 | Transcripts      | WebVTT / SRT                                      | Cue-aware loader.                                                                                                                                                 |
 | Unknown          | _everything else_                                 | `UnsupportedBinaryError` → `IngestionFailed` event with stable `code`.                                                                                            |
 
@@ -115,36 +115,30 @@ section markers, so chunks remain attributable via
 
 ---
 
-## Backend-agnostic retrieval
+## Postgres-native retrieval
 
 The BM25 corpus is co-located with the dense projection so hybrid
-retrieval is single-host in the default deployment:
+retrieval is a single-host, Postgres-native operation:
 
-- **`pgvector` (default)** — BM25 rides on a `tsvector` + GIN index
-  on `canon_chunks.tsv` (a Postgres GENERATED column derived from
-  `content`). No extra service, no SQLite file — both projections
-  live in the same operational Postgres. Text-search config is
-  `simple` by default (multilingual); switch to `english` /
-  `spanish` / … via `FLYCANON_BM25_TEXT_SEARCH_CONFIG`.
-- **`sqlite-vec` / `chroma` / `qdrant` / `pinecone` / `memory`** —
-  BM25 falls back to the file-backed SQLite FTS5 corpus shipped by
-  `fireflyframework-agentic` (portable, single-file, no extra
-  service).
+- **BM25** rides on a `tsvector` + GIN index on `canon_chunks.tsv`
+  (a Postgres GENERATED column derived from `content`). No extra
+  service, no SQLite file. Text-search config is `simple` by default
+  (multilingual); switch to `english` / `spanish` / … via
+  `FLYCANON_BM25_TEXT_SEARCH_CONFIG`.
+- **Dense vectors** live in `pgvector` in the same operational
+  Postgres — an HNSW index on `vector_cosine_ops`, tuneable `m` /
+  `ef_construction`.
 
-The dense projection is chosen at boot via `FLYCANON_VECTOR_STORE`:
+`FLYCANON_VECTOR_STORE` accepts only `pgvector`:
 
 | Backend      | Use case                                                                                                                                |
 | ------------ | --------------------------------------------------------------------------------------------------------------------------------------- |
-| **`pgvector`**   | **Default.** PostgreSQL + pgvector extension. HNSW index on `vector_cosine_ops`, tuneable `m` / `ef_construction`. Same operational Postgres as the canonical store AND the BM25 projection. |
-| `chroma`     | Self-hosted Chroma server. Namespaced by `FLYCANON_CHROMA_COLLECTION`.                                                                  |
-| `qdrant`     | Self-hosted or Qdrant Cloud. `FLYCANON_QDRANT_URL` + optional API key.                                                                  |
-| `pinecone`   | Pinecone Serverless. `FLYCANON_PINECONE_INDEX` + `FLYCANON_PINECONE_API_KEY`.                                                            |
-| `sqlite-vec` | Laptop / single-process deployments. Same SQLite file as the FTS5 BM25 index.                                                           |
-| `memory`     | Tests only — evicted on process exit.                                                                                                   |
+| **`pgvector`**   | The only supported value. PostgreSQL + pgvector extension. HNSW index on `vector_cosine_ops`, tuneable `m` / `ef_construction`. Same operational Postgres as the canonical store AND the BM25 projection. |
 
-Switching backends is a config change — the application code only
-sees `VectorStoreProtocol`. Fusion always happens via Reciprocal
-Rank Fusion over the two channels.
+The `sqlite-vec` / `chroma` / `qdrant` / `pinecone` / `memory`
+backends and the file-backed SQLite FTS5 corpus fallback were
+removed in the pgvector-only RAG migration. Fusion always happens
+via Reciprocal Rank Fusion over the two channels.
 
 ---
 
@@ -273,7 +267,7 @@ public class CopilotService {
 | Document | Read it when… |
 |----------|---------------|
 | [QUICKSTART.md](QUICKSTART.md) | You want your first ingest + search + answer in ten minutes (HTTP / curl). |
-| [docs/architecture.md](docs/architecture.md) | You need the data model, the binary-normaliser routing matrix, the pluggable retrieval backend matrix, the dependency arrows. |
+| [docs/architecture.md](docs/architecture.md) | You need the data model, the binary-normaliser routing matrix, the Postgres-native retrieval design, the dependency arrows. |
 | [docs/pipeline.md](docs/pipeline.md) | You're touching the orchestrator, adding a new stage, or chasing a slow ingest. |
 | [docs/api-reference.md](docs/api-reference.md) | You're integrating with the HTTP API and need every endpoint, shape, and status code. |
 | [docs/payload-reference.md](docs/payload-reference.md) | You're composing the request payload — every field, option, and example. |

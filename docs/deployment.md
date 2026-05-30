@@ -102,7 +102,7 @@ required for production:
 | `FLYCANON_ANSWER_MODEL` | `<provider>:<model>` for the RAG answer endpoint (default `anthropic:claude-sonnet-4-6`) | **Yes** for `/api/v1/query`, optional for ingestion-only deployments. |
 | `FLYCANON_ANSWER_FALLBACK_MODEL` | Used when the primary model errors (e.g. provider 5xx, rate limit). | Recommended. |
 | Provider API keys | `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `VOYAGEAI_API_KEY`, `COHERE_API_KEY`, ... -- read by `fireflyframework-agentic` from env at boot. | As needed for your provider mix. |
-| `FLYCANON_VECTOR_STORE` | `pgvector` (default), `sqlite-vec`, `chroma`, `qdrant`, `pinecone`, `memory`. | Defaults to `pgvector`. |
+| `FLYCANON_VECTOR_STORE` | `pgvector` -- the only supported value (the `sqlite-vec` / `chroma` / `qdrant` / `pinecone` / `memory` backends were removed in the pgvector-only RAG migration). | Defaults to `pgvector`. |
 | `FLYCANON_EDA_ADAPTER` | `postgres` (default -- durable outbox + LISTEN/NOTIFY), `memory`, `redis`, `kafka`. | Defaults to `postgres`. |
 | `FLYCANON_API_KEYS` | Comma-separated static API keys. When set, every `/api/v1/*` request requires `Authorization: Bearer <key>`. | Optional. |
 | `FLYCANON_CORS_ORIGINS` | Comma-separated origins for `Access-Control-Allow-Origin`. | Optional. |
@@ -189,13 +189,12 @@ for the rationale; the integration suite
 
 ### BM25 projection
 
-The default `pgvector` backend is **Postgres-native** for both
-channels: BM25 rides on a `tsvector` + GIN index on `canon_chunks.tsv`
-(generated column from `canon_chunks.content`). No SQLite file is
-involved -- the deploy needs Postgres only. When the vector backend
-is anything else (`sqlite-vec`, `chroma`, `qdrant`, `pinecone`), the
-BM25 corpus falls back to a file-backed SQLite FTS5 corpus
-(`FLYCANON_CORPUS_PATH`); pin that to a persistent volume.
+flycanon is **Postgres-native** for both retrieval channels: BM25 rides
+on a `tsvector` + GIN index on `canon_chunks.tsv` (generated column from
+`canon_chunks.content`), and dense vectors live in `pgvector` in the same
+Postgres. No SQLite file is involved -- the deploy needs Postgres only.
+The SQLite FTS5 corpus fallback (for non-pgvector backends) was removed
+in the pgvector-only migration.
 
 ---
 
@@ -220,12 +219,13 @@ deploys that don't need layout-aware OCR.
 ## Office conversion
 
 Office formats (DOCX / XLSX / PPTX / ODT / ODS / ODP / RTF) are read
-via the universal MarkItDown loader by default. For high-fidelity
-extraction you can render Office docs to PDF first:
+via native per-format loaders (python-docx, openpyxl, python-pptx,
+odfpy, striprtf) by default. For high-fidelity extraction you can
+render Office docs to PDF first:
 
 | Converter | How | Trade-off |
 |-----------|-----|-----------|
-| `none` (default) | MarkItDown directly. | Zero extra service. Markdown fidelity for tables / images is best-effort. |
+| `none` (default) | Native per-format loaders (python-docx / openpyxl / python-pptx / odfpy / striprtf). | Zero extra service. Text + structure fidelity for tables / images is best-effort. |
 | `gotenberg` | HTTP sidecar (`gotenberg/gotenberg:8` -- see docker-compose). | High fidelity, distroless runtime stays clean. Adds one service. |
 | `libreoffice` | In-container `soffice` subprocess. | High fidelity, no extra service. Bloats the runtime image (~1 GB). Build a derived image with `libreoffice-core`. |
 
@@ -335,9 +335,9 @@ resume:
 * `canon_candidates` + `canon_audit_events` + `canon_taxonomy_nodes`
 * The `pyfly_eda_outbox` for in-flight EDA messages
 
-The file-backed BM25 corpus (`FLYCANON_CORPUS_PATH`) only matters
-for `sqlite-vec` deployments; for the default `pgvector` topology,
-the BM25 projection is in Postgres too, so the pg_dump is sufficient.
+The BM25 projection lives in Postgres (`canon_chunks.tsv` + GIN
+index), so the pg_dump captures it too -- there is no separate
+file-backed corpus to back up.
 
 ---
 

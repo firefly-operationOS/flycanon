@@ -481,8 +481,7 @@ else has a working default. Every row was verified against
 | `FLYCANON_QUERY_EXPANSION_ENABLED` | no | `false` | Multi-query expansion (+1 LLM call per `/search` and `/query`). |
 | `FLYCANON_PII_SCANNER` | no | `regex` | `regex`, `presidio`, or `disabled`. |
 | `FLYCANON_PII_POLICY` | no | `warn` | `warn`, `redact`, `reject`. |
-| `FLYCANON_VECTOR_STORE` | no | `pgvector` | `pgvector` (default; HNSW in same Postgres), `sqlite-vec`, `chroma`, `qdrant`, `pinecone`, `memory`. |
-| `FLYCANON_CORPUS_PATH` | no | `./local_data/corpus.db` | Only material for `sqlite-vec`; for `pgvector` the BM25 projection rides on `tsvector` in Postgres. |
+| `FLYCANON_VECTOR_STORE` | no | `pgvector` | `pgvector` is the only supported value (HNSW in same Postgres; BM25 rides on `tsvector` + GIN). The `sqlite-vec` / `chroma` / `qdrant` / `pinecone` / `memory` backends were removed in the pgvector-only RAG migration. |
 | `FLYCANON_PGVECTOR_TABLE` | no | `canon_chunk_vectors` | |
 | `FLYCANON_PGVECTOR_HNSW_M` | no | `16` | HNSW degree. |
 | `FLYCANON_PGVECTOR_HNSW_EF_CONSTRUCTION` | no | `64` | HNSW build-time candidate list. |
@@ -493,7 +492,7 @@ else has a working default. Every row was verified against
 | `FLYCANON_BINARY_NORMALIZE_ENABLED` | no | `true` | Master kill-switch for the binary normaliser. |
 | `FLYCANON_BINARY_MAX_RECURSION_DEPTH` | no | `4` | Archive / email expansion. |
 | `FLYCANON_BINARY_MAX_EXPANDED_FILES` | no | `50` | Defends against zip-bomb fan-out. |
-| `FLYCANON_OFFICE_CONVERTER` | no | `none` | `none` (MarkItDown), `gotenberg`, `libreoffice`. |
+| `FLYCANON_OFFICE_CONVERTER` | no | `none` | `none` (native per-format loaders: python-docx / openpyxl / python-pptx / odfpy / striprtf), `gotenberg`, `libreoffice`. |
 | `FLYCANON_GOTENBERG_URL` | only if `OFFICE_CONVERTER=gotenberg` | `http://gotenberg:3000` | Sidecar URL. |
 | `FLYCANON_OCR_LANG` | no | `eng+spa` | `+`-joined ISO 639-2/B codes. |
 | `FLYCANON_API_KEYS` | no | (empty) | Comma-separated static API keys (open if empty -- guard with the IdP integration in `pyfly.yaml` instead). |

@@ -21,9 +21,11 @@ models/       SQLAlchemy entities + repositories
 The framework runtime lives in
 [`fireflyframework-pyfly`](https://github.com/fireflyframework/fireflyframework-pyfly)
 (DI, CQRS, EDA, web, observability, resilience, actuator). The
-agentic substrate -- FireflyAgent over pydantic-ai, the hybrid
-retrieval primitives, the corpus + pluggable vector stores -- lives
+agentic substrate -- FireflyAgent over pydantic-ai and the unified
+binary normaliser (`fireflyframework_agentic.content.binary`) -- lives
 in [`fireflyframework-agentic`](https://github.com/fireflyframework/fireflyframework-agentic).
+flycanon vendors its own hybrid-retrieval primitives in
+`core/services/retrieval/fusion.py`.
 flycanon's job is the composition: take raw bytes in any format,
 ground them in a canonical version chain, and expose retrieval + RAG
 over the result.
@@ -47,11 +49,9 @@ auditable. Knowledge content is never mutated in place -- updates
 append a new `canon_knowledge_versions` row and flip the previous one
 to `superseded`. The BM25 projection is Postgres-native by default
 (a `tsvector` GENERATED column on `canon_chunks.content` with a GIN
-index -- see migration `0003_bm25_tsv`) so both retrieval channels
-share the same operational Postgres; the file-backed SQLite FTS5
-corpus is only used when the `sqlite-vec` vector backend is selected.
-The dense vector projection is fully pluggable -- see _Pluggable
-retrieval backends_ below.
+index -- see migration `0003_bm25_tsv`) and the dense projection
+lives in `pgvector`, so both retrieval channels share the same
+operational Postgres -- see _Retrieval backend (pgvector-only)_ below.
 
 Every `canon_*` row also carries `(tenant_id, workspace_id)` as the
 multitenancy scope -- see _Workspace + multitenancy_ below.
@@ -169,8 +169,9 @@ and call the REST API.
 
 ## Universal binary normaliser
 
-`core/services/binary/normalizer.py` is the front door for every
-inbound artefact. It detects the media type from the magic bytes
+The unified binary normaliser from
+`fireflyframework_agentic.content.binary` (shared with flydocs) is the
+front door for every inbound artefact. It detects the media type from the magic bytes
 (stdlib `mimetypes` + a curated header table + ZIP central-directory
 inspection to disambiguate Office formats from generic archives) and
 routes the payload through a fixed matrix:
@@ -181,12 +182,12 @@ routes the payload through a fixed matrix:
 | PDF -- digital text | Born-digital PDFs (Word / LibreOffice / LaTeX exports, browser "Save as PDF", reporting output) | **Phase 1 (PyMuPDF text-layer):** `pymupdf.get_text()` per page returns the encoded text stream in reading order. No rendering, microseconds per page. |
 | PDF -- image / scanned | Scanned contracts, photographed pages, fax output, mobile camera captures (raster pages, no encoded text) | **Phase 2 (OCR fallback):** pages under `_MIN_CHARS_PER_PAGE` rasterised by PyMuPDF at `_OCR_DPI` and piped through Tesseract (`pytesseract.image_to_string`) or Docling (with `FLYCANON_PDF_OCR_ENGINE=docling`). Composes with Phase 1 page-by-page for hybrid PDFs. |
 | PDF -- guard rail | Encrypted or corrupt PDFs | Rejected up-front by `PdfGuard` (lightweight `pypdf` pre-flight) with `error_code=encrypted_pdf` / `corrupt_source`. |
-| Office          | DOCX / XLSX / PPTX / ODT / ODS / ODP / RTF | `office_converter=none` (default) feeds MarkItDown directly; `gotenberg` (HTTP sidecar) or `libreoffice` (in-container `soffice`) render to PDF first. |
+| Office          | DOCX / XLSX / PPTX / ODT / ODS / ODP / RTF | `office_converter=none` (default) uses native per-format loaders (python-docx / openpyxl / python-pptx / odfpy / striprtf); `gotenberg` (HTTP sidecar) or `libreoffice` (in-container `soffice`) render to PDF first. |
 | Raster images   | PNG / JPG / WEBP                          | Pass-through to `ImageLoader` (Tesseract OCR).                           |
 | Converted images| HEIC / AVIF / TIFF / SVG / BMP            | Pillow + pillow-heif + cairosvg -> PNG, then OCR.                        |
 | Archives        | ZIP / 7Z / TAR / TAR.GZ / TAR.BZ2         | Expanded recursively (capped at `binary_max_recursion_depth` and `binary_max_expanded_files`). Each child re-enters the normaliser. |
 | Emails          | EML / MSG                                 | Body + each attachment exposed as a separate artefact carrying `parent_artifact` ancestry. |
-| Web             | HTML / XHTML                              | MarkItDown.                                                              |
+| Web             | HTML / XHTML                              | BeautifulSoup-backed `HtmlLoader`.                                       |
 | Transcripts     | WebVTT / SRT                              | `TranscriptLoader` (cue-aware).                                          |
 | Unknown         | _everything else_                         | `UnsupportedBinaryError` -> `IngestionFailed` event with stable `code`.  |
 
@@ -195,37 +196,27 @@ into a single Markdown document with `## Artifact: <filename>`
 section markers, so chunks remain attributable to their originating
 artefact via `metadata.parent_artifact`.
 
-## Pluggable retrieval backends
+## Retrieval backend (pgvector-only)
 
 The BM25 corpus is co-located with the dense projection so hybrid
-retrieval is a single-host operation in the default deployment:
+retrieval is a single-host, Postgres-native operation:
 
-* `FLYCANON_VECTOR_STORE=pgvector` (default) -- BM25 rides on a
-  `tsvector` + GIN index on `canon_chunks.tsv` (a Postgres GENERATED
-  column derived from `content`; see migration `0003_bm25_tsv`). No
-  extra service, no SQLite file -- both projections live in the same
-  operational Postgres. The text-search config defaults to `simple`
-  (multilingual, no stemming); flip
+* BM25 rides on a `tsvector` + GIN index on `canon_chunks.tsv` (a
+  Postgres GENERATED column derived from `content`; see migration
+  `0003_bm25_tsv`). No SQLite file is involved. The text-search config
+  defaults to `simple` (multilingual, no stemming); flip
   `FLYCANON_BM25_TEXT_SEARCH_CONFIG` to `english` / `spanish` / &hellip;
   for language-aware stemming.
-* Anything else (`sqlite-vec`, `chroma`, `qdrant`, `pinecone`,
-  `memory`) -- BM25 falls back to the file-backed SQLite FTS5 corpus
-  shipped by `fireflyframework-agentic`.
+* The dense projection lives in `pgvector` in the same operational
+  Postgres -- an HNSW index on `vector_cosine_ops`, tuneable `m` /
+  `ef_construction`.
 
-The dense projection is chosen at boot via `FLYCANON_VECTOR_STORE`:
-
-| Value         | Use case                                                                 |
-|---------------|--------------------------------------------------------------------------|
-| `pgvector`    | **Default.** PostgreSQL + pgvector extension. HNSW index on `vector_cosine_ops`, tuneable `m` / `ef_construction`. Lives in the same operational Postgres as the canonical store. |
-| `chroma`      | Self-hosted Chroma server. Namespaced by `FLYCANON_CHROMA_COLLECTION`.    |
-| `qdrant`      | Self-hosted or Qdrant Cloud. `FLYCANON_QDRANT_URL` + optional API key.   |
-| `pinecone`    | Pinecone Serverless. `FLYCANON_PINECONE_INDEX` + `FLYCANON_PINECONE_API_KEY`. |
-| `sqlite-vec`  | Laptop / SBOM / single-process deployments. Same SQLite file as the FTS5 index. |
-| `memory`      | Tests only -- evicted on process exit.                                   |
-
-Switching backends is a config change -- the application code only
-sees `VectorStoreProtocol`. Fusion always happens via Reciprocal
-Rank Fusion (RRF) over the two channels.
+`FLYCANON_VECTOR_STORE` accepts only `pgvector`; the `sqlite-vec` /
+`chroma` / `qdrant` / `pinecone` / `memory` backends and the
+file-backed SQLite FTS5 corpus fallback were removed in the
+pgvector-only RAG migration. Both projections live in the same
+operational Postgres, and fusion always happens via Reciprocal Rank
+Fusion (RRF) over the two channels.
 
 ## Layers
 
@@ -253,15 +244,12 @@ Rank Fusion (RRF) over the two channels.
         +----------------------------+                   +--------------------------+
         |  models/repositories       |                   |  HybridRetriever:        |
         |  AsyncEngine + Repository  |                   |  - Postgres tsv+GIN BM25 |
-        |  shared across the layer   |                   |    (file-backed FTS5     |
-        |                            |                   |    only for sqlite-vec)  |
-        |                            |                   |  - pluggable vector store|
+        |  shared across the layer   |                   |  - pgvector dense store  |
         +----------------------------+                   +--------------------------+
                       |                                              |
                       v                                              v
-                Postgres (asyncpg)                            pgvector / chroma /
-                                                              qdrant / pinecone /
-                                                              sqlite-vec / memory
+                Postgres (asyncpg)                            pgvector
+                                                              (same Postgres)
 ```
 
 ## DI wiring
@@ -275,10 +263,12 @@ beans are declared. It registers:
 * `SqlAlchemyHealthIndicator` -> `/actuator/health`
 * the binary normaliser stack (sniffer, PDF guard, image normaliser,
   archive unpacker, email unpacker, the chosen `OfficeConverter`)
-* the universal loader registry (MarkItDown for Office / HTML, image
-  loader with Tesseract OCR, transcript loader, plain-text loader)
+* the loader registry of native per-format loaders (Office via
+  python-docx / openpyxl / python-pptx / odfpy / striprtf, HTML via
+  BeautifulSoup, CSV / JSON / XML, image loader with Tesseract OCR,
+  transcript loader, plain-text `TextLoader` fallback)
 * `EmbeddingService` (provider switch via `FLYCANON_EMBEDDING_MODEL`)
-* `CorpusContext` + the chosen `VectorStoreProtocol` + `IndexService`
+* `CorpusContext` + the `pgvector` store + `IndexService`
   + `RetrievalService`
 * `AuditService`, `KnowledgeService`, `ProvenanceService`,
   `TaxonomyService` (each takes the `EventPublisher` so events are

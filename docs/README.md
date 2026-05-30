@@ -47,15 +47,15 @@ Pick the entry point that matches what you're trying to do:
 ### "I want to understand how it works"
 
 1. [**architecture.md**](architecture.md) — the data model, the
-   binary-normaliser routing matrix, the pluggable retrieval backend
-   matrix, the layer diagram, the dependency arrows.
+   binary-normaliser routing matrix, the Postgres-native retrieval
+   design, the layer diagram, the dependency arrows.
 2. [**pipeline.md**](pipeline.md) — source intake → retrieval →
    answer end-to-end, with the agentic primitives flycanon composes.
 
 ### "I'm extending the service"
 
 1. [**architecture.md** § Universal binary normaliser](architecture.md#universal-binary-normaliser) — how the routing matrix dispatches on media type; where to plug a new format.
-2. [**architecture.md** § Pluggable retrieval backends](architecture.md#pluggable-retrieval-backends) — adding a new `VectorStoreProtocol` adapter.
+2. [**architecture.md** § Retrieval backend (pgvector-only)](architecture.md#retrieval-backend-pgvector-only) — how the Postgres-native BM25 + pgvector hybrid retrieval is wired.
 3. [**pipeline.md**](pipeline.md) — the orchestrator and the stages it composes.
 
 ### "I'm running this in production"
@@ -71,7 +71,7 @@ Pick the entry point that matches what you're trying to do:
 | Document                                          | Read it when…                                                                                                                  |
 | ------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
 | [../QUICKSTART.md](../QUICKSTART.md)              | You want your first ingest + search + answer in ten minutes (HTTP / curl).                                                     |
-| [architecture.md](architecture.md)                | You need the data model, the binary-normaliser routing matrix, the pluggable retrieval backend matrix, the dependency arrows.  |
+| [architecture.md](architecture.md)                | You need the data model, the binary-normaliser routing matrix, the Postgres-native retrieval design, the dependency arrows.  |
 | [pipeline.md](pipeline.md)                        | You're touching the orchestrator, adding a new stage, or chasing a slow ingest.                                                |
 | [api-reference.md](api-reference.md)              | You're integrating with the HTTP API and need every endpoint, shape, and status code.                                          |
 | [payload-reference.md](payload-reference.md)      | You're composing the request payload — every field, option, and example.                                                       |
@@ -100,7 +100,7 @@ Where to read about each topic that spans multiple documents:
 | Topic                                  | Primary                                                                                       | Secondary                                                                          |
 | -------------------------------------- | --------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------- |
 | Universal ingestion (any file format)  | [architecture.md § Universal binary normaliser](architecture.md#universal-binary-normaliser)  | [pipeline.md](pipeline.md), [README.md § Universal ingestion](../README.md#universal-ingestion) |
-| Backend-agnostic retrieval             | [architecture.md § Pluggable retrieval backends](architecture.md#pluggable-retrieval-backends) | [README.md § Backend-agnostic retrieval](../README.md#backend-agnostic-retrieval)  |
+| Postgres-native retrieval              | [architecture.md § Retrieval backend (pgvector-only)](architecture.md#retrieval-backend-pgvector-only) | [README.md § Postgres-native retrieval](../README.md#postgres-native-retrieval)  |
 | Hybrid retrieval (BM25 + vectors + RRF) | [pipeline.md](pipeline.md), [api-reference.md § /search](api-reference.md#query)              | [architecture.md § Layers](architecture.md#layers)                                  |
 | Grounded RAG answers (no hallucinations) | [pipeline.md](pipeline.md), [api-reference.md § /query](api-reference.md#query)              | [README.md § What you get back](../README.md#what-you-get-back)                    |
 | Provenance graph                       | [api-reference.md § /provenance](api-reference.md#provenance)                                  | [glossary.md § Provenance](glossary.md)                                            |

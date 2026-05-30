@@ -67,9 +67,9 @@ overridable via `FLYCANON_OCR_LANG`.
 
 Encrypted PDFs are rejected up-front by `PdfGuard` (lightweight
 `pypdf` pre-flight) with `error_code=encrypted_pdf`. Corrupt PDFs
-fail fast with `error_code=corrupt_source`. MarkItDown is **not** on
-the PDF path -- it is reserved as the last-resort fallback for
-exotic formats only.
+fail fast with `error_code=corrupt_source`. PDFs are handled by the
+PyMuPDF text-layer / Tesseract OCR path -- the plain UTF-8 `TextLoader`
+is reserved as the last-resort fallback for unrecognised formats only.
 
 ```
 POST /api/v1/candidates:propose
@@ -95,12 +95,9 @@ POST /api/v1/candidates/{id}:reject
 POST /api/v1/search    (raw hybrid retrieval)
   → SearchKnowledgeHandler → SearchService.search
       → RetrievalService.search
-          → HybridRetriever (agentic):
+          → HybridRetriever (vendored in core/services/retrieval/fusion.py):
                 BM25 over Postgres tsvector + GIN on canon_chunks
-                (default; SQLite FTS5 only for the file-backed
-                ``sqlite-vec`` backend) + dense over the pluggable
-                VectorStoreProtocol (pgvector / chroma / qdrant /
-                pinecone / sqlite-vec / memory),
+                + dense over pgvector (same Postgres),
                 fused via Reciprocal Rank Fusion (k = FLYCANON_RETRIEVAL_RRF_K)
           → hydrate hits with Postgres rows; apply caller filters
       → SearchResponse { hits, elapsed_ms }

@@ -47,9 +47,9 @@ Flexible Server all ship the extension).
 CREATE EXTENSION IF NOT EXISTS vector;
 ```
 
-flycanon will not boot the `pgvector` backend without this -- pick a
-different backend via `FLYCANON_VECTOR_STORE` (`sqlite-vec` for a
-file-backed alternative) if your Postgres doesn't have `vector`.
+`pgvector` is **required** -- it is the only supported vector backend.
+flycanon will not boot without the `vector` extension installed, so
+provision it on your Postgres before starting the service.
 
 ---
 
@@ -120,8 +120,8 @@ causes:
 
 **Fix.** Check the `error_message` on the `SourceRecord` for the
 specific reason. Re-upload the corrected file. For exotic formats,
-the universal MarkItDown loader is the last-resort fallback -- if
-MarkItDown can't read it, neither can flycanon today.
+the plain UTF-8 `TextLoader` is the last-resort fallback -- if the
+payload doesn't decode as UTF-8 text, neither can flycanon today.
 
 ---
 
@@ -392,10 +392,10 @@ After ~1M chunks:
   `FLYCANON_PGVECTOR_HNSW_EF_CONSTRUCTION` if you're rebuilding the
   HNSW index post-load.
 
-For corpora past ~5M chunks consider partitioning by `domain` or
-moving the dense vectors to a dedicated `qdrant` cluster
-(`FLYCANON_VECTOR_STORE=qdrant`) -- the canonical store stays in
-Postgres, the dense index lives where it can scale horizontally.
+For corpora past ~5M chunks consider partitioning by `domain`, or
+scaling the Postgres cluster vertically / with read replicas -- the
+dense index lives in `pgvector` in the same Postgres, so there is no
+separate vector store to shard.
 
 ---
 

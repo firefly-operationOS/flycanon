@@ -323,16 +323,15 @@ Special considerations:
   rotated does NOT restore the working secret -- the secret is only
   in the original mint response, never in flycanon's storage. Mint
   new tokens after a restore + propagate to consumers.
-- **Non-pgvector backends** (`sqlite-vec`, `chroma`, `qdrant`,
-  `pinecone`) keep the vector projection outside Postgres; back up
-  separately. The default `pgvector` topology is the simplest
-  operationally.
+- **Vector projection** lives in `pgvector` in the same Postgres
+  (`FLYCANON_VECTOR_STORE=pgvector` is the only supported value), so a
+  single `pg_dump` captures it -- there is no separate vector store
+  to back up.
 - **BM25 projection** lives in `canon_chunks.tsv` (a Postgres
-  GENERATED column with a GIN index, per migration `0003_bm25_tsv`)
-  when `FLYCANON_VECTOR_STORE=pgvector`; a `pg_dump` captures it.
-  When the vector backend is `sqlite-vec`, the BM25 corpus falls
-  back to a file-backed SQLite FTS5 corpus (`FLYCANON_CORPUS_PATH`);
-  back up that file separately.
+  GENERATED column with a GIN index, per migration `0003_bm25_tsv`);
+  a `pg_dump` captures it too. There is no file-backed SQLite FTS5
+  corpus to back up -- that fallback was removed in the pgvector-only
+  migration.
 
 Recommended cadence: hourly snapshots for the cost trail + audit
 log; daily full dumps for everything else. Pair with cross-region
