@@ -154,11 +154,11 @@ override-dependencies = [
 ]
 
 [tool.uv.sources]
-# Sibling-repo path sources -- mirror what the rest of operationOS does
-# so both services boot from a fresh local checkout without needing the
-# registry.
+# Agentic is consumed from its published git tag so fresh clones / CI resolve
+# it without the sibling path; pyfly stays on the local checkout (released on
+# its own cadence).
 pyfly = { path = "../../fireflyframework/fireflyframework-pyfly", editable = true }
-fireflyframework-agentic = { path = "../../fireflyframework/fireflyframework-agentic", editable = true }
+fireflyframework-agentic = { git = "https://github.com/fireflyframework/fireflyframework-agentic.git", tag = "v26.05.30" }
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/flycanon"]
