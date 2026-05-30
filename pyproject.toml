@@ -2,7 +2,7 @@
 name = "flycanon"
 # CalVer YY.MM.PP -- bumped per release. Note that PEP 440 normalises
 # ``26.05.04`` -> ``26.5.4`` in the built wheel filename.
-version = "26.5.6"
+version = "26.5.7"
 description = "Operational Knowledge Repository -- versioned, provenance-tracked canonical knowledge with hybrid retrieval and RAG, exposed as a standalone HTTP microservice over fireflyframework-pyfly and -agentic. Part of Firefly OperationOS, platform-agnostic by design."
 readme = "README.md"
 requires-python = ">=3.13,<3.14"
@@ -19,46 +19,36 @@ dependencies = [
     # so a fresh ``uv sync`` is enough to boot the full stack.
     "pyfly[fastapi,observability,security,data-relational,postgresql,eda,redis,client,scheduling,cli]>=26.5.4",
 
-    # GenAI metaframework -- FireflyAgent over pydantic-ai, plus the
-    # corpus / hybrid-retrieval primitives the query stage uses
-    # (SqliteCorpus + HybridRetriever live under
-    # ``fireflyframework_agentic.rag``). The ``corpus-search`` extra
-    # bundles MarkItDown (multi-format intake), the SQLite-vec vector
-    # store backend, openai-embeddings, and sqlglot.
-    "fireflyframework-agentic[rest,security,redis,corpus-search]>=26.5.11",
+    # GenAI metaframework -- FireflyAgent over pydantic-ai, the binary
+    # normalisation stack (``[binary]`` -> ``content.binary``), MarkItDown
+    # (multi-format text intake) and the OpenAI embeddings provider.
+    # flycanon vendors its own hybrid retrieval -- StoredChunk / ChunkHit /
+    # HybridRetriever / reciprocal_rank_fusion live in
+    # ``core/services/retrieval/fusion.py`` -- so it no longer depends on
+    # the framework's removed ``rag`` module, and the ``corpus-search``
+    # extra (which bundled sqlite-vec + sqlglot) is gone.
+    "fireflyframework-agentic[rest,security,redis,markitdown,openai-embeddings,binary]>=26.5.11",
 
-    # Source intake -- the high-fidelity per-format loaders + the
-    # universal MarkItDown fallback. MarkItDown ships via the agentic
-    # ``corpus-search`` extra above and covers DOCX / XLSX / PPTX /
-    # PDF / HTML / CSV / JSON / XML / EPUB. The dedicated wheels
-    # listed here back the specific loaders and the binary
-    # normaliser:
+    # Source intake -- the high-fidelity per-format SourceLoaders. Binary
+    # normalisation (HEIC / SVG / TIFF rasterisation, archive + email
+    # fan-out, PDF guard, Office -> PDF) now comes from the framework's
+    # ``[binary]`` extra above, which supplies pypdf, Pillow, pillow-heif,
+    # cairosvg, py7zr and extract-msg. The wheels below back loader paths
+    # that are flycanon-specific:
     #
-    # * ``python-docx`` -- :class:`DocxLoader` (Heading1-9 detection)
-    #   + DOCX metadata (core.coreproperties).
-    # * ``pypdf``        -- :class:`PdfGuard` encryption/corruption
-    #   pre-flight; lightweight page count.
-    # * ``pymupdf``      -- primary :class:`PdfLoader` text + per-page
-    #   rendering for image-only PDFs (the flydocs approach: PyMuPDF
-    #   first, Tesseract OCR fallback). MarkItDown is no longer on
-    #   the PDF path.
-    # * ``pypdfium2``    -- fallback PDF renderer for the image OCR
-    #   path when PyMuPDF is unavailable.
-    # * ``python-pptx``  -- PPTX metadata + native text extraction.
-    # * ``openpyxl``     -- XLSX metadata + cell extraction.
-    # * ``beautifulsoup4``+ ``lxml`` -- :class:`HtmlLoader`.
-    # * ``Pillow`` + ``pillow-heif`` + ``cairosvg`` -- image format
-    #   normalisation (HEIC / HEIF / AVIF / TIFF / BMP / SVG -> PNG)
-    #   used by :class:`ImageNormalizer` and :class:`ImageLoader`.
-    # * ``pytesseract`` -- :class:`ImageLoader` OCR. The runtime
-    #   Dockerfile installs the ``tesseract`` binary + the common
-    #   European language packs (``-spa``, ``-eng``, ``-fra``, ...).
-    # * ``py7zr`` -- 7-Zip archive expansion. ``.zip`` and ``.tar``
-    #   are stdlib.
-    # * ``extract-msg`` -- Outlook ``.msg`` parsing. ``.eml`` uses
-    #   stdlib ``email``.
-    # * ``langdetect`` -- best-effort language detection on extracted
-    #   text for the metadata extractor.
+    # * ``python-docx`` -- :class:`DocxLoader` (Heading1-9 detection) + metadata.
+    # * ``python-pptx`` -- PPTX metadata + native text extraction.
+    # * ``openpyxl``    -- XLSX metadata + cell extraction.
+    # * ``pypdf``       -- lightweight page count on the loader path.
+    # * ``pymupdf``     -- :class:`PdfLoader` text + per-page rendering for
+    #   image-only PDFs (PyMuPDF first, Tesseract OCR fallback).
+    # * ``beautifulsoup4`` + ``lxml`` -- :class:`HtmlLoader`.
+    # * ``Pillow``      -- raster handling for :class:`ImageLoader`.
+    # * ``pytesseract`` -- :class:`ImageLoader` OCR. The runtime Dockerfile
+    #   installs the ``tesseract`` binary + the common European language
+    #   packs (``-spa``, ``-eng``, ``-fra``, ...).
+    # * ``langdetect``  -- best-effort language detection on extracted text
+    #   for the metadata extractor.
     "python-docx>=1.1",
     "python-pptx>=1.0",
     "openpyxl>=3.1",
@@ -67,11 +57,7 @@ dependencies = [
     "beautifulsoup4>=4.12",
     "lxml>=5.0",
     "Pillow>=11.0",
-    "pillow-heif>=0.18",
-    "cairosvg>=2.7",
     "pytesseract>=0.3.13",
-    "py7zr>=0.22",
-    "extract-msg>=0.51",
     "langdetect>=1.0.9",
 
     # HTTP client for outbound calls (webhooks, future SOTA monitors).

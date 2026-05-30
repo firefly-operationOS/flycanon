@@ -19,6 +19,12 @@ import asyncio
 import contextlib
 import logging
 
+from fireflyframework_agentic.content.binary import (
+    BinaryConfig,
+    BinaryNormalizer,
+    OfficeConverter,
+    build_office_converter,
+)
 from pyfly.container import bean, configuration
 from pyfly.data.relational.health import SqlAlchemyHealthIndicator
 
@@ -36,12 +42,6 @@ from flycanon.core.services.auth.agent_token_service import (
     _RateLimiter,
 )
 from flycanon.core.services.auth.redis_rate_limiter import RedisRateLimiter
-from flycanon.core.services.binary import (
-    GotenbergConverter,
-    LibreOfficeConverter,
-    OfficeConverter,
-)
-from flycanon.core.services.binary.office_converter import NoOpOfficeConverter
 from flycanon.core.services.consolidation import (
     Consolidator,
 )
@@ -367,30 +367,52 @@ class CanonCoreConfiguration:
     # ------------------------------------------------------------------
     # Binary normalisation
     #
-    # PdfGuard, ImageNormalizer, ArchiveUnpacker, EmailUnpacker, and
-    # BinaryNormalizer itself carry ``@service`` decorators and are
-    # autoscanned via the ``flycanon.core.services`` scan path -- they
-    # don't need explicit @bean factories.
-    #
-    # The OfficeConverter selection is settings-driven so we keep the
-    # bean factory; the BinaryNormalizer takes it as a constructor
-    # arg through pyfly's auto-resolution against the
-    # :class:`OfficeConverter` protocol.
+    # The normaliser + handlers live in the framework
+    # (``fireflyframework_agentic.content.binary``). We map CanonSettings
+    # onto a host-agnostic ``BinaryConfig`` and inject the pluggable
+    # ``OfficeConverter``. ``wrap_text_as_pdf`` is False: flycanon passes
+    # text / markdown / CSV through to its SourceLoader pipeline (MarkItDown)
+    # rather than rendering them to PDF. ``email_render_header`` surfaces a
+    # ``<stem>-headers.md`` artifact so Subject/From/To metadata still
+    # reaches the loaders.
     # ------------------------------------------------------------------
 
     @bean
-    def office_converter(self, settings: CanonSettings) -> OfficeConverter:
-        kind = (settings.office_converter or "none").lower()
-        if kind in {"none", "", "disabled"}:
-            return NoOpOfficeConverter()
-        if kind == "gotenberg":
-            return GotenbergConverter(settings=settings)
-        if kind == "libreoffice":
-            return LibreOfficeConverter(settings=settings)
-        raise ValueError(
-            f"unknown FLYCANON_OFFICE_CONVERTER={settings.office_converter!r}; "
-            "expected 'none', 'gotenberg', or 'libreoffice'"
+    def binary_config(self, settings: CanonSettings) -> BinaryConfig:
+        return BinaryConfig(
+            normalize_enabled=settings.binary_normalize_enabled,
+            max_bytes=settings.max_bytes,
+            max_recursion_depth=settings.binary_max_recursion_depth,
+            max_expanded_files=settings.binary_max_expanded_files,
+            wrap_text_as_pdf=False,
+            email_render_header=True,
+            office_converter=settings.office_converter,
+            gotenberg_url=settings.gotenberg_url,
+            gotenberg_timeout_s=float(settings.gotenberg_timeout_s),
+            libreoffice_path=settings.binary_libreoffice_path,
+            libreoffice_timeout_s=float(settings.binary_libreoffice_timeout_s),
         )
+
+    @bean
+    def office_converter(self, binary_config: BinaryConfig) -> OfficeConverter:
+        kind = (binary_config.office_converter or "none").lower()
+        if kind not in {"none", "", "disabled", "gotenberg", "libreoffice"}:
+            raise ValueError(
+                f"unknown FLYCANON_OFFICE_CONVERTER={binary_config.office_converter!r}; "
+                "expected 'none', 'gotenberg', or 'libreoffice'"
+            )
+        return build_office_converter(binary_config)
+
+    @bean
+    def binary_normalizer(
+        self,
+        binary_config: BinaryConfig,
+        office_converter: OfficeConverter,
+    ) -> BinaryNormalizer:
+        # The framework BinaryNormalizer builds its own PdfGuard /
+        # ImageNormalizer / ArchiveUnpacker / EmailUnpacker from the config;
+        # only the pluggable OfficeConverter is injected.
+        return BinaryNormalizer(config=binary_config, office=office_converter)
 
     # IntakeService is ``@service``-decorated; auto-discovered.
 

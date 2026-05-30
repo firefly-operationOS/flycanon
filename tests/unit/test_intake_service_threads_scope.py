@@ -20,9 +20,9 @@ from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from fireflyframework_agentic.content.binary import BinaryArtifact
 
 from flycanon.config import CanonSettings
-from flycanon.core.services.binary import NormalizedArtifact
 from flycanon.core.services.ingestion import IngestionResult
 from flycanon.core.services.sources.intake_service import IntakeService
 from flycanon.interfaces.dtos.source import SourceMetadata, SubmitSourceRequest
@@ -31,8 +31,8 @@ from flycanon.models.entities.knowledge_chunk import KnowledgeChunkRow
 from flycanon.models.entities.source import SourceRow
 
 
-def _artifact() -> NormalizedArtifact:
-    return NormalizedArtifact(
+def _artifact() -> BinaryArtifact:
+    return BinaryArtifact(
         bytes=b"hello world",
         media_type="text/plain",
         kind=SourceKind.text,

@@ -4,6 +4,31 @@ All notable changes to **flycanon** are documented here.
 
 ## [Unreleased] -- Multitenancy backbone
 
+### Changed -- decoupled from the framework's RAG module (26.5.7)
+
+- **Binary normalisation moved to the framework.** The local
+  `core/services/binary/` package is deleted; flycanon now consumes
+  `fireflyframework_agentic.content.binary` (the unified normaliser shared
+  with flydocs), wired in `CanonCoreConfiguration` from a `BinaryConfig`
+  mapped off `CanonSettings` (`wrap_text_as_pdf=False` -- text passes
+  through to the SourceLoaders; `email_render_header=True`). The
+  `OfficeConverter` stays pluggable.
+- **Hybrid retrieval vendored.** `StoredChunk`, `ChunkHit`,
+  `reciprocal_rank_fusion` and `HybridRetriever` -- previously imported from
+  the framework's now-removed `rag` module -- now live in
+  `core/services/retrieval/fusion.py`. The vendored `HybridRetriever` honours
+  `FLYCANON_RETRIEVAL_RRF_K` (the framework hard-coded `k=60`, leaving the
+  knob dead); it is now live.
+- **Retrieval collapsed to pgvector-only.** `corpus_factory` no longer
+  builds the SQLite-vec / Chroma / Qdrant / Pinecone / in-memory fallback
+  backends (or the agentic `SqliteCorpus`); `FLYCANON_VECTOR_STORE` now
+  accepts only `pgvector`. Dropped the dead fallback knobs `corpus_path`,
+  `chroma_collection`, `qdrant_*`, `pinecone_*`.
+- **Dependencies.** Replaced the agentic `[corpus-search]` extra (which
+  bundled sqlite-vec + sqlglot) with `[markitdown,openai-embeddings,binary]`;
+  dropped the now-redundant direct deps `pillow-heif`, `cairosvg`, `py7zr`,
+  `extract-msg` (provided by `[binary]`).
+
 ### Added -- Redis-backed adapters for rate-limit + idempotency
 
 - **`RedisRateLimiter`** -- sliding-window per-token rate limiter

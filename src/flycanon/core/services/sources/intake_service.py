@@ -8,7 +8,7 @@ new binary. The orchestrator owns:
    actual media type from magic bytes, routes through the right
    adapter (image conversion, archive expansion, email
    decomposition, optional Office conversion), and emits one or more
-   :class:`NormalizedArtifact` rows.
+   :class:`BinaryArtifact` rows.
 
 2. **Loading** -- each artifact is fed to the loader registered for
    its kind, producing a :class:`LoadedDocument` with heading-anchored
@@ -37,13 +37,13 @@ import logging
 import uuid
 from typing import Any
 
+from fireflyframework_agentic.content.binary import BinaryArtifact, BinaryNormalizer
 from pyfly.container import service
 from pyfly.eda import EventPublisher
 from sqlalchemy.exc import IntegrityError
 
 from flycanon.config import CanonSettings
 from flycanon.core.services.audit import AuditService
-from flycanon.core.services.binary import BinaryNormalizer, NormalizedArtifact
 from flycanon.core.services.embeddings import EmbeddingService
 from flycanon.core.services.ingestion import IngestionService, LoadedDocument
 from flycanon.core.services.ingestion.loaders import LoaderRegistry
@@ -495,7 +495,7 @@ class IntakeService:
 
     def _merge_artifacts(
         self,
-        artifacts: list[NormalizedArtifact],
+        artifacts: list[BinaryArtifact],
         original_filename: str | None,
     ) -> tuple[SourceKind, bytes, dict[str, Any]]:
         """Collapse a fan-out artifact list into a single content payload.
@@ -509,7 +509,7 @@ class IntakeService:
         """
         if len(artifacts) == 1:
             artifact = artifacts[0]
-            return artifact.kind, artifact.bytes, _ancestry_metadata([artifact])
+            return SourceKind(artifact.kind), artifact.bytes, _ancestry_metadata([artifact])
 
         merged_sections: list[str] = []
         kind = SourceKind.archive
@@ -518,7 +518,7 @@ class IntakeService:
             if loader is None:
                 logger.warning(
                     "intake skipping artifact kind=%s filename=%s -- no loader",
-                    artifact.kind.value,
+                    artifact.kind,
                     artifact.filename,
                 )
                 continue
@@ -527,7 +527,7 @@ class IntakeService:
             except Exception as exc:
                 logger.warning(
                     "intake skipping artifact kind=%s filename=%s -- loader failed: %s",
-                    artifact.kind.value,
+                    artifact.kind,
                     artifact.filename,
                     exc,
                 )
@@ -601,12 +601,12 @@ def _metadata_to_json(metadata: SourceMetadata) -> dict[str, Any]:
     return payload
 
 
-def _ancestry_metadata(artifacts: list[NormalizedArtifact]) -> dict[str, Any]:
+def _ancestry_metadata(artifacts: list[BinaryArtifact]) -> dict[str, Any]:
     return {
         "artifacts": [
             {
                 "filename": artifact.filename,
-                "kind": artifact.kind.value,
+                "kind": artifact.kind,
                 "media_type": artifact.media_type,
                 "derived_from": list(artifact.derived_from),
             }

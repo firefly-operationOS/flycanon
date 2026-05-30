@@ -126,7 +126,7 @@ class RetrievalService:
                 "callers must thread the tenant scope explicitly."
             )
 
-        from fireflyframework_agentic.rag.retrieval.hybrid import HybridRetriever
+        from flycanon.core.services.retrieval.fusion import HybridRetriever
 
         # Approach (a) -- scope-bound proxies. The agentic
         # ``HybridRetriever`` calls ``corpus.bm25_search(text,
@@ -153,6 +153,7 @@ class RetrievalService:
             corpus=scoped_corpus,  # type: ignore[arg-type]
             vector_store=scoped_vector_store,  # type: ignore[arg-type]
             embedder=_EmbedderShim(self._embeddings),  # type: ignore[arg-type]
+            rrf_k=self._rrf_k,
         )
         effective_top_k = top_k or self._default_top_k
         effective_per_query_k = per_query_k or self._default_per_query_k

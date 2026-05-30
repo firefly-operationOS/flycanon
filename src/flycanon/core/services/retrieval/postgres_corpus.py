@@ -36,9 +36,10 @@ import asyncio
 import logging
 from typing import Any
 
-from fireflyframework_agentic.rag.corpus import ChunkHit, StoredChunk
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
+
+from flycanon.core.services.retrieval.fusion import ChunkHit, StoredChunk
 
 logger = logging.getLogger(__name__)
 

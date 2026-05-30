@@ -40,7 +40,14 @@ class CanonSettings(BaseSettings):
     # file. Default ``postgres`` because the service already runs
     # Postgres for persistence -- no extra broker is required.
     eda_adapter: str = Field(default="postgres", description="memory | postgres | redis | kafka")
-    redis_url: str = "redis://localhost:6379/0"
+    # Empty default means "no Redis available" so the rate-limit +
+    # idempotency adapters fall back to the in-memory variants unless
+    # an operator explicitly opts into Redis by exporting
+    # ``FLYCANON_REDIS_URL``. Setting a localhost default here would
+    # cause every CI run + container that lacks a Redis sidecar to
+    # crash on the first agent-token revoke ("Connect call failed
+    # ('127.0.0.1', 6379)").
+    redis_url: str = ""
 
     # -- Rate limiter + idempotency backend selection -------------------
     # Per-adapter overrides for the auth + replay surfaces. ``auto``
@@ -183,26 +190,15 @@ class CanonSettings(BaseSettings):
     pii_policy: str = Field(default="warn")
 
     # -- Vector store ---------------------------------------------------
-    # Backend selector. Every option implements the agentic
-    # ``VectorStoreProtocol``; BM25 stays on SQLite regardless of the
-    # vector backend (the corpus file is an index projection, not a
-    # source of truth).
-    #
-    # ``pgvector`` is the default because flycanon already runs
-    # Postgres for the canonical store -- co-locating the vector
-    # projection avoids an extra service to operate. Flip to
-    # ``sqlite-vec`` for single-node / dev / test deployments.
+    # Backend selector. flycanon is Postgres-native: BM25 rides on the
+    # ``tsv`` column of ``canon_chunks`` and dense vectors live in
+    # pgvector, both co-located with the canonical Postgres instance.
+    # ``pgvector`` is the only supported value -- the SQLite-vec / Chroma /
+    # Qdrant / Pinecone / memory fallbacks were removed when flycanon
+    # stopped depending on ``fireflyframework_agentic.rag``.
     vector_store: str = Field(
         default="pgvector",
-        description=(
-            "``pgvector`` (default; co-located in Postgres) | "
-            "``sqlite-vec`` (single-file dev) | ``chroma`` | "
-            "``qdrant`` | ``pinecone`` | ``memory``."
-        ),
-    )
-    corpus_path: str = Field(
-        default="./local_data/corpus.db",
-        description="SQLite path used by the BM25 corpus + sqlite-vec backend.",
+        description="Dense-vector backend. Only ``pgvector`` is supported.",
     )
 
     # -- pgvector backend ----------------------------------------------
@@ -212,9 +208,7 @@ class CanonSettings(BaseSettings):
     # BM25 / Postgres FTS text-search configuration. ``simple`` is
     # the safest multilingual default (no stemming, no stopwords);
     # switch to ``english`` / ``spanish`` / etc. when the deployment
-    # is mono-lingual to get language-aware stemming. Only consulted
-    # when ``FLYCANON_VECTOR_STORE=pgvector`` (the default) -- SQLite
-    # corpus deployments ignore this knob.
+    # is mono-lingual to get language-aware stemming.
     bm25_text_search_config: str = Field(
         default="simple",
         description=(
@@ -224,18 +218,6 @@ class CanonSettings(BaseSettings):
             "for language-specific stemming."
         ),
     )
-
-    # -- Chroma backend ------------------------------------------------
-    chroma_collection: str = "flycanon"
-
-    # -- Qdrant backend ------------------------------------------------
-    qdrant_url: str = "http://localhost:6333"
-    qdrant_collection: str = "flycanon"
-    qdrant_api_key: str | None = None
-
-    # -- Pinecone backend ----------------------------------------------
-    pinecone_index: str = "flycanon"
-    pinecone_api_key: str | None = None
 
     # -- Ingestion ------------------------------------------------------
     chunk_size_tokens: int = Field(default=1200, ge=128, le=8192)

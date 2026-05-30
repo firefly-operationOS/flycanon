@@ -62,8 +62,9 @@ class IndexService:
                 f"chunk/embedding length mismatch: {len(chunks)} chunks vs {len(embeddings)} embeddings"
             )
 
-        from fireflyframework_agentic.rag.corpus import StoredChunk
         from fireflyframework_agentic.vectorstores.types import VectorDocument
+
+        from flycanon.core.services.retrieval.fusion import StoredChunk
 
         stored_chunks = [
             StoredChunk(
