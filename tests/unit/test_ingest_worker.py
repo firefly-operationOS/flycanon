@@ -15,12 +15,53 @@ bus would. This lets us assert on:
 from __future__ import annotations
 
 import asyncio
+import logging
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
 
 from flycanon.core.services.workers.ingest_worker import IngestWorker
+
+_WORKER_LOGGER = "flycanon.core.services.workers.ingest_worker"
+
+
+class _CaptureHandler(logging.Handler):
+    """Records emitted messages so tests can assert on background-task logs."""
+
+    def __init__(self) -> None:
+        super().__init__(level=logging.DEBUG)
+        self.messages: list[str] = []
+
+    def emit(self, record: logging.LogRecord) -> None:
+        self.messages.append(record.getMessage())
+
+
+@pytest.fixture
+def worker_logs():
+    """Capture the worker logger directly.
+
+    The dispatcher emits its timeout / failure warnings from a module-level
+    logger created at import time. The integration suite runs alembic
+    migrations, and ``fileConfig`` historically disabled pre-existing loggers
+    (``Logger.disabled = True``), muting later warnings regardless of handlers
+    or ``caplog``. Attaching our own handler AND clearing ``disabled`` makes
+    the assertion reliable in any suite ordering.
+    """
+    handler = _CaptureHandler()
+    logger = logging.getLogger(_WORKER_LOGGER)
+    prev_level, prev_propagate, prev_disabled = logger.level, logger.propagate, logger.disabled
+    logger.addHandler(handler)
+    logger.setLevel(logging.DEBUG)
+    logger.propagate = True
+    logger.disabled = False
+    try:
+        yield handler
+    finally:
+        logger.removeHandler(handler)
+        logger.setLevel(prev_level)
+        logger.propagate = prev_propagate
+        logger.disabled = prev_disabled
 
 
 class _StubPublisher:
@@ -122,36 +163,35 @@ class TestConcurrencyCap:
 
 class TestHandlerTimeout:
     @pytest.mark.asyncio
-    async def test_hung_handler_is_cancelled_after_timeout(self, monkeypatch, caplog):
+    async def test_hung_handler_is_cancelled_after_timeout(self, worker_logs):
         settings = _settings(worker_handler_timeout_s=0.1)
         worker = _make_worker(settings)
 
         async def hung_handler(envelope):
             await asyncio.sleep(5.0)
 
-        dispatcher = worker._make_dispatcher(hung_handler, "source")
-        with caplog.at_level("WARNING"):
-            await dispatcher(_envelope())
-            await asyncio.sleep(0.25)  # let the timeout fire
-        assert any("timed out" in rec.message for rec in caplog.records)
+        # Drive the guarded handler inline (the real dispatcher fires it as a
+        # fire-and-forget task; awaiting it here makes the timeout deterministic
+        # and independent of background-task scheduling). ``wait_for`` cancels
+        # the hung handler at the timeout and the outcome is logged.
+        await worker._guarded_handler(hung_handler, _envelope(), "source")
+        assert any("timed out" in m for m in worker_logs.messages)
 
 
 class TestExceptionSwallowed:
     @pytest.mark.asyncio
-    async def test_handler_failure_does_not_propagate_to_dispatcher(self, caplog):
+    async def test_handler_failure_does_not_propagate_to_dispatcher(self, worker_logs):
         worker = _make_worker(_settings())
 
         async def boom(envelope):
             raise RuntimeError("boom")
 
-        dispatcher = worker._make_dispatcher(boom, "source")
-        with caplog.at_level("WARNING"):
-            # Awaiting the dispatcher MUST NOT raise -- the bus
-            # subscription would otherwise lose this handler on the
-            # next delivery.
-            await dispatcher(_envelope())
-            await asyncio.sleep(0.05)
-        assert any("worker handler failed" in rec.message for rec in caplog.records)
+        # The guard catches the handler failure and logs it instead of
+        # re-raising; awaiting it MUST NOT raise -- otherwise the dispatcher
+        # that wraps it would propagate the error and the bus subscription
+        # would lose this handler on the next delivery.
+        await worker._guarded_handler(boom, _envelope(), "source")
+        assert any("worker handler failed" in m for m in worker_logs.messages)
 
 
 class TestShutdownDrain:
