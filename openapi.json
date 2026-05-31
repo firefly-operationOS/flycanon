@@ -4921,7 +4921,7 @@
     },
     "description": "Operational Knowledge Repository -- versioned, provenance-tracked canonical knowledge with hybrid retrieval (BM25 + vector + RRF) and retrieval-augmented answering, exposed as a standalone HTTP microservice over fireflyframework-pyfly and -agentic. Part of Firefly OperationOS, platform-agnostic by design.",
     "license": {
-      "name": "Proprietary -- service",
+      "name": "Apache-2.0",
       "url": "https://github.com/firefly-operationOS/flycanon/blob/main/LICENSE"
     },
     "title": "flycanon",

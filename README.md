@@ -15,7 +15,7 @@ with citations — all behind a single HTTP service.
 [![OpenAPI](https://img.shields.io/badge/api-openapi%203.1-green)](docs/api-reference.md)
 [![vector store](https://img.shields.io/badge/vector--store-pgvector%20%7C%20qdrant%20%7C%20chroma-336791)](docs/architecture.md#retrieval-backend-pluggable-dense-store)
 [![Version](https://img.shields.io/badge/version-26.5.8-green.svg)](#)
-[![License](https://img.shields.io/badge/license-Proprietary-lightgrey.svg)](LICENSE)
+[![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 
 </div>
 
@@ -324,11 +324,11 @@ flycanon/
 
 ## License
 
-The service is proprietary — see [`LICENSE`](LICENSE).
+flycanon is released under the [Apache License 2.0](LICENSE) —
+copyright 2024-2026 Firefly Software Foundation.
 
-The SDKs under [`sdks/python`](sdks/python) and [`sdks/java`](sdks/java)
-are released under the Apache License 2.0; each ships its own LICENSE
-file.
+The bundled SDKs under [`sdks/python`](sdks/python) and
+[`sdks/java`](sdks/java) ship their own Apache License 2.0 files.
 
 ---
 

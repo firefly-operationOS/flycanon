@@ -114,7 +114,7 @@ jobs:
             org.opencontainers.image.title=flycanon
             org.opencontainers.image.description=flycanon -- Operational Knowledge Repository. Universal ingestion (any file format), hybrid retrieval (Postgres BM25 + pgvector dense + RRF), grounded RAG answers with citations, append-only version chain + provenance graph + EDA outbox. Part of Firefly OperationOS, platform-agnostic.
             org.opencontainers.image.source=https://github.com/${{ github.repository }}
-            org.opencontainers.image.licenses=Proprietary
+            org.opencontainers.image.licenses=Apache-2.0
             org.opencontainers.image.vendor=Firefly Software Foundation
 
       - name: Build + push (linux/amd64+arm64)

@@ -9,8 +9,8 @@
 ---
 
 Official client libraries for the flycanon service. Both are released
-under the Apache License 2.0 (the service itself is proprietary —
-see the top-level [LICENSE](../LICENSE)).
+under the Apache License 2.0, the same license as the service itself
+(see the top-level [LICENSE](../LICENSE)).
 
 | SDK | Highlights | Read it when… |
 |-----|------------|---------------|
