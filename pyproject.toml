@@ -148,11 +148,11 @@ override-dependencies = [
 ]
 
 [tool.uv.sources]
-# Agentic is consumed from its published git tag so fresh clones / CI resolve
-# it without the sibling path; pyfly stays on the local checkout (released on
-# its own cadence). v26.05.31 adds the pgvector adapter + tenant-scoped
-# vector-store layer that flycanon's multi-backend retrieval depends on.
-pyfly = { path = "../../fireflyframework/fireflyframework-pyfly", editable = true }
+# Both framework deps are consumed from their published git tags so fresh
+# clones / CI resolve them without any sibling path. agentic v26.05.31 adds the
+# pgvector adapter + tenant-scoped vector-store layer flycanon's multi-backend
+# retrieval depends on.
+pyfly = { git = "https://github.com/fireflyframework/fireflyframework-pyfly.git", tag = "v26.05.05" }
 fireflyframework-agentic = { git = "https://github.com/fireflyframework/fireflyframework-agentic.git", tag = "v26.05.31" }
 
 [tool.hatch.build.targets.wheel]
