@@ -134,8 +134,8 @@ FLYCANON_PII_POLICY=warn
 # ----------------------------------------------------------------------------
 # Vector store
 # ----------------------------------------------------------------------------
-# Backend selector. ``pgvector`` is the ONLY supported value -- an HNSW
-# index in the canonical Postgres (extension ``vector`` required). The
+# Backend selector for the DENSE half. ``pgvector`` (the default) keeps an
+# HNSW index in the canonical Postgres (extension ``vector`` required). The
 # canonical store already runs Postgres, so co-locating the vector
 # projection means one operational service, not two. The docker-compose
 # stack uses the ``pgvector/pgvector:pg16`` image so the ``vector``

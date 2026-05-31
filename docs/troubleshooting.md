@@ -47,7 +47,8 @@ Flexible Server all ship the extension).
 CREATE EXTENSION IF NOT EXISTS vector;
 ```
 
-`pgvector` is **required** -- it is the only supported vector backend.
+`pgvector` is the **default** dense backend; with it (or when
+`FLYCANON_VECTOR_STORE` is unset) the `vector` extension is required.
 flycanon will not boot without the `vector` extension installed, so
 provision it on your Postgres before starting the service.
 

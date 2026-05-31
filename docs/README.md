@@ -55,7 +55,7 @@ Pick the entry point that matches what you're trying to do:
 ### "I'm extending the service"
 
 1. [**architecture.md** § Universal binary normaliser](architecture.md#universal-binary-normaliser) — how the routing matrix dispatches on media type; where to plug a new format.
-2. [**architecture.md** § Retrieval backend (pgvector-only)](architecture.md#retrieval-backend-pgvector-only) — how the Postgres-native BM25 + pgvector hybrid retrieval is wired.
+2. [**architecture.md** § Retrieval backend (pluggable dense store)](architecture.md#retrieval-backend-pluggable-dense-store) — how the Postgres BM25 + pluggable dense (pgvector/qdrant/chroma) hybrid retrieval is wired.
 3. [**pipeline.md**](pipeline.md) — the orchestrator and the stages it composes.
 
 ### "I'm running this in production"
@@ -100,7 +100,7 @@ Where to read about each topic that spans multiple documents:
 | Topic                                  | Primary                                                                                       | Secondary                                                                          |
 | -------------------------------------- | --------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------- |
 | Universal ingestion (any file format)  | [architecture.md § Universal binary normaliser](architecture.md#universal-binary-normaliser)  | [pipeline.md](pipeline.md), [README.md § Universal ingestion](../README.md#universal-ingestion) |
-| Postgres-native retrieval              | [architecture.md § Retrieval backend (pgvector-only)](architecture.md#retrieval-backend-pgvector-only) | [README.md § Postgres-native retrieval](../README.md#postgres-native-retrieval)  |
+| Postgres-native retrieval              | [architecture.md § Retrieval backend (pluggable dense store)](architecture.md#retrieval-backend-pluggable-dense-store) | [README.md § Postgres-native retrieval](../README.md#postgres-native-retrieval)  |
 | Hybrid retrieval (BM25 + vectors + RRF) | [pipeline.md](pipeline.md), [api-reference.md § /search](api-reference.md#query)              | [architecture.md § Layers](architecture.md#layers)                                  |
 | Grounded RAG answers (no hallucinations) | [pipeline.md](pipeline.md), [api-reference.md § /query](api-reference.md#query)              | [README.md § What you get back](../README.md#what-you-get-back)                    |
 | Provenance graph                       | [api-reference.md § /provenance](api-reference.md#provenance)                                  | [glossary.md § Provenance](glossary.md)                                            |

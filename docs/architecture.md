@@ -49,9 +49,9 @@ auditable. Knowledge content is never mutated in place -- updates
 append a new `canon_knowledge_versions` row and flip the previous one
 to `superseded`. The BM25 projection is Postgres-native by default
 (a `tsvector` GENERATED column on `canon_chunks.content` with a GIN
-index -- see migration `0003_bm25_tsv`) and the dense projection
-lives in `pgvector`, so both retrieval channels share the same
-operational Postgres -- see _Retrieval backend (pgvector-only)_ below.
+index -- see migration `0003_bm25_tsv`) and the dense projection lives
+in a pluggable backend (pgvector by default, or Qdrant / Chroma) -- see
+_Retrieval backend (pluggable dense store)_ below.
 
 Every `canon_*` row also carries `(tenant_id, workspace_id)` as the
 multitenancy scope -- see _Workspace + multitenancy_ below.
@@ -190,7 +190,7 @@ into a single Markdown document with `## Artifact: <filename>`
 section markers, so chunks remain attributable to their originating
 artefact via `metadata.parent_artifact`.
 
-## Retrieval backend (pgvector-only)
+## Retrieval backend (pluggable dense store)
 
 The BM25 corpus is co-located with the dense projection so hybrid
 retrieval is a single-host, Postgres-native operation:

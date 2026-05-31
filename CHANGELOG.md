@@ -4,7 +4,7 @@ All notable changes to **flycanon** are documented here.
 
 ## [Unreleased] -- Multitenancy backbone
 
-### Added -- multi-backend vector stores
+### Added -- multi-backend vector stores (26.5.8)
 
 - **Pluggable dense backend.** `FLYCANON_VECTOR_STORE` now selects the dense
   projection backend: `pgvector` (default), `qdrant`, or `chroma`. The lexical
@@ -21,7 +21,7 @@ All notable changes to **flycanon** are documented here.
   by the framework's generic `PgVectorVectorStore`; flycanon keeps a thin
   `RlsPgVectorVectorStore` subclass that adds namespace-keyed Postgres RLS via
   the adapter's `_prepare_session` hook. Requires `fireflyframework-agentic`
-  >= 26.5.31. Migration `0014` retires the legacy column-shaped
+  >= 26.5.32. Migration `0014` retires the legacy column-shaped
   `canon_chunk_vectors` table (the adapter recreates the namespace-shaped table
   on boot; **re-index after upgrading** to repopulate the derived projection).
 - **Vector purge on source delete.** `IndexService.remove_for_source` now purges

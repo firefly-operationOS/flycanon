@@ -13,8 +13,8 @@ with citations — all behind a single HTTP service.
 [![pyfly](https://img.shields.io/badge/runtime-fireflyframework--pyfly-orange)](https://github.com/fireflyframework/fireflyframework-pyfly)
 [![agentic](https://img.shields.io/badge/genai-fireflyframework--agentic-purple)](https://github.com/fireflyframework/fireflyframework-agentic)
 [![OpenAPI](https://img.shields.io/badge/api-openapi%203.1-green)](docs/api-reference.md)
-[![pgvector](https://img.shields.io/badge/vector--store-pgvector--only-336791)](docs/architecture.md#retrieval-backend-pgvector-only)
-[![Version](https://img.shields.io/badge/version-26.5.6-green.svg)](#)
+[![vector store](https://img.shields.io/badge/vector--store-pgvector%20%7C%20qdrant%20%7C%20chroma-336791)](docs/architecture.md#retrieval-backend-pluggable-dense-store)
+[![Version](https://img.shields.io/badge/version-26.5.8-green.svg)](#)
 [![License](https://img.shields.io/badge/license-Proprietary-lightgrey.svg)](LICENSE)
 
 </div>
