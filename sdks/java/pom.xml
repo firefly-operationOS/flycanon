@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
-    Copyright 2026 Firefly Software Solutions Inc.
+    Copyright 2026 Firefly Software Foundation.
     Licensed under the Apache License, Version 2.0.
 -->
 <project xmlns="http://maven.apache.org/POM/4.0.0"
@@ -39,7 +39,7 @@
   </licenses>
 
   <organization>
-    <name>Firefly Software Solutions Inc</name>
+    <name>Firefly Software Foundation</name>
     <url>https://github.com/firefly-operationOS</url>
   </organization>
 

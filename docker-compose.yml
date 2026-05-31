@@ -1,4 +1,4 @@
-# Copyright 2026 Firefly Software Solutions Inc
+# Copyright 2026 Firefly Software Foundation
 #
 # Default compose stack:  api + worker + postgres + redis
 #

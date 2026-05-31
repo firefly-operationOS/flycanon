@@ -1,4 +1,4 @@
-# Copyright 2026 Firefly Software Solutions Inc
+# Copyright 2026 Firefly Software Foundation
 #
 # Prompt template for the RAG answerer. Reads a question + retrieved
 # chunks and produces a grounded answer with explicit citations.

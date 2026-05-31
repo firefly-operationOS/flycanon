@@ -6,11 +6,11 @@ version = "26.5.8"
 description = "Operational Knowledge Repository -- versioned, provenance-tracked canonical knowledge with hybrid retrieval and RAG, exposed as a standalone HTTP microservice over fireflyframework-pyfly and -agentic. Part of Firefly OperationOS, platform-agnostic by design."
 readme = "README.md"
 requires-python = ">=3.13,<3.14"
-# flycanon (the service) is proprietary -- no public license is granted.
-# Only the SDKs under ``sdks/python`` and ``sdks/java`` are released
-# under Apache-2.0; each carries its own LICENSE file.
+# Released under the Apache License 2.0 -- see the LICENSE file. The SDKs
+# under ``sdks/python`` and ``sdks/java`` carry their own LICENSE files.
+license = { text = "Apache-2.0" }
 authors = [
-    { name = "Firefly Software Solutions Inc" },
+    { name = "Firefly Software Foundation" },
 ]
 
 dependencies = [

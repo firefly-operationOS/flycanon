@@ -1,4 +1,4 @@
-# Copyright 2026 Firefly Software Solutions Inc
+# Copyright 2026 Firefly Software Foundation
 #
 # Copy to .env (this file is the canonical reference; .env is gitignored).
 # All keys are prefixed with FLYCANON_ so they are easy to grep for and

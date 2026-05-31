@@ -1,4 +1,4 @@
-# Copyright 2026 Firefly Software Solutions Inc
+# Copyright 2026 Firefly Software Foundation
 #
 # Integration-test overlay. Adds an OpenAI-compatible mock LLM server so
 # integration tests run against a deterministic backend without burning
