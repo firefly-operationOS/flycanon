@@ -26,7 +26,6 @@ from __future__ import annotations
 import uuid
 
 import pytest
-
 from fireflyframework_agentic.vectorstores import TenantScopedVectorStore
 from fireflyframework_agentic.vectorstores.types import VectorDocument
 
@@ -108,9 +107,7 @@ class TestQdrantScopeIsolation:
             mine = await store.search([1.0, 0.0, 0.0], top_k=5, tenant_id="acme", workspace_id="ws-a")
             assert [r.document.id for r in mine] == [id_a]
 
-            foreign = await store.search(
-                [1.0, 0.0, 0.0], top_k=5, tenant_id="nobody", workspace_id="ws-a"
-            )
+            foreign = await store.search([1.0, 0.0, 0.0], top_k=5, tenant_id="nobody", workspace_id="ws-a")
             assert foreign == []
         finally:
             await store.close()

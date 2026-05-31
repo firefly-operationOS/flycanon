@@ -27,7 +27,6 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
-
 from fireflyframework_agentic.vectorstores import TenantScopedVectorStore
 
 from flycanon.core.services.retrieval import corpus_factory

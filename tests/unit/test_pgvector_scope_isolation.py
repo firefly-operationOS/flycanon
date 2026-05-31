@@ -33,7 +33,6 @@ from __future__ import annotations
 from unittest.mock import AsyncMock
 
 import pytest
-
 from fireflyframework_agentic.vectorstores import PgVectorVectorStore
 
 from flycanon.core.services.retrieval.pgvector_store import RlsPgVectorVectorStore, _asyncpg_dsn

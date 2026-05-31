@@ -170,9 +170,7 @@ class TestRemoveForSourcePurgesVectors:
         await svc.remove_for_source("src-1", tenant_id="acme", workspace_id="ws-a")
 
         chunk_repo.list_for_source.assert_awaited_once_with("src-1")
-        vector_store.delete.assert_awaited_once_with(
-            ["ch-1", "ch-2"], tenant_id="acme", workspace_id="ws-a"
-        )
+        vector_store.delete.assert_awaited_once_with(["ch-1", "ch-2"], tenant_id="acme", workspace_id="ws-a")
 
     @pytest.mark.asyncio
     async def test_requires_explicit_scope(self):

@@ -273,9 +273,7 @@ class CanonCoreConfiguration:
         return ctx
 
     @bean
-    def index_service(
-        self, corpus_context: CorpusContext, chunk_repository: ChunkRepository
-    ) -> IndexService:
+    def index_service(self, corpus_context: CorpusContext, chunk_repository: ChunkRepository) -> IndexService:
         return IndexService(context=corpus_context, chunk_repository=chunk_repository)
 
     @bean
