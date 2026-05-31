@@ -4541,7 +4541,7 @@
           "version": {
             "description": "CalVer (``YY.MM.PP``) baked into the wheel at build time. PEP 440 normalises ``26.05.01`` -> ``26.5.1`` so the value you see here uses the stripped form.",
             "examples": [
-              "26.5.1"
+              "26.5.9"
             ],
             "title": "Version",
             "type": "string"
@@ -4925,7 +4925,7 @@
       "url": "https://github.com/firefly-operationOS/flycanon/blob/main/LICENSE"
     },
     "title": "flycanon",
-    "version": "26.5.6"
+    "version": "26.5.9"
   },
   "openapi": "3.1.0",
   "paths": {

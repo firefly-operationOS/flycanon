@@ -2,6 +2,18 @@
 
 All notable changes to **flycanon** are documented here.
 
+## [26.5.9] - 2026-05-31
+
+### Changed
+
+- **Open-sourced under the Apache License 2.0.** Replaced the proprietary
+  notice with the full Apache 2.0 `LICENSE` (root + both SDKs) and prepended
+  the Apache 2.0 header to every source file. The copyright holder is now
+  Firefly Software Foundation, and the repository is public.
+- Set the OpenAPI `info.license`, the image `licenses` label, the README
+  badge, and `pyproject` metadata to Apache-2.0.
+- Realigned `__version__` with the packaged release version.
+
 ## [Unreleased] -- Multitenancy backbone
 
 ### Added -- multi-backend vector stores (26.5.8)

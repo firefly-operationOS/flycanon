@@ -14,7 +14,7 @@ with citations — all behind a single HTTP service.
 [![agentic](https://img.shields.io/badge/genai-fireflyframework--agentic-purple)](https://github.com/fireflyframework/fireflyframework-agentic)
 [![OpenAPI](https://img.shields.io/badge/api-openapi%203.1-green)](docs/api-reference.md)
 [![vector store](https://img.shields.io/badge/vector--store-pgvector%20%7C%20qdrant%20%7C%20chroma-336791)](docs/architecture.md#retrieval-backend-pluggable-dense-store)
-[![Version](https://img.shields.io/badge/version-26.5.8-green.svg)](#)
+[![Version](https://img.shields.io/badge/version-26.5.9-green.svg)](#)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 
 </div>
