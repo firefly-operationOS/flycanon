@@ -71,15 +71,15 @@ class IngestJobRepository:
     ) -> IngestJobRow | None:
         """Look up one ingest job, scoped to ``(tenant_id, workspace_id)``.
 
-        Plan 6 Task 1: scope kwargs are MANDATORY. A job owned by a
-        different workspace (same tenant) returns ``None`` instead
-        of leaking to the caller.
+        Scope kwargs are MANDATORY. A job owned by a different
+        workspace (same tenant) returns ``None`` instead of leaking to
+        the caller.
 
         Workers that dispatch off the EDA payload (which carries the
         job id without the request context) must use
         :meth:`get_across_workspaces` -- the row's own scope columns
-        provide the scope ex post. Plan 6 Task 4 replaces that
-        escape hatch with a Postgres BYPASSRLS role.
+        provide the scope ex post, backed by a Postgres BYPASSRLS
+        role.
         """
         async with self._session_factory() as session:
             result = await session.execute(
@@ -317,11 +317,9 @@ class IngestJobRepository:
     ) -> IngestJobEventRow:
         """Append one progress event for a job.
 
-        ``tenant_id`` + ``workspace_id`` default to ``"default"`` so the
-        legacy callers that pre-date Plan 4's scope tightening keep
-        compiling, but every production call site now threads the
-        parent job's scope (so the per-event projection lines up with
-        the parent row).
+        ``tenant_id`` + ``workspace_id`` default to ``"default"``;
+        every production call site threads the parent job's scope so
+        the per-event projection lines up with the parent row.
         """
         async with self.session() as session:
             event = IngestJobEventRow(
@@ -348,9 +346,9 @@ class IngestJobRepository:
     ) -> list[IngestJobEventRow]:
         """Return events for a job ordered by id ascending.
 
-        Plan 6 Task 1: scope kwargs are MANDATORY. Events tied to a
-        job owned by a different workspace (same tenant) return an
-        empty list instead of leaking.
+        Scope kwargs are MANDATORY. Events tied to a job owned by a
+        different workspace (same tenant) return an empty list instead
+        of leaking.
 
         The SSE endpoint passes ``after_id`` so a long-running poll
         only fetches the deltas since its last cursor position.

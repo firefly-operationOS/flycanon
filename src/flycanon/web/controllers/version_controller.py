@@ -47,9 +47,7 @@ class VersionController:
         * ``embedding_model`` / ``answer_model`` /
           ``answer_fallback_model`` -- ``<provider>:<model>``
           identifiers read from :class:`CanonSettings`.
-        * ``vector_store`` -- one of ``pgvector`` (default),
-          ``sqlite-vec``, ``chroma``, ``qdrant``, ``pinecone``,
-          ``memory``.
+        * ``vector_store`` -- ``pgvector``.
         * ``eda_adapter`` -- one of ``postgres`` (default),
           ``memory``, ``redis``, ``kafka``.
         """

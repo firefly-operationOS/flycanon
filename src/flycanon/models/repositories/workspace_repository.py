@@ -1,9 +1,9 @@
 # Copyright 2026 Firefly Software Solutions Inc
 """Async repository for ``canon_workspaces``.
 
-The workspace surface is the entry point for Plan 4's multi-tenancy
-adoption: every other ``canon_*`` row hangs off a ``(tenant_id,
-workspace_id)`` pair owned by a row in this table. The repository
+The workspace surface is the entry point for multi-tenancy: every
+other ``canon_*`` row hangs off a ``(tenant_id, workspace_id)`` pair
+owned by a row in this table. The repository
 mirrors :class:`flyradar.models.repositories.agent_token_repository.AgentTokenRepository`
 in shape -- it returns plain ``dict`` rows so the service layer never
 imports SQLAlchemy -- and follows the flycanon convention of taking a
@@ -57,7 +57,7 @@ class WorkspaceRepository:
 
         Callers pass a plain dict so the service layer never imports
         SQLAlchemy. ``tenant_id`` + ``id`` are required (the
-        composite-key contract Plan 4 added to every ``canon_*`` table).
+        composite-key contract every ``canon_*`` table follows).
         """
         async with self._session_factory() as session, session.begin():
             session.add(Workspace(**row))

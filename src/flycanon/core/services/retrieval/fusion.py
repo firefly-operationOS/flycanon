@@ -1,15 +1,15 @@
 # Copyright 2026 Firefly Software Solutions Inc
 """Hybrid retrieval -- BM25 + dense vectors fused via Reciprocal Rank Fusion.
 
-These types used to live in ``fireflyframework_agentic.rag`` (``StoredChunk``,
-``ChunkHit``, ``HybridRetriever``, ``reciprocal_rank_fusion``). The framework's
-RAG module has been removed, so flycanon owns them directly. The call contract
-the orchestration relies on is preserved exactly -- ``corpus.bm25_search`` /
-``corpus.get_chunks`` / ``vector_store.search`` / ``embedder.embed_one`` -- so
-the scope-binding wrappers in :mod:`retrieval_service` need no change.
+Hybrid-retrieval primitives -- ``StoredChunk``, ``ChunkHit``,
+``HybridRetriever`` and ``reciprocal_rank_fusion`` -- used by the retrieval
+service. The orchestration relies on a fixed call contract --
+``corpus.bm25_search`` / ``corpus.get_chunks`` / ``vector_store.search`` /
+``embedder.embed_one`` -- matched by the scope-binding wrappers in
+:mod:`retrieval_service`.
 
 The module is self-contained: it depends only on the stdlib, and types its
-collaborators via structural :class:`Protocol`s. The pgvector-default path
+collaborators via structural :class:`Protocol`s. The pgvector path
 (``PostgresCorpus`` + ``PgVectorVectorStore`` + ``EmbeddingService``) satisfies
 those protocols structurally.
 """
@@ -85,8 +85,8 @@ class HybridRetriever:
     Queries may be plain strings (route defaults to ``hybrid``) or any object
     exposing ``.text`` / ``.route`` attributes.
 
-    ``rrf_k`` is honoured (the framework version hard-coded 60), so flycanon's
-    ``FLYCANON_RETRIEVAL_RRF_K`` knob is now live.
+    ``rrf_k`` is honoured, exposed through the ``FLYCANON_RETRIEVAL_RRF_K``
+    knob.
     """
 
     def __init__(

@@ -24,8 +24,7 @@ Format coverage:
 * **RTF**        -- :class:`RtfLoader` (striprtf).
 * **ODT/ODS/ODP** -- :class:`OdfLoader` (odfpy).
 
-Unrecognised payloads fall back to :class:`TextLoader`. There is no
-Microsoft MarkItDown dependency.
+Unrecognised payloads fall back to :class:`TextLoader`.
 """
 
 from __future__ import annotations

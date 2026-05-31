@@ -23,7 +23,7 @@ class CreateConversationRequest(BaseModel):
 
     ``actor`` is intentionally NOT a body field: the conversation's
     actor is derived from the request context (the JWT subject or
-    agent-token prefix), per the Plan 4 wire contract.
+    agent-token prefix).
     """
 
     title: str | None = Field(default=None, max_length=512)

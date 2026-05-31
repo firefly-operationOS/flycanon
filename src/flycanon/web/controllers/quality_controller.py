@@ -19,7 +19,7 @@ class ConflictScanRequest(BaseModel):
 
     ``actor`` is intentionally NOT a body field: the audit actor is
     derived from the request context (the JWT subject or agent-token
-    prefix), per the Plan 4 wire contract.
+    prefix).
     """
 
     domain: str | None = Field(default=None)

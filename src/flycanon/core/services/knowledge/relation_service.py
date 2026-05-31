@@ -211,9 +211,9 @@ class KnowledgeRelationService:
     ) -> tuple[list, list]:
         """Return ``(outgoing, incoming)`` rows for the item.
 
-        Plan 6 Task 1: scope kwargs are MANDATORY. A foreign item
-        raises :class:`KnowledgeItemNotFound`; relations rooted in
-        a different workspace never surface.
+        Scope kwargs are MANDATORY. A foreign item raises
+        :class:`KnowledgeItemNotFound`; relations rooted in a
+        different workspace never surface.
         """
         item = await self._knowledge.get_item(
             item_id,

@@ -298,7 +298,7 @@ flycanon's wire contract is gated by tooling, not convention:
   the old surface stays operational for at least one minor release
   cycle, marked deprecated in the OpenAPI spec, before removal.
 - **No service-specific synonyms.** Field names follow the
-  [shared vocabulary](../../docs/firefly-intelligence-system.md#shared-vocabulary-post-unification)
+  [shared vocabulary](../../docs/firefly-intelligence-system.md#shared-vocabulary)
   (`tenant_id`, `workspace_id`, `correlation_id`, `actor`,
   `agent_token`); no `engagement_id` aliases, no
   service-specific shorthands.

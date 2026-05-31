@@ -159,9 +159,9 @@ class SourcesController:
         5. Embeds every chunk through the configured provider
            (``FLYCANON_EMBEDDING_MODEL``).
 
-        6. Indexes BM25 (SQLite FTS5) + dense vectors (pgvector by
-           default, swappable via ``FLYCANON_VECTOR_STORE``) keyed
-           by ``chunk_id``.
+        6. Indexes BM25 (Postgres ``tsvector`` + GIN on
+           ``canon_chunks``) + dense vectors (pgvector) keyed by
+           ``chunk_id``.
 
         7. Records an audit row and broadcasts ``SourceIngested`` on
            ``flycanon.ingest``.

@@ -69,11 +69,10 @@ class ConversationsController:
     ) -> Conversation:
         """Return the full session + turn history.
 
-        Plan 6 Task 1 closes the workspace-scope gap on this read --
-        the service-layer ``get`` now requires ``(tenant_id,
-        workspace_id)`` and a same-tenant cross-workspace lookup
-        raises :class:`ConversationNotFound` (404), not the foreign
-        row.
+        The service-layer ``get`` requires ``(tenant_id,
+        workspace_id)``; a same-tenant cross-workspace lookup raises
+        :class:`ConversationNotFound` (404) rather than returning the
+        foreign row.
         """
         ctx: TenantContext = tenant_context_from_request(http_request)
         try:

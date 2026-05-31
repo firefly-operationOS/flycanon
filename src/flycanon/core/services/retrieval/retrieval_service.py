@@ -1,16 +1,15 @@
 # Copyright 2026 Firefly Software Solutions Inc
 """Hybrid retrieval service.
 
-Wraps the agentic :class:`HybridRetriever`, hydrates the resulting
+Wraps :class:`HybridRetriever`, hydrates the resulting
 :class:`ChunkHit` rows with Postgres metadata, and applies the
 caller-supplied filters (domain / jurisdiction / status / explicit
 ids) as a post-retrieval pass.
 
-Filters run AFTER retrieval because the agentic ``HybridRetriever``
-does not expose pre-filter predicates yet -- pulling more candidates
-and trimming locally is the pragmatic v1 strategy. The
-``per_query_k`` knob lets callers compensate by widening the
-retrieval window.
+Filters run AFTER retrieval because :class:`HybridRetriever` does not
+expose pre-filter predicates -- pulling more candidates and trimming
+locally is the strategy here. The ``per_query_k`` knob lets callers
+compensate by widening the retrieval window.
 """
 
 from __future__ import annotations
@@ -115,12 +114,11 @@ class RetrievalService:
         scope is a programmer error: the service raises
         :class:`MissingTenantContext` rather than silently falling
         back to ``'default'`` so leak-by-omission can never reach
-        production. Plan 4 wires every caller to pass real values.
+        production. Every caller threads real values.
         """
         if not tenant_id or not workspace_id:
             # Fail closed -- the read path is security-critical.
-            # Plan 4 will tighten the write path too, but until
-            # then callers MUST present a real scope for the read.
+            # Callers MUST present a real scope for the read.
             raise MissingTenantContext(
                 "RetrievalService.search requires tenant_id and workspace_id; "
                 "callers must thread the tenant scope explicitly."
@@ -128,15 +126,13 @@ class RetrievalService:
 
         from flycanon.core.services.retrieval.fusion import HybridRetriever
 
-        # Approach (a) -- scope-bound proxies. The agentic
-        # ``HybridRetriever`` calls ``corpus.bm25_search(text,
-        # top_k=...)`` and ``vector_store.search(qvec, top_k=...)``
-        # without scope kwargs, so we wrap the two corpora in thin
-        # adapters that bake the scope into every call before
-        # delegating. The framework's RRF fusion + telemetry stays
-        # untouched; only the read predicate is augmented. The
-        # alternative -- reimplementing fusion at the service layer
-        # -- would duplicate the agentic RRF math without benefit.
+        # Scope-bound proxies. ``HybridRetriever`` calls
+        # ``corpus.bm25_search(text, top_k=...)`` and
+        # ``vector_store.search(qvec, top_k=...)`` without scope
+        # kwargs, so we wrap the two corpora in thin adapters that
+        # bake the scope into every call before delegating. RRF
+        # fusion + telemetry stays untouched; only the read predicate
+        # is augmented.
         scoped_corpus = _ScopedCorpus(
             self._context.corpus,
             tenant_id=tenant_id,
@@ -147,7 +143,7 @@ class RetrievalService:
             tenant_id=tenant_id,
             workspace_id=workspace_id,
         )
-        # The agentic embedder protocol is honoured by our EmbeddingService
+        # The embedder protocol is honoured by EmbeddingService
         # via the ``embed`` method; pass it through directly.
         retriever = HybridRetriever(
             corpus=scoped_corpus,  # type: ignore[arg-type]
@@ -161,9 +157,8 @@ class RetrievalService:
         start = time.perf_counter()
 
         # Optional multi-query expansion. When enabled, the retriever
-        # walks every paraphrase in one call -- the agentic
-        # HybridRetriever already RRFs over the multi-query result
-        # lists internally.
+        # walks every paraphrase in one call -- HybridRetriever RRFs
+        # over the multi-query result lists internally.
         queries = [query]
         if self._query_expander is not None and self._query_expansion_n > 1:
             queries = await self._query_expander.expand(query, n=self._query_expansion_n)
@@ -355,12 +350,12 @@ class RetrievalService:
 
 
 class _EmbedderShim:
-    """Adapt :class:`EmbeddingService` to the agentic ``EmbeddingProtocol``.
+    """Adapt :class:`EmbeddingService` to the retriever's embedder protocol.
 
-    The framework expects an embedder with an async ``embed`` method
+    The retriever expects an embedder with an async ``embed`` method
     returning an object whose ``embeddings`` attribute is the list of
-    vectors. Our :class:`EmbeddingService` already returns vectors
-    directly; this shim wraps them in the expected shape.
+    vectors. :class:`EmbeddingService` returns vectors directly; this
+    shim wraps them in the expected shape.
     """
 
     def __init__(self, service: EmbeddingService) -> None:
@@ -371,7 +366,7 @@ class _EmbedderShim:
         return _EmbedResult(embeddings=vectors)
 
     async def embed_one(self, text: str) -> list[float]:
-        """Single-text convenience used by the agentic ``HybridRetriever``.
+        """Single-text convenience used by :class:`HybridRetriever`.
 
         The retriever calls this for the search query path; returning
         the raw vector keeps the call cheap and avoids the wrapper.
@@ -387,18 +382,14 @@ class _EmbedResult:
 class _ScopedCorpus:
     """Bind ``(tenant_id, workspace_id)`` onto every corpus read.
 
-    The agentic ``HybridRetriever`` calls ``bm25_search(text, top_k=...)``
+    :class:`HybridRetriever` calls ``bm25_search(text, top_k=...)``
     and ``get_chunks(ids)`` without scope kwargs; this thin wrapper
     intercepts those reads and forwards the scope to the underlying
     corpus when its signature accepts it.
 
-    Only flycanon's :class:`PostgresCorpus` honours scope kwargs
-    natively (Plan 3 task 4). The agentic ``SqliteCorpus`` (used
-    by the ``sqlite-vec`` backend) doesn't expose scope yet, so
-    the wrapper detects support and falls back to the un-scoped
-    call. In multi-tenant deployments operators MUST use the
-    ``pgvector`` backend; ``sqlite-vec`` is intentionally a
-    single-tenant local-dev convenience. Write surfaces are not
+    :class:`PostgresCorpus` honours scope kwargs natively, so the
+    wrapper detects support via a signature probe and only forwards
+    the scope when the call accepts it. Write surfaces are not
     wrapped -- the index writer goes through :class:`IndexService`
     directly, with its own scope threading.
     """
@@ -452,23 +443,16 @@ class _ScopedCorpus:
 class _ScopedVectorStore:
     """Bind ``(tenant_id, workspace_id)`` onto every vector-store read.
 
-    Mirror of :class:`_ScopedCorpus` for the dense projection. The
-    agentic retriever calls ``search(qvec, top_k=...)`` without
-    scope; this wrapper forwards the scope to whichever vector
-    store the deployment picked.
+    Mirror of :class:`_ScopedCorpus` for the dense projection.
+    :class:`HybridRetriever` calls ``search(qvec, top_k=...)`` without
+    scope; this wrapper forwards the scope to the vector store.
 
-    Only the flycanon :class:`PgVectorVectorStore` honours scope
-    kwargs natively (Plan 3 task 3). For the agentic backends
-    (``sqlite-vec``, ``chroma``, ``qdrant``, ``pinecone``,
-    ``memory``) the scope isn't pushed down -- their ``search``
-    signature would reject the extras with ``TypeError`` -- but
-    the scope is still enforced by :class:`_ScopedCorpus`. The
-    agentic ``HybridRetriever`` always re-hydrates the fused
-    top ids via ``corpus.get_chunks(...)`` which is scope-filtered;
-    any vector hit pointing at a foreign-scope chunk is silently
-    dropped when hydration can't find it. Backends that grow
-    scope kwargs in a future agentic release will pick them up
-    automatically -- the signature probe below detects them.
+    :class:`PgVectorVectorStore` honours scope kwargs natively, so the
+    signature probe below detects support and forwards the scope. As a
+    defence in depth, :class:`HybridRetriever` always re-hydrates the
+    fused top ids via ``corpus.get_chunks(...)`` which is
+    scope-filtered; any vector hit pointing at a foreign-scope chunk is
+    silently dropped when hydration can't find it.
     """
 
     _SUPPORTS_SCOPE_KEYS = ("tenant_id", "workspace_id")

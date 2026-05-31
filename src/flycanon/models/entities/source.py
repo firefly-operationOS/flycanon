@@ -70,10 +70,9 @@ class SourceRow(Base):
         # SHA-256 is the idempotency anchor *within a workspace*: two
         # uploads of the same bytes into the same workspace hit the
         # same row, while the same bytes uploaded into a different
-        # workspace get their own row (per unification spec section
-        # 4.2). The partial index keeps the constraint useful even
-        # on Postgres where ``NULL`` would otherwise be globally
-        # allowed.
+        # workspace get their own row. The partial index keeps the
+        # constraint useful even on Postgres where ``NULL`` would
+        # otherwise be globally allowed.
         Index(
             "uq_canon_sources_tenant_workspace_content_sha256",
             "tenant_id",

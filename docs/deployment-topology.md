@@ -6,7 +6,7 @@
 > repos.
 
 The platform narrative ("what these two services are, why they share
-a vocabulary, how the unification lands") lives in
+a vocabulary") lives in
 [firefly-intelligence-system.md](firefly-intelligence-system.md) --
 this document does not re-state that material; it links to it.
 
@@ -481,7 +481,7 @@ else has a working default. Every row was verified against
 | `FLYCANON_QUERY_EXPANSION_ENABLED` | no | `false` | Multi-query expansion (+1 LLM call per `/search` and `/query`). |
 | `FLYCANON_PII_SCANNER` | no | `regex` | `regex`, `presidio`, or `disabled`. |
 | `FLYCANON_PII_POLICY` | no | `warn` | `warn`, `redact`, `reject`. |
-| `FLYCANON_VECTOR_STORE` | no | `pgvector` | `pgvector` is the only supported value (HNSW in same Postgres; BM25 rides on `tsvector` + GIN). The `sqlite-vec` / `chroma` / `qdrant` / `pinecone` / `memory` backends were removed in the pgvector-only RAG migration. |
+| `FLYCANON_VECTOR_STORE` | no | `pgvector` | `pgvector` is the only supported value (HNSW in same Postgres; BM25 rides on `tsvector` + GIN). |
 | `FLYCANON_PGVECTOR_TABLE` | no | `canon_chunk_vectors` | |
 | `FLYCANON_PGVECTOR_HNSW_M` | no | `16` | HNSW degree. |
 | `FLYCANON_PGVECTOR_HNSW_EF_CONSTRUCTION` | no | `64` | HNSW build-time candidate list. |

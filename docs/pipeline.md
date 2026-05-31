@@ -95,7 +95,7 @@ POST /api/v1/candidates/{id}:reject
 POST /api/v1/search    (raw hybrid retrieval)
   → SearchKnowledgeHandler → SearchService.search
       → RetrievalService.search
-          → HybridRetriever (vendored in core/services/retrieval/fusion.py):
+          → HybridRetriever (core/services/retrieval/fusion.py):
                 BM25 over Postgres tsvector + GIN on canon_chunks
                 + dense over pgvector (same Postgres),
                 fused via Reciprocal Rank Fusion (k = FLYCANON_RETRIEVAL_RRF_K)

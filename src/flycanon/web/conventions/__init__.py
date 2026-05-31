@@ -2,7 +2,7 @@
 """flycanon HTTP conventions.
 
 This package owns the wire-contract primitives both flyradar and
-flycanon agree on (per the 2026-05-21 unification spec):
+flycanon agree on:
 
 * header-name constants,
 * the ``TenantContext`` request scope,

@@ -52,9 +52,9 @@ class SourceRepository:
     ) -> SourceRow | None:
         """Look up one source, scoped to ``(tenant_id, workspace_id)``.
 
-        Plan 6 Task 1 closes the workspace-scope gap: the scope kwargs
-        are MANDATORY. A row living in a different workspace (same
-        tenant) returns ``None`` instead of leaking to the caller.
+        The scope kwargs are MANDATORY. A row living in a different
+        workspace (same tenant) returns ``None`` instead of leaking to
+        the caller.
 
         Worker code that walks the table without a request scope must
         use :meth:`get_across_workspaces` explicitly.
@@ -73,9 +73,8 @@ class SourceRepository:
         """Cross-workspace lookup -- TRUSTED-CONTEXT callers only.
 
         Used by workers / sweepers that operate without a request
-        scope (the row's own scope columns provide it ex post). Plan
-        6 Task 4 replaces this code-level escape hatch with a
-        Postgres BYPASSRLS role.
+        scope (the row's own scope columns provide it ex post), backed
+        by a Postgres BYPASSRLS role.
 
         Do NOT call from request-scoped code paths.
         """

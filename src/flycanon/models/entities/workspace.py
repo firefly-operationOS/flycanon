@@ -2,8 +2,8 @@
 """``canon_workspaces`` -- canonical workspace identity + metadata.
 
 A workspace scopes every other canon_* row through the ``tenant_id`` +
-``workspace_id`` composite that Plan 4 (multi-tenancy adoption) added
-across the schema. The row stores the human-facing name, the lifecycle
+``workspace_id`` composite carried across the schema. The row stores
+the human-facing name, the lifecycle
 status, optional scope / SME roster metadata, and retention / jurisdiction
 defaults that downstream services consult when materialising knowledge.
 

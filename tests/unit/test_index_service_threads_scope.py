@@ -162,9 +162,9 @@ class TestReplaceForSourceWritePathFailsClosed:
 class TestReplaceForSourceLegacyVectorStore:
     @pytest.mark.asyncio
     async def test_does_not_pass_scope_to_unsupported_store(self):
-        # Agentic backends (InMemory, SqliteVec, Chroma) don't accept
-        # scope kwargs -- passing tenant_id would raise TypeError.
-        # IndexService must probe and call them without the extras.
+        # A vector store whose ``upsert`` takes no scope kwargs --
+        # passing tenant_id would raise TypeError. IndexService must
+        # probe and call it without the extras.
         corpus = _FakeCorpus()
         vector_store = _FakeLegacyVectorStore()
         svc = _make_index_service(corpus=corpus, vector_store=vector_store)

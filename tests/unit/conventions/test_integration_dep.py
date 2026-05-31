@@ -4,8 +4,8 @@
 These tests cover the path the unit tests do not exercise: the
 dependency wires the ContextVar, the route reads it via
 ``current_tenant_context()``, and ``tenant_safe_client`` propagates
-it on an outbound call. This is the path Plan 2's controllers will
-adopt — it MUST work end-to-end.
+it on an outbound call. This is the path the controllers use -- it
+MUST work end-to-end.
 """
 
 from __future__ import annotations

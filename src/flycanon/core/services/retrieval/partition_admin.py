@@ -3,8 +3,7 @@
 
 DORMANT BY DEFAULT. Production deployments stay on Tier-A
 (global HNSW + ef_search bump + WHERE filter) until a single
-tenant outgrows the global index -- empirically ~500k+ chunks
-per the unification spec section 4.3.
+tenant outgrows the global index -- empirically ~500k+ chunks.
 
 When an admin needs to enable Tier-B for a hot tenant, they:
 

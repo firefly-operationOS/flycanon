@@ -47,8 +47,8 @@ class KnowledgeDiffService:
     ) -> KnowledgeVersionDiff:
         """Diff two versions of a knowledge item, scoped to ``(tenant, workspace)``.
 
-        Plan 6 Task 1: scope kwargs are MANDATORY. A cross-workspace
-        diff raises :class:`KnowledgeItemNotFound`.
+        Scope kwargs are MANDATORY. A cross-workspace diff raises
+        :class:`KnowledgeItemNotFound`.
         """
         item = await self._repository.get_item(
             item_id,

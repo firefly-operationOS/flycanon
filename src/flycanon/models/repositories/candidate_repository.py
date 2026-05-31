@@ -49,9 +49,9 @@ class CandidateRepository:
     ) -> CandidateRow | None:
         """Look up one candidate, scoped to ``(tenant_id, workspace_id)``.
 
-        Plan 6 Task 1: scope kwargs are MANDATORY on every read-by-id
-        path. A candidate living in a different workspace (same
-        tenant) returns ``None`` instead of leaking.
+        Scope kwargs are MANDATORY on every read-by-id path. A
+        candidate living in a different workspace (same tenant)
+        returns ``None`` instead of leaking.
         """
         async with self._session_factory() as session:
             result = await session.execute(
@@ -68,8 +68,7 @@ class CandidateRepository:
 
         Workers / sweepers that walk the table without a request
         scope use this; the row's own scope columns provide the
-        scope ex post. Plan 6 Task 4 replaces this code-level escape
-        hatch with a Postgres BYPASSRLS role.
+        scope ex post, backed by a Postgres BYPASSRLS role.
         """
         async with self._session_factory() as session:
             return await session.get(CandidateRow, candidate_id)

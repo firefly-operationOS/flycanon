@@ -27,9 +27,9 @@ The store creates one table per service deployment
         ON canon_chunk_vectors (tenant_id, workspace_id);
 
 The HNSW index gives sub-millisecond ANN over millions of rows; the
-namespace column is retained as a legacy diagnostic, and the
-``(tenant_id, workspace_id)`` composite is the canonical scope used by
-Plan 3 retrieval filters.
+namespace column carries a diagnostic ``t/<tenant>/w/<workspace>``
+label, and the ``(tenant_id, workspace_id)`` composite is the
+canonical scope used by the retrieval filters.
 
 Activated when ``FLYCANON_VECTOR_STORE=pgvector``; requires the
 ``pgvector`` extra (``uv sync --extra pgvector``) and the pgvector
@@ -48,9 +48,9 @@ from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker, create_async
 logger = logging.getLogger(__name__)
 
 
-# Plan 3 default for ``hnsw.ef_search``. The HNSW index builder picks a
-# small candidate-list size by default (~40); 200 trades ~2ms of extra
-# query time for recall that's competitive with brute force. ``SET LOCAL``
+# Default for ``hnsw.ef_search``. The HNSW index builder picks a small
+# candidate-list size by default (~40); 200 trades ~2ms of extra query
+# time for recall that's competitive with brute force. ``SET LOCAL``
 # scopes the bump to a single transaction, so other workloads on the same
 # connection pool are unaffected.
 _HNSW_EF_SEARCH = 200
@@ -65,17 +65,15 @@ _DEFAULT_WIDENING_FACTOR = 5
 def _scope_namespace(tenant_id: str, workspace_id: str) -> str:
     """Canonical ``t/<tenant>/w/<workspace>`` namespace string.
 
-    Kept as a backstop while the framework's
-    :class:`VectorStoreProtocol` still threads ``namespace`` everywhere
-    -- the new scope columns are the authoritative filter, but mirroring
-    them onto ``namespace`` keeps diagnostics and any non-scope-aware
-    caller working.
+    The scope columns are the authoritative filter; mirroring them onto
+    the ``namespace`` field keeps the diagnostic label aligned with the
+    scope.
     """
     return f"t/{tenant_id}/w/{workspace_id}"
 
 
 class PgVectorVectorStore:
-    """Backend-agnostic VectorStoreProtocol implementation over pgvector."""
+    """VectorStoreProtocol implementation over pgvector."""
 
     def __init__(
         self,
@@ -208,10 +206,10 @@ class PgVectorVectorStore:
 
         ``tenant_id`` / ``workspace_id`` are the authoritative scope and
         required: callers must propagate the request-bound scope rather
-        than rely on a silent ``"default"`` fallback. The legacy
-        ``namespace`` argument is preserved for callers that haven't been
-        migrated to the scoped API yet but is overridden whenever the
-        canonical ``t/<tenant>/w/<workspace>`` template applies.
+        than rely on a silent ``"default"`` fallback. The ``namespace``
+        argument carries the diagnostic label and is overridden by the
+        canonical ``t/<tenant>/w/<workspace>`` template whenever it
+        applies.
         """
         factory = await self._ensure_engine()
         scope_namespace = _scope_namespace(tenant_id, workspace_id)

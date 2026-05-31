@@ -24,7 +24,7 @@ The framework runtime lives in
 agentic substrate -- FireflyAgent over pydantic-ai and the unified
 binary normaliser (`fireflyframework_agentic.content.binary`) -- lives
 in [`fireflyframework-agentic`](https://github.com/fireflyframework/fireflyframework-agentic).
-flycanon vendors its own hybrid-retrieval primitives in
+flycanon owns its hybrid-retrieval primitives in
 `core/services/retrieval/fusion.py`.
 flycanon's job is the composition: take raw bytes in any format,
 ground them in a canonical version chain, and expose retrieval + RAG
@@ -56,26 +56,22 @@ operational Postgres -- see _Retrieval backend (pgvector-only)_ below.
 Every `canon_*` row also carries `(tenant_id, workspace_id)` as the
 multitenancy scope -- see _Workspace + multitenancy_ below.
 
-## Workspace + multitenancy (Plan 2 foundation)
+## Workspace + multitenancy
 
-Flycanon is the **canonical store** for workspace identity (per the
-unification spec section 4.1). The `canon_workspaces` table holds
-the authoritative row for every workspace; sibling services
-(flyradar, flydesk-*) read workspace details via a cached client
-(added in their respective plans).
+Flycanon is the **canonical store** for workspace identity. The
+`canon_workspaces` table holds the authoritative row for every
+workspace; sibling services (flyradar, flydesk-*) read workspace
+details via a cached client.
 
 Every `canon_*` row carries `(tenant_id, workspace_id)` as NOT NULL
-columns. Today they default to `'default'` on every insert -- Plan 4
-(conventions adoption) will wire `require_tenant_context()` so
-services pass real values from request headers. Composite
-`(tenant_id, workspace_id)` indexes back the workspace-scoped query
-paths that Plan 4 introduces.
+columns. `require_tenant_context()` wires real values from request
+headers into every service call. Composite `(tenant_id,
+workspace_id)` indexes back the workspace-scoped query paths.
 
 ### Workspace lifecycle
 
 `WorkspaceStatus` is one of: `draft`, `active`, `closed`,
-`handed_off`. The CRUD API at `/api/v1/workspaces` (added in Plan 4)
-exposes:
+`handed_off`. The CRUD API at `/api/v1/workspaces` exposes:
 
 - `POST /api/v1/workspaces` -- create
 - `GET /api/v1/workspaces` -- list (tenant-scoped via header)
@@ -86,16 +82,15 @@ exposes:
 
 ### Conventions module
 
-`flycanon.web.conventions` (ported from flyradar in Plan 1) supplies
-the building blocks for tenant-scoped HTTP: RFC 7807 envelope, the
-`require_tenant_context()` FastAPI dependency, an exception
-hierarchy that maps to RFC 7807, idempotency primitives, and a
-tenant-safe outbound HTTP client. It is in-tree and unit-tested
-today; controllers start consuming it in Plan 4.
+`flycanon.web.conventions` supplies the building blocks for
+tenant-scoped HTTP: RFC 7807 envelope, the `require_tenant_context()`
+FastAPI dependency, an exception hierarchy that maps to RFC 7807,
+idempotency primitives, and a tenant-safe outbound HTTP client. The
+controllers consume it on every request.
 
 ## Embeddings: tenant + workspace isolation
 
-flycanon's retrieval path is tenant-isolated end-to-end (Plan 3).
+flycanon's retrieval path is tenant-isolated end-to-end.
 The two corpora -- BM25 over `canon_chunks` and dense vectors
 over `canon_chunk_vectors` -- both filter `(tenant_id,
 workspace_id)` before computing relevance.
@@ -131,14 +126,13 @@ roll-out (one-time partitioning migration + per-tenant
 kwargs and **fails closed** (raises `MissingTenantContext`) when
 either is missing. Internally, the service wraps the two corpora
 in scope-bound proxies (`_ScopedCorpus`, `_ScopedVectorStore`)
-that inject the scope before delegating to the agentic
-`HybridRetriever`. The framework's RRF math and OpenTelemetry
-spans are untouched.
+that inject the scope before delegating to `HybridRetriever`. The
+RRF math and OpenTelemetry spans are untouched.
 
-The write path (`IndexService.replace_for_source()`) accepts
-optional scope kwargs with `'default'` fallback (column-level
-defaults in Plan 2's migration catch forgotten writes). Plan 4
-tightens both paths.
+The write path (`IndexService.replace_for_source()`) requires
+`tenant_id` + `workspace_id` kwargs with no default, so a forgotten
+scope fails loud with a `TypeError` at the call site rather than
+landing the vectors in the wrong RLS bucket.
 
 ### Re-embed drift detection
 
@@ -211,12 +205,9 @@ retrieval is a single-host, Postgres-native operation:
   Postgres -- an HNSW index on `vector_cosine_ops`, tuneable `m` /
   `ef_construction`.
 
-`FLYCANON_VECTOR_STORE` accepts only `pgvector`; the `sqlite-vec` /
-`chroma` / `qdrant` / `pinecone` / `memory` backends and the
-file-backed SQLite FTS5 corpus fallback were removed in the
-pgvector-only RAG migration. Both projections live in the same
-operational Postgres, and fusion always happens via Reciprocal Rank
-Fusion (RRF) over the two channels.
+`FLYCANON_VECTOR_STORE` accepts only `pgvector`. Both projections
+live in the same operational Postgres, and fusion always happens via
+Reciprocal Rank Fusion (RRF) over the two channels.
 
 ## Layers
 
@@ -295,7 +286,7 @@ beans are declared. It registers:
   OAuth2 resource-server stack inherited from pyfly is available
   (set `pyfly.security.oauth2.resource-server.enabled=true`).
 
-## Conventions adoption (Plan 4)
+## Tenant-context conventions
 
 All `/api/v1/*` requests except `/api/v1/version` require:
 
@@ -310,7 +301,7 @@ repositories and the retrieval layer.
 
 ### Error envelope
 
-flycanon now emits the RFC 7807 envelope from
+flycanon emits the RFC 7807 envelope from
 `flycanon.web.conventions.ProblemDetail`:
 
 ```json
@@ -328,15 +319,14 @@ flycanon now emits the RFC 7807 envelope from
 
 Media type `application/problem+json`. Programmatic clients dispatch
 on `code` (stable slug); `title` and `detail` are translation-friendly
-but not contract. The legacy `flycanon.interfaces.dtos.error.ProblemDetails`
-(plural) and `flycanon.web.problem_handlers` are deleted -- the
+but not contract. The
 `flycanon.web.conventions.register_exception_handlers()` registrar
-installs handlers at boot.
+installs the handlers at boot.
 
 ### Workspace CRUD
 
-`canon_workspaces` (Plan 2) is the canonical workspace store. CRUD
-lives at `/api/v1/workspaces`:
+`canon_workspaces` is the canonical workspace store. CRUD lives at
+`/api/v1/workspaces`:
 
 - `POST /api/v1/workspaces` -- create
 - `GET /api/v1/workspaces` -- list within tenant
@@ -347,11 +337,11 @@ lives at `/api/v1/workspaces`:
 
 All five endpoints require the standard headers. The lifecycle
 states (`draft` / `active` / `closed` / `handed_off`) match the
-`WorkspaceStatus` enum from Plan 2.
+`WorkspaceStatus` enum.
 
-### `actor` retirement
+### `actor` is audit metadata
 
-`actor` is no longer used for partitioning. Tenant + workspace come
+`actor` is not used for partitioning. Tenant + workspace come
 from headers via `TenantContext`. `actor` remains as audit metadata
 on rows (who/what created the row) -- `ctx.actor` is the canonical
 source; the field stays on `canon_audit_events` and
@@ -371,20 +361,19 @@ to flyradar's `/api/v1/discovery-jobs/*`). Three sub-routes moved:
 The async-enqueue path (`POST /api/v1/sources?mode=async`) is
 unchanged.
 
-### RetrievalService scope threading (operational again)
+### RetrievalService scope threading
 
 `RetrievalService.search()` requires `tenant_id` + `workspace_id`
-from `TenantContext`. The `/api/v1/search`, `/api/v1/query`, and
-`/api/v1/query/stream` endpoints -- which Plan 3 left fail-closed
-because their callers didn't pass scope -- are now operational
-again. Scope flows from request headers through `SearchService` /
-`AnswerService` into the retrieval layer.
+from `TenantContext`. Scope flows from request headers through
+`SearchService` / `AnswerService` into the retrieval layer on the
+`/api/v1/search`, `/api/v1/query`, and `/api/v1/query/stream`
+endpoints.
 
 ### Service-layer scope + widened constraints
 
-Services no longer rely on the `'default'` column-level
-`server_default` for `tenant_id` + `workspace_id`. Migration `0011`
-drops those defaults and widens the
+Services do not rely on a `'default'` column-level `server_default`
+for `tenant_id` + `workspace_id`. Migration `0011` drops those
+defaults and widens the
 `canon_sources.content_sha256` unique constraint to
 `(tenant_id, workspace_id, content_sha256)` -- the same content
 can now coexist in multiple workspaces and dedup is workspace-local.

@@ -1,14 +1,14 @@
 # Copyright 2026 Firefly Software Solutions Inc
 """``PostgresCorpus`` -- BM25 over ``canon_chunks`` via tsvector + GIN.
 
-Implements the surface that the agentic ``HybridRetriever`` consumes
+Implements the corpus surface that :class:`HybridRetriever` consumes
 on top of the canonical Postgres ``canon_chunks`` table -- the same
 table the rest of flycanon writes via :class:`ChunkRepository`. The
 BM25 projection rides on a GENERATED ``tsv`` column populated
 automatically by Postgres (see migration ``0003_bm25_tsv``); flycanon
 never has to maintain it.
 
-Methods called by the agentic retriever:
+Methods called by the retriever:
 
 * :meth:`bm25_search`  -- returns the top-k chunks for a free-text
   query, ranked by ``ts_rank_cd``.
@@ -16,7 +16,7 @@ Methods called by the agentic retriever:
   ``StoredChunk`` shape the retriever's RRF pass expects.
 
 Methods used by :class:`IndexService` to keep the corpus interface
-stable across backends:
+stable:
 
 * :meth:`upsert_chunks`     -- no-op (canon_chunks is the canonical
   store; the ``tsv`` projection is maintained by the GENERATED
@@ -45,7 +45,7 @@ logger = logging.getLogger(__name__)
 
 
 class PostgresCorpus:
-    """Agentic-corpus-compatible BM25 surface on ``canon_chunks``."""
+    """BM25 corpus surface on ``canon_chunks``."""
 
     def __init__(self, database_url: str, *, search_config: str = "simple") -> None:
         # Reuse the async engine pattern from the rest of flycanon --
@@ -95,7 +95,7 @@ class PostgresCorpus:
             await conn.execute(text("DELETE FROM canon_chunks"))
 
     # ------------------------------------------------------------------
-    # Reads -- the surface the HybridRetriever consumes
+    # Reads -- the surface :class:`HybridRetriever` consumes
     # ------------------------------------------------------------------
 
     async def bm25_search(
@@ -118,11 +118,9 @@ class PostgresCorpus:
         -- the BM25 query filters the chunk projection on the
         ``(tenant_id, workspace_id)`` composite BEFORE the
         ``tsvector @@ plainto_tsquery`` match so a foreign-scope
-        chunk can never bleed into another workspace's hit list.
-        Defaults to ``'default'`` so legacy single-tenant callers
-        keep working until Plan 4 wires ``TenantContext`` through.
-        The composite is selective enough (post migration 0009) that
-        the GIN-on-tsv index still gets picked for the match.
+        chunk can never bleed into another workspace's hit list. The
+        composite is selective enough that the GIN-on-tsv index still
+        gets picked for the match.
         """
         q = (query or "").strip()
         if not q:
@@ -167,7 +165,7 @@ class PostgresCorpus:
             if row["section_path"]:
                 metadata.setdefault("section_path", str(row["section_path"]))
             if row["page"] is not None:
-                # Stored as string so the downstream agentic
+                # Stored as string so the downstream
                 # ``ChunkHit.metadata`` shape (dict[str, str]) stays
                 # honest -- callers cast back to int when they need
                 # the numeric value (the DTO mapper does this).
@@ -201,8 +199,7 @@ class PostgresCorpus:
         ``tenant_id`` / ``workspace_id`` are filtered on the SQL side
         so a caller that presents a foreign chunk id (whether by bug
         or by malice) cannot read content from a workspace they don't
-        own. Defaults to ``'default'`` to match the BM25 surface and
-        let single-tenant callers stay un-modified until Plan 4.
+        own.
         """
         if not chunk_ids:
             return []

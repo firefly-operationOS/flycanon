@@ -5,20 +5,18 @@ Revision ID: 0009_embeddings_scope
 Revises: 0008_workspaces
 Create Date: 2026-05-22
 
-Plan 2 added ``(tenant_id, workspace_id)`` to ``canon_chunks`` but
-kept the original ``(source_id, embedding_model)`` re-embed-drift
-index. Per the unification spec section 4.3, the right composite
-for re-embed scope is ``(tenant_id, workspace_id, embedding_model)``
--- re-embed jobs are workspace-scoped, not source-scoped.
+Re-embed jobs are workspace-scoped, so the composite that backs
+re-embed-drift detection on ``canon_chunks`` is
+``(tenant_id, workspace_id, embedding_model)``.
 
 Adds:
-- ``ix_canon_chunks_tenant_workspace_model`` -- the new re-embed
-  drift detector.
+- ``ix_canon_chunks_tenant_workspace_model`` -- the re-embed drift
+  detector.
 - ``ix_canon_chunks_scope_source`` -- composite for chunk fetches
   by source within a workspace.
 
 Drops:
-- ``ix_canon_chunks_source_model`` (replaced).
+- ``ix_canon_chunks_source_model``.
 """
 
 from __future__ import annotations

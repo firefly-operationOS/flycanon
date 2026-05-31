@@ -30,7 +30,7 @@ Special cases:
   exist on first-deploy until the PgvectorStore boots.
 
 Application sessions ``SET LOCAL`` the GUCs at transaction start via
-the session-factory wrapper in ``flycanon.web.conventions.db`` (Task 4).
+the session-factory wrapper in ``flycanon.web.conventions.db``.
 
 Migrations + ops tooling use a separate role with ``BYPASSRLS``
 (deployment responsibility -- not created here; document in

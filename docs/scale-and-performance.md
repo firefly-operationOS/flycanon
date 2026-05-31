@@ -23,9 +23,7 @@ For the cross-link map:
 ## 1. Workload model
 
 flycanon is sized for the following **moderate-to-high** envelope.
-The numbers come from the same unification spec the multitenancy
-plan referenced (`canon_workspaces` + Plan 3 retrieval); a
-deployment past these envelopes should consult section 6 before
+A deployment past these envelopes should consult section 6 before
 scaling further.
 
 | Dimension                          | Target envelope         |
@@ -260,7 +258,7 @@ maintained automatically by Postgres on every INSERT / UPDATE of
 | Text-search configuration     | `simple` | `FLYCANON_BM25_TEXT_SEARCH_CONFIG` |
 
 * `simple` -- no stemming, no stopwords. Safest default for
-  multilingual corpora (the unification ships with this; see
+  multilingual corpora (the default; see
   [postgres_corpus.py docstring](../src/flycanon/core/services/retrieval/postgres_corpus.py)).
 * `english` / `spanish` / etc. -- language-aware stemming. Bumps
   recall for mono-lingual corpora at the cost of cross-language
@@ -289,8 +287,8 @@ GIN-on-tsv index still gets picked by the planner.
 `canon_chunk_vectors` ships in **Tier-A** layout: a single shared
 table with a global HNSW index, scope-filtered by `WHERE tenant_id
 = ? AND workspace_id = ?`. This is the default and works
-comfortably to **~500K chunks for a single hot tenant** per the
-unification spec section 4.3 (cited inline in
+comfortably to **~500K chunks for a single hot tenant** (the
+threshold is documented inline in
 [partition_admin.py](../src/flycanon/core/services/retrieval/partition_admin.py)).
 Past that, the global HNSW starts paying a recall tax because the
 scope filter rejects most of the candidate list.
@@ -309,7 +307,7 @@ for hot tenants. Tier-B is **dormant** by default -- it requires:
 ### When to promote
 
 * **Empirical threshold**: a tenant whose `canon_chunk_vectors`
-  row count crosses ~500K (per the unification spec).
+  row count crosses ~500K.
 * **Symptoms**: dense search p99 climbing past the 200ms budget on
   one tenant's queries even though others stay fast; HNSW recall
   drops measurably (top-1 chunks from BM25 missing from the dense

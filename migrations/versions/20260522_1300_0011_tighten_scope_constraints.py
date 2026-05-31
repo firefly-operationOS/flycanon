@@ -5,12 +5,9 @@ Revision ID: 0011_tighten_scope
 Revises: 0010_chunk_vectors_scope
 Create Date: 2026-05-22
 
-Plan 2 added ``tenant_id`` + ``workspace_id`` as NOT NULL columns with
-server default ``'default'`` to every ``canon_*`` row. The default
-let existing services keep writing rows during the transition. Plan 4
-(conventions adoption, Tasks 1-5) wired every service to thread real
-``TenantContext`` values, so the column-level defaults are no longer
-needed.
+Every service threads real ``TenantContext`` values, so the
+column-level ``'default'`` server defaults on ``tenant_id`` +
+``workspace_id`` are not needed.
 
 This migration:
 
@@ -19,9 +16,8 @@ This migration:
 2. Widens the partial unique index on
    ``canon_sources.content_sha256`` to include ``(tenant_id,
    workspace_id, content_sha256)`` so the SHA-256 idempotency anchor
-   is workspace-scoped (per unification spec section 4.2 -- the same
-   bytes uploaded into two workspaces must each get their own
-   ``canon_sources`` row).
+   is workspace-scoped -- the same bytes uploaded into two workspaces
+   must each get their own ``canon_sources`` row.
 
 Other ``UniqueConstraint``s on ``canon_*`` tables stay narrow because
 they already carry their scope transitively via a FK to a parent

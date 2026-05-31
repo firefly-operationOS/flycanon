@@ -7,11 +7,8 @@ flycanon is Postgres-native. BM25 rides on the GENERATED ``tsv`` column of
 instance -- no extra service to operate, and scope isolation is enforced by
 Postgres RLS.
 
-``FLYCANON_VECTOR_STORE`` is retained as a forward-looking selector, but
-``pgvector`` is the only supported value. The SQLite-vec / Chroma / Qdrant /
-Pinecone / in-memory fallbacks (and the agentic ``SqliteCorpus`` that backed
-them) were removed when flycanon stopped depending on
-``fireflyframework_agentic.rag``.
+``FLYCANON_VECTOR_STORE`` is a selector whose only supported value is
+``pgvector``.
 """
 
 from __future__ import annotations
@@ -52,9 +49,7 @@ def build_corpus_context(*, settings: CanonSettings) -> CorpusContext:
     """
     backend = (settings.vector_store or "pgvector").strip().lower()
     if backend != "pgvector":
-        raise ValueError(
-            f"unsupported FLYCANON_VECTOR_STORE={backend!r}; flycanon only supports 'pgvector'."
-        )
+        raise ValueError(f"unsupported FLYCANON_VECTOR_STORE={backend!r}; flycanon only supports 'pgvector'.")
 
     from flycanon.core.services.retrieval.pgvector_store import PgVectorVectorStore
     from flycanon.core.services.retrieval.postgres_corpus import PostgresCorpus

@@ -404,9 +404,9 @@ separate vector store to shard.
 * The OpenAPI spec at `/openapi.json` is the source of truth for
   every endpoint's contract -- compare your call against it.
 * Every error response is RFC 7807 `ProblemDetail` (singular --
-  the Plan 4 envelope from `flycanon.web.conventions`) with a
-  stable `code` field; grep the source for the code to find the
-  failure site.
+  the envelope from `flycanon.web.conventions`) with a stable
+  `code` field; grep the source for the code to find the failure
+  site.
 * The audit log (`GET /api/v1/audit`) carries every mutation with
   correlation id + actor + payload -- useful for "what happened
   during ingest" forensics.

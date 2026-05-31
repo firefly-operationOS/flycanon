@@ -156,8 +156,8 @@ services:
         condition: service_healthy
 
   # Optional Gotenberg sidecar for high-fidelity Office -> PDF
-  # conversion. Off by default -- the binary normaliser uses MarkItDown
-  # in-process which is sufficient for DOCX / XLSX / PPTX / HTML.
+  # conversion. Off by default -- the native per-format loaders read
+  # DOCX / XLSX / PPTX / HTML in-process, which is sufficient.
   # Enable when source documents have complex layout (PowerPoint
   # decks with images, multi-tab spreadsheets, &c.) and you want the
   # PDF render path:

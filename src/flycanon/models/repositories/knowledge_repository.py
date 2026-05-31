@@ -77,15 +77,14 @@ class KnowledgeRepository:
     ) -> KnowledgeItemRow | None:
         """Look up one knowledge item, scoped to ``(tenant_id, workspace_id)``.
 
-        Plan 6 Task 1 closes the workspace-scope gap by making the
-        scope kwargs MANDATORY on every read-by-id path. A row that
-        sits in a different workspace (same tenant) returns ``None``
-        instead of leaking across.
+        The scope kwargs are MANDATORY on every read-by-id path. A row
+        that sits in a different workspace (same tenant) returns
+        ``None`` instead of leaking across.
 
         Workers + retention sweepers that legitimately need to scan
         across workspaces must use :meth:`get_item_across_workspaces`
         explicitly -- that method is the documented escape hatch
-        Plan 6 Task 4 swaps for a Postgres BYPASSRLS role.
+        backed by a Postgres BYPASSRLS role.
         """
         async with self._session_factory() as session:
             result = await session.execute(
@@ -102,8 +101,8 @@ class KnowledgeRepository:
 
         Used by workers / admin sweepers that walk the table without
         a request scope (the row's own ``tenant_id`` / ``workspace_id``
-        columns provide the scope ex post). Plan 6 Task 4 replaces
-        this code-level escape hatch with a Postgres BYPASSRLS role.
+        columns provide the scope ex post), backed by a Postgres
+        BYPASSRLS role.
 
         Do NOT call this from request-scoped code paths -- the typed
         :meth:`get_item` is the only safe surface there.
@@ -212,8 +211,8 @@ class KnowledgeRepository:
     ) -> list[KnowledgeVersionRow]:
         """Return every version for ``item_id``, scoped to ``(tenant, workspace)``.
 
-        Plan 6 Task 1: scope kwargs are MANDATORY. Cross-workspace
-        history reads return an empty list instead of leaking.
+        Scope kwargs are MANDATORY. Cross-workspace history reads
+        return an empty list instead of leaking.
         """
         async with self._session_factory() as session:
             result = await session.execute(

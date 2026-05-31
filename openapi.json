@@ -1262,7 +1262,7 @@
         "type": "object"
       },
       "ConflictScanRequest": {
-        "description": "``POST /api/v1/knowledge:detect-conflicts`` body.\n\n``actor`` is intentionally NOT a body field: the audit actor is\nderived from the request context (the JWT subject or agent-token\nprefix), per the Plan 4 wire contract.",
+        "description": "``POST /api/v1/knowledge:detect-conflicts`` body.\n\n``actor`` is intentionally NOT a body field: the audit actor is\nderived from the request context (the JWT subject or agent-token\nprefix).",
         "properties": {
           "domain": {
             "anyOf": [
@@ -1727,7 +1727,7 @@
         "type": "object"
       },
       "CreateConversationRequest": {
-        "description": "Open a fresh conversation.\n\n``actor`` is intentionally NOT a body field: the conversation's\nactor is derived from the request context (the JWT subject or\nagent-token prefix), per the Plan 4 wire contract.",
+        "description": "Open a fresh conversation.\n\n``actor`` is intentionally NOT a body field: the conversation's\nactor is derived from the request context (the JWT subject or\nagent-token prefix).",
         "properties": {
           "metadata": {
             "additionalProperties": true,
@@ -5997,7 +5997,7 @@
     },
     "/api/v1/conversations/{conversation_id}": {
       "get": {
-        "description": "Plan 6 Task 1 closes the workspace-scope gap on this read --\nthe service-layer ``get`` now requires ``(tenant_id,\nworkspace_id)`` and a same-tenant cross-workspace lookup\nraises :class:`ConversationNotFound` (404), not the foreign\nrow.",
+        "description": "The service-layer ``get`` requires ``(tenant_id,\nworkspace_id)``; a same-tenant cross-workspace lookup raises\n:class:`ConversationNotFound` (404) rather than returning the\nforeign row.",
         "operationId": "get_conversation",
         "parameters": [
           {
@@ -6975,7 +6975,7 @@
     },
     "/api/v1/search": {
       "post": {
-        "description": "BM25 (Postgres ``tsvector`` + GIN on ``canon_chunks`` for the\ndefault ``pgvector`` backend; SQLite FTS5 only for the\nfile-backed ``sqlite-vec`` backend) is fused with dense-vector\nsearch via Reciprocal Rank Fusion::\n\nscore(chunk) = sum_over_modalities( 1 / (k + rank) )\n\nwith ``k`` from ``FLYCANON_RETRIEVAL_RRF_K`` (default 60).\nThe vector half uses the embedding provider configured in\n``FLYCANON_EMBEDDING_MODEL``; the BM25 half uses the\nFTS5-indexed chunk content.\n\nFilters in the request body compose with ``AND`` and are\napplied *post-retrieval*; the retriever widens internally by\n3x (so ``top_k=10`` actually fetches 30 candidates) before\ntrimming, but heavy filtering may still starve the result\nset -- raise ``per_query_k`` if so.\n\nScope is fixed to the (tenant, workspace) carried by the\nrequest headers; the :class:`RetrievalService` fails closed\non missing values.\n\nUse this surface when:\n\n* you want to power your own answer / summarisation step,\n* you need the raw evidence (chunk content + citation\nmetadata) without the answer-stage cost,\n* you're building a \"show citations\" UI that lets the user\nread the source verbatim.\n\nReturns :class:`SearchResponse` (always 200). Empty result\nsets return ``hits=[]``.",
+        "description": "BM25 (Postgres ``tsvector`` + GIN on ``canon_chunks``) is fused\nwith dense-vector search (pgvector) via Reciprocal Rank\nFusion::\n\nscore(chunk) = sum_over_modalities( 1 / (k + rank) )\n\nwith ``k`` from ``FLYCANON_RETRIEVAL_RRF_K`` (default 60).\nThe vector half uses the embedding provider configured in\n``FLYCANON_EMBEDDING_MODEL``; the BM25 half uses the\n``tsvector``-indexed chunk content.\n\nFilters in the request body compose with ``AND`` and are\napplied *post-retrieval*; the retriever widens internally by\n3x (so ``top_k=10`` actually fetches 30 candidates) before\ntrimming, but heavy filtering may still starve the result\nset -- raise ``per_query_k`` if so.\n\nScope is fixed to the (tenant, workspace) carried by the\nrequest headers; the :class:`RetrievalService` fails closed\non missing values.\n\nUse this surface when:\n\n* you want to power your own answer / summarisation step,\n* you need the raw evidence (chunk content + citation\nmetadata) without the answer-stage cost,\n* you're building a \"show citations\" UI that lets the user\nread the source verbatim.\n\nReturns :class:`SearchResponse` (always 200). Empty result\nsets return ``hits=[]``.",
         "operationId": "search",
         "requestBody": {
           "content": {
@@ -7075,7 +7075,7 @@
         ]
       },
       "post": {
-        "description": "The request body carries the canonical bytes encoded as\nbase64 (``content_base64``) plus the caller-supplied\nmetadata. The handler:\n\n1. Decodes the bytes and runs the binary normaliser. The\nnormaliser sniffs the media type from magic bytes, routes\nthrough the right adapter (image conversion, archive\nexpansion, email decomposition, optional Office -> PDF),\nand emits one or more loader-ready artifacts. Archive +\nemail intakes are concatenated into a single Markdown\ndocument with constituent section markers; the ancestry\nchain is preserved on ``metadata.artifacts`` so the audit\ntrail can reconstruct it.\n\n2. Hashes the canonical bytes (SHA-256) -- two uploads of\nthe same content share a :class:`SourceRecord`. The hash\nlands on ``content_sha256`` (also unique-indexed in\nPostgres).\n\n3. Loads through the per-format :class:`SourceLoader`\nregistered for the detected kind. Heading-aware loaders\npreserve the section path on every chunk.\n\n4. Chunks via :class:`ParagraphChunker` (paragraph-bounded,\ntoken-budgeted, soft overlap).\n\n5. Embeds every chunk through the configured provider\n(``FLYCANON_EMBEDDING_MODEL``).\n\n6. Indexes BM25 (SQLite FTS5) + dense vectors (pgvector by\ndefault, swappable via ``FLYCANON_VECTOR_STORE``) keyed\nby ``chunk_id``.\n\n7. Records an audit row and broadcasts ``SourceIngested`` on\n``flycanon.ingest``.\n\nReturns the populated :class:`SourceRecord` with ``201\nCreated`` on success. Failure modes (all RFC 7807):\n\n* ``415 unsupported_binary`` -- no normaliser route.\n* ``422 encrypted_pdf`` -- PDF is encrypted.\n* ``422 corrupt_pdf`` / ``corrupt_source`` -- parser failed.\n* ``422 empty_source`` -- loader produced no text.\n* ``413 binary_too_large`` -- exceeds ``FLYCANON_MAX_BYTES``.\n* ``422 binary_fanout_cap_exceeded`` -- archive / email\nexpansion exceeded ``FLYCANON_BINARY_MAX_EXPANDED_FILES``.\n\nEach failure persists a :class:`SourceRecord` with\n``status=failed`` and the typed ``error_code`` /\n``error_message`` so callers can inspect and re-submit.",
+        "description": "The request body carries the canonical bytes encoded as\nbase64 (``content_base64``) plus the caller-supplied\nmetadata. The handler:\n\n1. Decodes the bytes and runs the binary normaliser. The\nnormaliser sniffs the media type from magic bytes, routes\nthrough the right adapter (image conversion, archive\nexpansion, email decomposition, optional Office -> PDF),\nand emits one or more loader-ready artifacts. Archive +\nemail intakes are concatenated into a single Markdown\ndocument with constituent section markers; the ancestry\nchain is preserved on ``metadata.artifacts`` so the audit\ntrail can reconstruct it.\n\n2. Hashes the canonical bytes (SHA-256) -- two uploads of\nthe same content share a :class:`SourceRecord`. The hash\nlands on ``content_sha256`` (also unique-indexed in\nPostgres).\n\n3. Loads through the per-format :class:`SourceLoader`\nregistered for the detected kind. Heading-aware loaders\npreserve the section path on every chunk.\n\n4. Chunks via :class:`ParagraphChunker` (paragraph-bounded,\ntoken-budgeted, soft overlap).\n\n5. Embeds every chunk through the configured provider\n(``FLYCANON_EMBEDDING_MODEL``).\n\n6. Indexes BM25 (Postgres ``tsvector`` + GIN on\n``canon_chunks``) + dense vectors (pgvector) keyed by\n``chunk_id``.\n\n7. Records an audit row and broadcasts ``SourceIngested`` on\n``flycanon.ingest``.\n\nReturns the populated :class:`SourceRecord` with ``201\nCreated`` on success. Failure modes (all RFC 7807):\n\n* ``415 unsupported_binary`` -- no normaliser route.\n* ``422 encrypted_pdf`` -- PDF is encrypted.\n* ``422 corrupt_pdf`` / ``corrupt_source`` -- parser failed.\n* ``422 empty_source`` -- loader produced no text.\n* ``413 binary_too_large`` -- exceeds ``FLYCANON_MAX_BYTES``.\n* ``422 binary_fanout_cap_exceeded`` -- archive / email\nexpansion exceeded ``FLYCANON_BINARY_MAX_EXPANDED_FILES``.\n\nEach failure persists a :class:`SourceRecord` with\n``status=failed`` and the typed ``error_code`` /\n``error_message`` so callers can inspect and re-submit.",
         "operationId": "submit_json",
         "parameters": [
           {
@@ -7336,7 +7336,7 @@
     },
     "/api/v1/version": {
       "get": {
-        "description": "Response shape (:class:`VersionInfo`):\n\n* ``service`` -- always ``\"flycanon\"``.\n* ``version`` -- CalVer baked into the wheel (``YY.MM.PP``,\ne.g. ``\"26.5.1\"``).\n* ``embedding_model`` / ``answer_model`` /\n``answer_fallback_model`` -- ``<provider>:<model>``\nidentifiers read from :class:`CanonSettings`.\n* ``vector_store`` -- one of ``pgvector`` (default),\n``sqlite-vec``, ``chroma``, ``qdrant``, ``pinecone``,\n``memory``.\n* ``eda_adapter`` -- one of ``postgres`` (default),\n``memory``, ``redis``, ``kafka``.",
+        "description": "Response shape (:class:`VersionInfo`):\n\n* ``service`` -- always ``\"flycanon\"``.\n* ``version`` -- CalVer baked into the wheel (``YY.MM.PP``,\ne.g. ``\"26.5.1\"``).\n* ``embedding_model`` / ``answer_model`` /\n``answer_fallback_model`` -- ``<provider>:<model>``\nidentifiers read from :class:`CanonSettings`.\n* ``vector_store`` -- ``pgvector``.\n* ``eda_adapter`` -- one of ``postgres`` (default),\n``memory``, ``redis``, ``kafka``.",
         "operationId": "version",
         "responses": {
           "200": {

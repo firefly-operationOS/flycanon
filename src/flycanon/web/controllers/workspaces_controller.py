@@ -1,10 +1,9 @@
 # Copyright 2026 Firefly Software Solutions Inc
 """``/api/v1/workspaces`` -- CRUD for the canonical workspace store.
 
-Workspaces live in ``canon_workspaces`` (Plan 2). This controller is
-the user-tier CRUD surface; agent-tier callers don't currently have
-workspace-creation rights (Plan 5 will add an explicit agent route
-if needed).
+Workspaces live in ``canon_workspaces``. This controller is the
+user-tier CRUD surface; agent-tier callers do not have
+workspace-creation rights.
 
 Headers:
 

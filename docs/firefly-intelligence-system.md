@@ -48,7 +48,7 @@ flyradar discoveries flow into flycanon via the agent handoff endpoint. flycanon
 +-----------+                                          +-----------+
 ```
 
-### Shared vocabulary (post-unification)
+### Shared vocabulary
 
 Every wire contract uses these identifiers in both services:
 
@@ -214,12 +214,13 @@ Reviewer (user-tier) → POST /api/v1/candidates/{id}:accept (flycanon)
   - `flycanon/sdks/{python,java}/README.md`
   - `flyradar/sdks/{python,java}/README.md` (includes BREAKING migration guide)
 
-## Unification milestones
+## Shared platform capabilities
 
-Shipped 2026-05-22 across 12 plans + closure work:
+flyradar and flycanon share a common backbone:
 
-- 6 flyradar plans: conventions, workspace rename, signal rename, conventions adoption, agent surface, tenant lockdown.
-- 6 flycanon plans: conventions, multitenancy, embeddings hardening, conventions adoption, agent surface, tenant lockdown.
-- Closure batch: middleware fix (RLS GUC binding), idempotency replay wiring, OpenAPI snapshot gate, SDK propagation across 4 SDKs, cross-service handoff + workspace cache, integration docs, Docker e2e harness.
+- Shared HTTP conventions: RFC 7807 envelope, tenant-context headers, idempotency primitives, tenant-safe outbound client.
+- `(tenant_id, workspace_id)` multitenancy across DB, DTOs, and headers, enforced by Postgres row-level security.
+- An agent surface (`/api/v1/agent/*`) protected by hashed agent tokens.
+- Cross-service handoff + a cached workspace client.
 
-See each service's `CHANGELOG.md` for the per-commit history.
+See each service's `CHANGELOG.md` for the per-release history.

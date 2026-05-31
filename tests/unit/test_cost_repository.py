@@ -67,11 +67,10 @@ class TestAggregation:
 
     @pytest.mark.asyncio
     async def test_group_by_actor_filters(self, cost_repo):
-        """Post-Plan 4 the actor proxy was retired -- the repo no
-        longer groups by actor, and ``aggregate`` doesn't accept an
-        ``actor`` kwarg. Aggregation partitions on tenant + workspace
-        (the real scope keys). Verify the cross-tenant filter narrows
-        correctly."""
+        """The repo does not group by actor, and ``aggregate`` does
+        not accept an ``actor`` kwarg. Aggregation partitions on tenant
+        + workspace (the real scope keys). Verify the cross-tenant
+        filter narrows correctly."""
         await _seed(cost_repo, actor="alice", cost_usd="0.05", tenant_id="t-a")
         await _seed(cost_repo, actor="bob", cost_usd="0.10", tenant_id="t-b")
         rows = await cost_repo.aggregate(group_by=["model"], tenant_id="t-a")

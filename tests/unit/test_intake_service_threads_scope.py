@@ -1,17 +1,17 @@
 # Copyright 2026 Firefly Software Solutions Inc
 """Scope threading coverage for :class:`IntakeService` -> :class:`IndexService`.
 
-This pins the Plan 6 write-path hole that was silently writing every
-ingested chunk vector to the ``('default', 'default')`` scope: intake
-called ``IndexService.replace_for_source`` without scope kwargs, so the
-``replace_for_source`` soft-default kicked in and every vector landed in
-the wrong RLS scope -- invisible to the real tenant/workspace under the
-migration 0013 policies.
+This pins the write path so every ingested chunk vector lands in the
+caller's scope rather than the ``('default', 'default')`` bucket:
+intake threads ``tenant_id`` / ``workspace_id`` into
+``IndexService.replace_for_source``, and a vector in the wrong RLS
+scope would be invisible to the real tenant/workspace under the RLS
+policies.
 
 The submit + replace paths MUST thread ``tenant_id`` / ``workspace_id``
 from the caller into the indexer. The index-service signature, in turn,
-removes the ``'default'`` fallback (belt-and-braces): callers that forget
-now fail loud rather than silently corrupting the scope.
+takes no ``'default'`` fallback (belt-and-braces): callers that forget
+fail loud rather than silently corrupting the scope.
 """
 
 from __future__ import annotations
@@ -177,11 +177,11 @@ class TestIntakeSubmitThreadsScopeToIndexer:
         kwargs = indexer.replace_for_source.await_args.kwargs
         assert kwargs["tenant_id"] == "acme", (
             f"expected tenant_id='acme', got {kwargs.get('tenant_id')!r} -- "
-            "intake silently fell back to the 'default' scope, undermining Plan 6 RLS."
+            "intake silently fell back to the 'default' scope, undermining row-level security."
         )
         assert kwargs["workspace_id"] == "ws-A", (
             f"expected workspace_id='ws-A', got {kwargs.get('workspace_id')!r} -- "
-            "intake silently fell back to the 'default' scope, undermining Plan 6 RLS."
+            "intake silently fell back to the 'default' scope, undermining row-level security."
         )
 
 

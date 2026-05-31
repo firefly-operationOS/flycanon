@@ -8,7 +8,7 @@ the pyfly DI graph. Mirrors how the other controller-flavoured unit
 tests interact with their services -- see
 ``test_workspaces_controller.py`` for the canonical shape.
 
-Coverage matches the Plan 5 Task 4 contract:
+Coverage matches the agent-token CRUD contract:
 
 * ``POST``          -> 201 + :class:`AgentTokenCreated` with the
   full ``token`` populated exactly once.

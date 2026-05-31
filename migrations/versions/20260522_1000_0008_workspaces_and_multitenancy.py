@@ -8,17 +8,12 @@ Create Date: 2026-05-22
 This migration:
 
 1. Creates ``canon_workspaces`` -- the canonical store for workspace
-   identity + metadata (per unification spec section 4.1).
+   identity + metadata.
 2. Adds ``tenant_id`` + ``workspace_id`` as NOT NULL columns with
    server default ``'default'`` to every existing canon table.
 3. Backfills existing rows to ``'default'``/``'default'``.
 4. Adds a composite ``(tenant_id, workspace_id)`` index on each
    table to support workspace-scoped queries.
-
-The server default lets existing services keep writing without
-changes. Plan 4 (conventions adoption) will replace the default
-with real ``TenantContext`` values, drop the defaults from
-entities, and widen unique constraints.
 
 Uses ``batch_alter_table`` for SQLite compatibility.
 """

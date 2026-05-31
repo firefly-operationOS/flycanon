@@ -12,10 +12,9 @@ This migration ALTERs the table IF IT EXISTS, adding scope
 columns + a composite index. On SQLite (where the table never
 exists), it's a no-op.
 
-The new ``PgVectorVectorStore`` DDL (Task 2 of Plan 3) creates
-the table with the scope columns from the start, so this
-migration is only needed for clusters that already had the table
-before Plan 3.
+``PgVectorVectorStore`` creates the table with the scope columns
+from the start, so this migration only applies to clusters whose
+``canon_chunk_vectors`` table predates the scope columns.
 """
 
 from __future__ import annotations

@@ -31,10 +31,10 @@ from pyfly.data.relational.health import SqlAlchemyHealthIndicator
 from flycanon.config import CanonSettings, get_settings
 
 # AuditService / KnowledgeService / CandidateService / IntakeService /
-# TaxonomyService / ProvenanceService are no longer constructed via
-# @bean factories here -- they carry their own ``@service`` decorators
-# and are auto-discovered via ``scan_packages``. The imports are
-# retained for the type hints used in the remaining @bean signatures.
+# TaxonomyService / ProvenanceService carry their own ``@service``
+# decorators and are auto-discovered via ``scan_packages`` rather than
+# constructed via @bean factories here. The imports are retained for
+# the type hints used in the remaining @bean signatures.
 from flycanon.core.services.audit import AuditService  # noqa: F401
 from flycanon.core.services.auth.agent_token_service import (
     AgentTokenService,
@@ -371,8 +371,8 @@ class CanonCoreConfiguration:
     # (``fireflyframework_agentic.content.binary``). We map CanonSettings
     # onto a host-agnostic ``BinaryConfig`` and inject the pluggable
     # ``OfficeConverter``. ``wrap_text_as_pdf`` is False: flycanon passes
-    # text / markdown / CSV through to its SourceLoader pipeline (MarkItDown)
-    # rather than rendering them to PDF. ``email_render_header`` surfaces a
+    # text / markdown / CSV through to its SourceLoader pipeline rather
+    # than rendering them to PDF. ``email_render_header`` surfaces a
     # ``<stem>-headers.md`` artifact so Subject/From/To metadata still
     # reaches the loaders.
     # ------------------------------------------------------------------

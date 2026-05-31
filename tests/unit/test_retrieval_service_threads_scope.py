@@ -1,7 +1,7 @@
 # Copyright 2026 Firefly Software Solutions Inc
 """Scope threading coverage for :meth:`RetrievalService.search`.
 
-The retrieval surface is the read path Plan 3 cares about most --
+The retrieval surface is the most scope-sensitive read path --
 every BM25 + ANN lookup MUST be scoped to ``(tenant_id,
 workspace_id)`` so a caller can never read across workspaces.
 
@@ -13,13 +13,13 @@ Two layers:
    ``'default'`` on the read path -- forgetting to thread the
    scope is a 400, not a silent leak.
 
-2. **Threading via scope-bound proxies.** Approach (a) wraps the
-   corpus + vector_store with :class:`_ScopedCorpus` /
-   :class:`_ScopedVectorStore` and lets the agentic
-   ``HybridRetriever`` consume them as-is. The proxies bake the
-   scope into every BM25 / vector / hydration call. We mock the
-   two corpora, run ``search()``, and assert the underlying
-   methods received ``tenant_id`` + ``workspace_id`` kwargs.
+2. **Threading via scope-bound proxies.** The corpus +
+   vector_store are wrapped with :class:`_ScopedCorpus` /
+   :class:`_ScopedVectorStore`, which :class:`HybridRetriever`
+   consumes as-is. The proxies bake the scope into every BM25 /
+   vector / hydration call. We mock the two corpora, run
+   ``search()``, and assert the underlying methods received
+   ``tenant_id`` + ``workspace_id`` kwargs.
 
 The :class:`IndexService` (write path) uses a softer default --
 covered by ``test_index_service_threads_scope.py``.
@@ -104,7 +104,7 @@ class _FakeScopeAwareCorpus:
 
 
 class _FakeLegacyCorpus:
-    """Stand-in for :class:`SqliteCorpus` -- no scope kwargs."""
+    """Stand-in for a corpus whose read methods take no scope kwargs."""
 
     def __init__(self) -> None:
         self.bm25_calls: list[dict[str, Any]] = []
@@ -170,9 +170,9 @@ class TestScopedCorpusProxy:
 
     @pytest.mark.asyncio
     async def test_falls_back_for_legacy_corpus_without_scope(self):
-        # Backends like the agentic SqliteCorpus haven't grown scope
-        # kwargs yet. The proxy must detect that and call them
-        # without the extras (passing tenant_id would raise TypeError).
+        # A corpus whose read methods take no scope kwargs: the proxy
+        # must detect that and call them without the extras (passing
+        # tenant_id would raise TypeError).
         inner = _FakeLegacyCorpus()
         scoped = _ScopedCorpus(inner, tenant_id="acme", workspace_id="ws-a")
         await scoped.bm25_search("hello", top_k=3)

@@ -329,9 +329,8 @@ Special considerations:
   to back up.
 - **BM25 projection** lives in `canon_chunks.tsv` (a Postgres
   GENERATED column with a GIN index, per migration `0003_bm25_tsv`);
-  a `pg_dump` captures it too. There is no file-backed SQLite FTS5
-  corpus to back up -- that fallback was removed in the pgvector-only
-  migration.
+  a `pg_dump` captures it too. There is no separate corpus to back
+  up.
 
 Recommended cadence: hourly snapshots for the cost trail + audit
 log; daily full dumps for everything else. Pair with cross-region

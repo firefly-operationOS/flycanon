@@ -56,7 +56,7 @@ class RelationRepository:
     ) -> KnowledgeRelationRow | None:
         """Look up one relation, scoped to ``(tenant_id, workspace_id)``.
 
-        Plan 6 Task 1: scope kwargs are MANDATORY. A relation owned
+        Scope kwargs are MANDATORY. A relation owned
         by a different workspace (same tenant) returns ``None``
         instead of leaking.
         """
@@ -80,7 +80,7 @@ class RelationRepository:
         """Drop one relation by id, scoped to ``(tenant, workspace)``.
 
         Returns ``True`` when a row was deleted. A relation outside
-        the caller's scope returns ``False`` (Plan 6 Task 1).
+        the caller's scope returns ``False``.
         """
         async with self.session() as session:
             result = await session.execute(
@@ -103,9 +103,9 @@ class RelationRepository:
     ) -> list[KnowledgeRelationRow]:
         """Return relations touching ``item_id`` within ``(tenant, workspace)``.
 
-        Plan 6 Task 1: scope kwargs are MANDATORY. Cross-workspace
-        relations are filtered out -- the caller only sees edges
-        rooted in their own workspace.
+        Scope kwargs are MANDATORY. Cross-workspace relations are
+        filtered out -- the caller only sees edges rooted in their own
+        workspace.
 
         ``direction``:
             - ``out``  -- relations where ``from_item_id == item_id``

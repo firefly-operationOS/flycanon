@@ -49,13 +49,11 @@ class IndexService:
 
         Returns the number of chunks ingested into the index.
 
-        ``tenant_id`` / ``workspace_id`` are REQUIRED kwargs. The
-        previous soft default to ``'default'`` was a write-path hole
-        that landed every silently-scoped vector in the
-        ``('default','default')`` RLS bucket -- invisible to the real
-        caller under migration 0013 policies. Forgetting the scope
-        now fails loud with a ``TypeError`` at the call site instead
-        of silently corrupting the index.
+        ``tenant_id`` / ``workspace_id`` are REQUIRED kwargs. Every
+        indexed vector is bound to the caller's scope so RLS policies
+        keep it visible only within ``(tenant_id, workspace_id)``.
+        Forgetting the scope fails loud with a ``TypeError`` at the
+        call site instead of silently corrupting the index.
         """
         if len(chunks) != len(embeddings):
             raise ValueError(
@@ -96,21 +94,14 @@ class IndexService:
         # Wipe the previous index entries for this source before
         # appending the new chunks. ``delete_by_doc_id`` returns the
         # deleted-rows count but we don't rely on it -- the upsert is
-        # the authoritative write.
+        # the authoritative write. Vector rows are overwritten by id
+        # on the upsert below, so stale ids resolve cleanly.
         await self._context.corpus.delete_by_doc_id(source.id)  # type: ignore[attr-defined]
-        # The sqlite-vec adapter expects ids on delete; we pass the
-        # full previous set lazily by recreating from the new ids
-        # only when present. The simplest correct path is to leave
-        # stale ids in place until the next replace; sqlite-vec's
-        # upsert by id overwrites cleanly.
         if stored_chunks:
             await self._context.corpus.upsert_chunks(stored_chunks)  # type: ignore[attr-defined]
         if vector_documents:
-            # Probe the upsert signature so we only push scope to
-            # backends that accept it (currently flycanon's
-            # PgVectorVectorStore -- the agentic stores ignore the
-            # scope and rely on the canon_chunks scope filter on
-            # read-hydration as the safety net).
+            # Probe the upsert signature so scope is only pushed when
+            # the vector store accepts it; PgVectorVectorStore does.
             await self._upsert_vectors(vector_documents, tenant_id=tenant_id, workspace_id=workspace_id)
 
         # Note the model on the entity so re-embedding with a different
@@ -137,9 +128,8 @@ class IndexService:
     ) -> None:
         """Thread scope to vector-store ``upsert`` when supported.
 
-        Backends that don't yet accept ``tenant_id``/``workspace_id``
-        kwargs (agentic ``InMemory`` / ``SqliteVec`` / ``Chroma`` /
-        etc.) are called without the extras. The flycanon
+        The signature is probed so scope is only pushed when the
+        vector store accepts ``tenant_id`` / ``workspace_id`` kwargs;
         :class:`PgVectorVectorStore` always accepts them.
         """
         import inspect

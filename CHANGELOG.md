@@ -4,38 +4,30 @@ All notable changes to **flycanon** are documented here.
 
 ## [Unreleased] -- Multitenancy backbone
 
-### Changed -- decoupled from the framework's RAG module (26.5.7)
+### Changed -- retrieval and intake internals (26.5.7)
 
-- **Dropped the Microsoft MarkItDown dependency.** The universal
-  `MarkitdownLoader` fallback is replaced with native per-format
-  SourceLoaders: `XlsxLoader` (openpyxl), `PptxLoader` (python-pptx),
-  `CsvLoader` (CSV/TSV, stdlib), `JsonLoader` (stdlib), `XmlLoader` (lxml),
-  `RtfLoader` (striprtf) and `OdfLoader` (ODT/ODS/ODP, odfpy). The registry
-  fallback is now a plain-text `TextLoader`, so an unrecognised payload
-  degrades to UTF-8 text rather than routing through MarkItDown. Added
-  `striprtf` + `odfpy` deps; dropped the agentic `markitdown` extra.
-- **Binary normalisation moved to the framework.** The local
-  `core/services/binary/` package is deleted; flycanon now consumes
+- **Native per-format document intake.** Document intake runs on native
+  per-format SourceLoaders: `XlsxLoader` (openpyxl), `PptxLoader`
+  (python-pptx), `CsvLoader` (CSV/TSV, stdlib), `JsonLoader` (stdlib),
+  `XmlLoader` (lxml), `RtfLoader` (striprtf) and `OdfLoader` (ODT/ODS/ODP,
+  odfpy). The registry fallback is a plain-text `TextLoader`, so an
+  unrecognised payload degrades to UTF-8 text. `striprtf` + `odfpy` are
+  declared as direct deps.
+- **Binary normalisation.** Binary normalisation runs through
   `fireflyframework_agentic.content.binary` (the unified normaliser shared
   with flydocs), wired in `CanonCoreConfiguration` from a `BinaryConfig`
   mapped off `CanonSettings` (`wrap_text_as_pdf=False` -- text passes
   through to the SourceLoaders; `email_render_header=True`). The
   `OfficeConverter` stays pluggable.
-- **Hybrid retrieval vendored.** `StoredChunk`, `ChunkHit`,
-  `reciprocal_rank_fusion` and `HybridRetriever` -- previously imported from
-  the framework's now-removed `rag` module -- now live in
-  `core/services/retrieval/fusion.py`. The vendored `HybridRetriever` honours
-  `FLYCANON_RETRIEVAL_RRF_K` (the framework hard-coded `k=60`, leaving the
-  knob dead); it is now live.
-- **Retrieval collapsed to pgvector-only.** `corpus_factory` no longer
-  builds the SQLite-vec / Chroma / Qdrant / Pinecone / in-memory fallback
-  backends (or the agentic `SqliteCorpus`); `FLYCANON_VECTOR_STORE` now
-  accepts only `pgvector`. Dropped the dead fallback knobs `corpus_path`,
-  `chroma_collection`, `qdrant_*`, `pinecone_*`.
-- **Dependencies.** Replaced the agentic `[corpus-search]` extra (which
-  bundled sqlite-vec + sqlglot) with `[markitdown,openai-embeddings,binary]`;
-  dropped the now-redundant direct deps `pillow-heif`, `cairosvg`, `py7zr`,
-  `extract-msg` (provided by `[binary]`).
+- **Hybrid retrieval primitives.** `StoredChunk`, `ChunkHit`,
+  `reciprocal_rank_fusion` and `HybridRetriever` live in
+  `core/services/retrieval/fusion.py`. `HybridRetriever` honours
+  `FLYCANON_RETRIEVAL_RRF_K`.
+- **pgvector-only retrieval.** `corpus_factory` builds the pgvector
+  backend; `FLYCANON_VECTOR_STORE` accepts only `pgvector`.
+- **Dependencies.** `fireflyframework-agentic` is pulled with the
+  `[openai-embeddings,binary]` extras; the `[binary]` extra provides
+  pillow-heif, cairosvg, py7zr and extract-msg.
 
 ### Added -- Redis-backed adapters for rate-limit + idempotency
 
@@ -85,7 +77,7 @@ All notable changes to **flycanon** are documented here.
   wire-stable across the swap.
 - **New error code**: `rate_limit_exceeded` (429).
 
-### Added -- Plan 2 (Phase 2) workspace + multitenancy schema
+### Added -- workspace + multitenancy schema
 
 - **`canon_workspaces` table** -- canonical store for workspace
   identity, status, scope, sme_roster, retention_days, jurisdiction.
@@ -100,13 +92,12 @@ All notable changes to **flycanon** are documented here.
   `WorkspaceSummary`).
 - **`WorkspaceRepository`** with CRUD operations (insert, get,
   list_for_tenant, update, close).
-- **`flycanon.web.conventions` module** ported from flyradar
-  (Plan 1) -- 90 tests covering RFC 7807 envelope, FastAPI
-  dependency, exception hierarchy, idempotency primitives,
-  tenant-safe HTTP client. Wired into controllers as part of
-  Plan 4 (see BREAKING section below).
+- **`flycanon.web.conventions` module** -- 90 tests covering RFC 7807
+  envelope, FastAPI dependency, exception hierarchy, idempotency
+  primitives, tenant-safe HTTP client. Wired into controllers (see
+  BREAKING section below).
 
-### Added -- Plan 3 (Phase 3) embeddings hardening
+### Added -- embeddings hardening
 
 - **Migration 0009** -- `canon_chunks` re-embed drift index swap:
   `(source_id, embedding_model)` -> `(tenant_id, workspace_id,
@@ -128,42 +119,40 @@ All notable changes to **flycanon** are documented here.
   (`MissingTenantContext`) when scope is missing; threads
   `tenant_id` + `workspace_id` through scope-bound proxies to
   the HybridRetriever.
-- **`IndexService.replace_for_source()`** -- accepts optional
-  scope with `'default'` fallback (Plan 4 tightens).
+- **`IndexService.replace_for_source()`** -- requires `tenant_id`
+  + `workspace_id` kwargs with no default.
 - **Tier-B partition admin** in
   `flycanon.core.services.retrieval.partition_admin`. Dormant
   by default. `promote_tenant_to_partition()` /
   `demote_tenant_from_partition()` for hot-tenant operators.
 
-### BREAKING -- Plan 4 (Phase 4) conventions adoption + controller wiring
+### BREAKING -- conventions adoption + controller wiring
 
 - **Headers required everywhere.** Every `/api/v1/*` call (except
-  `/api/v1/version`) now requires `X-Tenant-Id` + `X-Workspace-Id`.
+  `/api/v1/version`) requires `X-Tenant-Id` + `X-Workspace-Id`.
   Missing -> `400 missing_tenant_context`.
-- **Error envelope flipped.** `title` is now human-readable; new
-  `code` field carries the machine identifier; `type` URI base
-  `https://firefly.dev/problems/...` (was `https://flycanon.dev/...`).
-  Media type `application/problem+json`.
+- **Error envelope.** `title` is human-readable; the `code` field
+  carries the machine identifier; `type` URI base is
+  `https://firefly.dev/problems/...`. Media type
+  `application/problem+json`.
 - **`/api/v1/jobs/*` -> `/api/v1/ingest-jobs/*`** -- 3 sub-routes
   renamed.
-- **`actor` partitioning proxy retired.** `actor` stays as audit
-  metadata on every row; queries/groupings now use
-  `(tenant_id, workspace_id)`. Billing endpoints no longer accept
-  `actor` Query param.
+- **`actor` is audit metadata.** `actor` stays as audit metadata on
+  every row; queries/groupings use `(tenant_id, workspace_id)`.
+  Billing endpoints do not accept an `actor` Query param.
 - **New `/api/v1/workspaces` CRUD** -- create/list/get/patch/close
-  on `canon_workspaces` (table from Plan 2).
+  on `canon_workspaces`.
 - **`canon_sources.content_sha256` unique constraint widened** to
   `(tenant_id, workspace_id, content_sha256)`. Same content can
   coexist in multiple workspaces.
-- **Entity-level `'default'` defaults dropped** -- services now
-  pass real `tenant_id` + `workspace_id` from `TenantContext`.
-  Migration `0011` drops the column-level `server_default` too.
-- **RetrievalService callers now operational** -- Plan 3 had
-  `/api/v1/search`, `/api/v1/query`, `/api/v1/query/stream`
-  returning 400 because their callers didn't pass scope. Plan 4
-  wires the threading.
+- **Entity-level `'default'` defaults dropped** -- services pass
+  real `tenant_id` + `workspace_id` from `TenantContext`. Migration
+  `0011` drops the column-level `server_default` too.
+- **RetrievalService scope threading.** `/api/v1/search`,
+  `/api/v1/query`, and `/api/v1/query/stream` thread scope from the
+  request headers into the retrieval layer.
 
-### Added -- Plan 5 (Phase 5) agent surface
+### Added -- agent surface
 
 - **Agent tokens**: new `canon_agent_tokens` table (migration
   `0012_agent_tokens`). Tokens are tenant-scoped, hashed at rest,
@@ -187,15 +176,14 @@ All notable changes to **flycanon** are documented here.
   `agent_workspace_not_in_allowlist` (403), `agent_scope_denied` (403),
   `agent_cannot_mint` (403).
 
-### Security -- Plan 6 (Phase 6) tenant lockdown
+### Security -- tenant lockdown
 
-- **Workspace-scope enforcement on every read-by-id route.** Previously,
-  a caller who guessed a resource UUID from another workspace in the
-  same tenant could read knowledge / sources / candidates / etc. Now
-  all such lookups return `404 resource_not_found`. Affects both the
-  user tier and the agent tier (the Plan 5 `/api/v1/agent/*`
+- **Workspace-scope enforcement on every read-by-id route.** A caller
+  who guesses a resource UUID from another workspace in the same
+  tenant gets `404 resource_not_found` instead of the foreign row.
+  Affects both the user tier and the agent tier (the `/api/v1/agent/*`
   surface). Repositories, handlers, controllers, and CQRS queries
-  now thread `workspace_id` alongside `tenant_id`.
+  thread `workspace_id` alongside `tenant_id`.
 - **Postgres RLS on every `canon_*` table** (16 tables) -- migration
   `0013_rls_policies`. Defence-in-depth: even if a repository forgets
   a WHERE clause, RLS returns zero rows for the wrong scope. The
@@ -236,7 +224,7 @@ All notable changes to **flycanon** are documented here.
   the FORCE-vs-owner contract. Cleanly skipped when Docker is
   unavailable.
 
-### Added -- Plan 6 workspace lifecycle events
+### Added -- workspace lifecycle events
 
 - **`canon.workspaces.v1` topic** carries `WorkspaceCreated`,
   `WorkspaceUpdated`, `WorkspaceDeleted` events emitted by
@@ -302,10 +290,10 @@ The user-tier surface remains the only path:
 - **Taxonomy / billing / stats agent endpoints.** Out of scope per
   spec section 5.2.
 
-### Roadmap items (not blocking the unification)
+### Roadmap items
 
-- **Embedding cache key.** Spec section 4.3 forward-looking
-  optimisation; no cache exists yet. Tracked on the roadmap.
-- **Load + pen-test.** External validation pass per the unification
-  spec's Phase 4 ("5k/50k/500k chunks across 10/100/1000 tenants"
-  + pen-test RLS gates). Awaiting an external validation window.
+- **Embedding cache key.** A forward-looking optimisation; no cache
+  exists yet. Tracked on the roadmap.
+- **Load + pen-test.** External validation pass ("5k/50k/500k chunks
+  across 10/100/1000 tenants" + pen-test RLS gates). Awaiting an
+  external validation window.

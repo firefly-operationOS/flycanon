@@ -15,7 +15,7 @@ human-readable catalogue.
 ## Required headers
 
 Every `/api/v1/*` request **except** `/api/v1/version` requires the
-tenant-context headers (Plan 4 conventions adoption):
+tenant-context headers:
 
 | Header | Grammar | Notes |
 |--------|---------|-------|
@@ -102,7 +102,7 @@ consistent even when a future repository forgets the WHERE clause.
 
 ## Async ingest jobs
 
-Renamed in Plan 4 (was `/api/v1/jobs/*`) to parallel flyradar's
+The `/api/v1/ingest-jobs/*` surface parallels flyradar's
 `/api/v1/discovery-jobs/*`.
 
 | Method | Path | Description |
@@ -113,7 +113,7 @@ Renamed in Plan 4 (was `/api/v1/jobs/*`) to parallel flyradar's
 
 ## Workspaces
 
-CRUD over `canon_workspaces` (Plan 2 table). All five endpoints
+CRUD over the `canon_workspaces` table. All five endpoints
 require the standard tenant headers; list / get / update / close
 scope by `X-Tenant-Id`.
 
@@ -128,9 +128,9 @@ scope by `X-Tenant-Id`.
 ## Billing
 
 Billing endpoints scope by `(tenant_id, workspace_id)` from the
-request headers; the legacy `actor` Query param is retired (Plan 4).
-`actor` remains as a column on `canon_cost_events` for audit /
-forensics, but it no longer partitions queries.
+request headers; there is no `actor` Query param. `actor` is a
+column on `canon_cost_events` for audit / forensics, not a query
+partition.
 
 | Method | Path | Description |
 |--------|------|-------------|
@@ -256,9 +256,7 @@ raises:
 
 Every 4xx / 5xx response is an RFC 7807
 `application/problem+json` document produced by
-`flycanon.web.conventions.ProblemDetail` (the Plan 4 envelope; the
-legacy `flycanon.interfaces.dtos.error.ProblemDetails` plural is
-deleted). The shape:
+`flycanon.web.conventions.ProblemDetail`. The shape:
 
 ```json
 {

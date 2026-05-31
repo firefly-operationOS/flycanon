@@ -16,8 +16,7 @@ Pydantic models in
 ## ProblemDetail (RFC 7807)
 
 Every non-2xx response is a problem document produced by
-`flycanon.web.conventions.ProblemDetail` (Plan 4 envelope; replaces
-the legacy plural `ProblemDetails`):
+`flycanon.web.conventions.ProblemDetail`:
 
 ```json
 {
@@ -422,8 +421,8 @@ frame format. Reconnect with `?cursor=N` to resume.
 ### `GET /api/v1/billing`
 
 Query: `group_by` (csv), `since`, `until`. Scope is supplied by the
-`X-Tenant-Id` + `X-Workspace-Id` headers (Plan 4); the legacy
-`actor` Query param is retired.
+`X-Tenant-Id` + `X-Workspace-Id` headers; there is no `actor` Query
+param.
 
 ```json
 {
@@ -693,7 +692,7 @@ Response shape for `POST /api/v1/agent-tokens` -- extends
 ## Workspace lifecycle events
 
 The three DTOs below are the on-wire payloads for the
-`canon.workspaces.v1` topic introduced in Plan 6. Source:
+`canon.workspaces.v1` topic. Source:
 `src/flycanon/interfaces/dtos/workspace_event.py`. Consumers dispatch
 on `event_type`; the lifecycle mapping to flycanon routes lives in
 [architecture.md -> Workspace lifecycle events](architecture.md#workspace-lifecycle-events).

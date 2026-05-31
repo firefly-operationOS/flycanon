@@ -61,7 +61,7 @@ class AuditService:
     ) -> AuditEventRow:
         """Append one audit row and broadcast it on ``flycanon.audit``.
 
-        ``tenant_id`` + ``workspace_id`` are required: post-Plan 4 the
+        ``tenant_id`` + ``workspace_id`` are required: the
         ``canon_audit_events`` row carries the scope at the column
         level so aggregation queries can filter on the indexed columns
         without unpacking ``payload_json``.

@@ -193,9 +193,7 @@ class CanonSettings(BaseSettings):
     # Backend selector. flycanon is Postgres-native: BM25 rides on the
     # ``tsv`` column of ``canon_chunks`` and dense vectors live in
     # pgvector, both co-located with the canonical Postgres instance.
-    # ``pgvector`` is the only supported value -- the SQLite-vec / Chroma /
-    # Qdrant / Pinecone / memory fallbacks were removed when flycanon
-    # stopped depending on ``fireflyframework_agentic.rag``.
+    # ``pgvector`` is the only supported value.
     vector_store: str = Field(
         default="pgvector",
         description="Dense-vector backend. Only ``pgvector`` is supported.",
@@ -249,7 +247,7 @@ class CanonSettings(BaseSettings):
     office_converter: str = Field(
         default="none",
         description=(
-            "``none`` (default; flycanon relies on MarkItDown for DOCX / "
+            "``none`` (default; the native per-format loaders read DOCX / "
             "XLSX / PPTX / HTML in-process), ``gotenberg`` (HTTP sidecar; "
             "distroless-friendly), or ``libreoffice`` (in-container "
             "subprocess; requires ``soffice`` in the runtime image)."

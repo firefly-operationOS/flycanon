@@ -21,17 +21,15 @@ dependencies = [
 
     # GenAI metaframework -- FireflyAgent over pydantic-ai, the binary
     # normalisation stack (``[binary]`` -> ``content.binary``) and the
-    # OpenAI embeddings provider. flycanon vendors its own hybrid retrieval
-    # -- StoredChunk / ChunkHit / HybridRetriever / reciprocal_rank_fusion
-    # live in ``core/services/retrieval/fusion.py`` -- so it no longer
-    # depends on the framework's removed ``rag`` module (the ``corpus-search``
-    # extra that bundled sqlite-vec + sqlglot is gone). Document intake uses
-    # flycanon's own per-format SourceLoaders -- no Microsoft MarkItDown.
+    # OpenAI embeddings provider. Hybrid retrieval -- StoredChunk /
+    # ChunkHit / HybridRetriever / reciprocal_rank_fusion -- lives in
+    # ``core/services/retrieval/fusion.py``. Document intake runs on
+    # flycanon's own per-format SourceLoaders.
     "fireflyframework-agentic[rest,security,redis,openai-embeddings,binary]>=26.5.11",
 
     # Source intake -- the high-fidelity per-format SourceLoaders. Binary
     # normalisation (HEIC / SVG / TIFF rasterisation, archive + email
-    # fan-out, PDF guard, Office -> PDF) now comes from the framework's
+    # fan-out, PDF guard, Office -> PDF) comes from the framework's
     # ``[binary]`` extra above, which supplies pypdf, Pillow, pillow-heif,
     # cairosvg, py7zr and extract-msg. The wheels below back loader paths
     # that are flycanon-specific:

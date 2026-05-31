@@ -102,18 +102,18 @@ class TestPublicSurfaceSignatures:
 
     @pytest.mark.parametrize("method_name", ["upsert", "search", "search_text", "delete"])
     def test_scope_kwargs_have_no_default(self, method_name: str):
-        # Plan 6 hardening: silent ``"default"`` fallbacks on scope kwargs
-        # silently corrupt the RLS write path. Every public method must
-        # require explicit scope -- a forgotten kwarg surfaces as a
-        # TypeError at call time.
+        # Silent ``"default"`` fallbacks on scope kwargs would corrupt
+        # the RLS write path. Every public method must require explicit
+        # scope -- a forgotten kwarg surfaces as a TypeError at call
+        # time.
         method = getattr(PgVectorVectorStore, method_name)
         sig = inspect.signature(method)
         params = sig.parameters
         assert params["tenant_id"].default is inspect.Parameter.empty, (
-            f"{method_name}: tenant_id must not default -- silent 'default' scope masks Plan 6 RLS bugs."
+            f"{method_name}: tenant_id must not default -- silent 'default' scope masks row-level-security bugs."
         )
         assert params["workspace_id"].default is inspect.Parameter.empty, (
-            f"{method_name}: workspace_id must not default -- silent 'default' scope masks Plan 6 RLS bugs."
+            f"{method_name}: workspace_id must not default -- silent 'default' scope masks row-level-security bugs."
         )
 
 

@@ -148,8 +148,7 @@ class CostService:
         Designed for a status banner: "$4.20 today, $87 this month,
         top: anthropic:claude-sonnet-4-6".
 
-        Scope is fixed to the (tenant, workspace) passed in -- the
-        legacy ``actor`` partitioning proxy was retired in Plan 4.
+        Scope is fixed to the (tenant, workspace) passed in.
         """
         now = now or datetime.now(UTC)
         result: dict[str, Any] = {"generated_at": now.isoformat()}

@@ -1,17 +1,16 @@
 # Copyright 2026 Firefly Software Solutions Inc
-"""Regression tests for Plan 6 Task 1 -- the workspace-scope security fix.
+"""Workspace-scope security tests for every read-by-id route.
 
-Plans 1-5 enforced ``tenant_id`` filtering on every read-by-id route.
-``workspace_id`` filtering was inconsistent: callers from workspace B
-could fetch resources that lived in workspace A (same tenant) by
-guessing the UUID. These tests pin every read-by-id surface to the
-correct behaviour: same-tenant cross-workspace lookups MUST return
-``404`` (or raise the typed ``*NotFound`` exception that maps to one),
-NOT the foreign row.
+Every read-by-id route filters on both ``tenant_id`` and
+``workspace_id``: a caller from workspace B must not fetch resources
+that live in workspace A (same tenant) by guessing the UUID. These
+tests pin every read-by-id surface to the correct behaviour:
+same-tenant cross-workspace lookups MUST return ``404`` (or raise the
+typed ``*NotFound`` exception that maps to one), NOT the foreign row.
 
 The cross-tenant case (``tenant=acme`` row read from ``tenant=bcorp``)
-is already covered elsewhere; this file focuses on the
-**same-tenant cross-workspace** case that Plan 6 Task 1 closes.
+is covered elsewhere; this file focuses on the **same-tenant
+cross-workspace** case.
 
 Each class targets one resource family and exercises both the
 user-tier handler and (where the route exists) the agent-tier

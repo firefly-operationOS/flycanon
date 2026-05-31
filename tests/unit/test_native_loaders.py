@@ -1,5 +1,5 @@
 # Copyright 2026 Firefly Software Solutions Inc
-"""Unit tests for the native (non-MarkItDown) per-format SourceLoaders."""
+"""Unit tests for the native per-format SourceLoaders."""
 
 from __future__ import annotations
 
@@ -133,5 +133,5 @@ def test_default_registry_has_native_loaders_and_text_fallback() -> None:
     assert isinstance(registry.get(SourceKind.odp), OdfLoader)
     # Multi-artifact archives arrive pre-merged as Markdown.
     assert isinstance(registry.get(SourceKind.archive), MarkdownLoader)
-    # Unrecognised kinds degrade to the plain-text fallback (no MarkItDown).
+    # Unrecognised kinds degrade to the plain-text fallback.
     assert isinstance(registry.get(SourceKind.unknown), TextLoader)

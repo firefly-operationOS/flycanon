@@ -5,9 +5,8 @@ Revision ID: 0003_bm25_tsv
 Revises: 0002_indexes
 Create Date: 2026-05-18 18:00:00 UTC
 
-Replaces the SQLite FTS5 corpus with a Postgres ``tsvector`` +
-``GIN`` index when ``FLYCANON_VECTOR_STORE=pgvector`` (the default).
-The dense projection already lives in ``canon_chunk_vectors`` via
+Builds the BM25 projection as a Postgres ``tsvector`` + ``GIN``
+index. The dense projection lives in ``canon_chunk_vectors`` via
 pgvector; this migration makes the BM25 projection co-resident so
 hybrid retrieval is a single-host operation.
 
@@ -27,9 +26,8 @@ The column is GENERATED so application writes don't have to
 maintain it; every INSERT / UPDATE on ``canon_chunks.content``
 refreshes the projection atomically in the same transaction.
 
-Postgres-only: SQLite-backed deployments (``FLYCANON_VECTOR_STORE``
-in ``sqlite-vec`` / ``sqlite``) continue to use the file-backed FTS5
-corpus from the agentic framework.
+Postgres-only: the ``tsvector`` / GIN DDL is skipped on SQLite (used
+by the test suite), which lacks those features.
 """
 
 from __future__ import annotations
@@ -45,8 +43,7 @@ depends_on = None
 def upgrade() -> None:
     bind = op.get_bind()
     # Skip on SQLite (used by the test suite); the dialect lacks
-    # ``tsvector`` / GIN. The agentic ``SqliteCorpus`` provides the
-    # equivalent FTS5 projection on that backend.
+    # ``tsvector`` / GIN.
     if bind.dialect.name != "postgresql":
         return
     op.execute(

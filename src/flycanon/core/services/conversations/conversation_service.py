@@ -95,9 +95,9 @@ class ConversationService:
         actor: str | None = None,
     ) -> ConversationRow:
         # ``actor`` is audit metadata: it identifies the human / token
-        # that opened the conversation, not a scope key. Plan 4 wires
-        # it from the request context (``ctx.actor``) so the body
-        # surface no longer carries it.
+        # that opened the conversation, not a scope key. It is wired
+        # from the request context (``ctx.actor``); the body surface
+        # does not carry it.
         scope_tenant = tenant_id or "default"
         scope_workspace = workspace_id or "default"
         row = ConversationRow(
@@ -246,8 +246,8 @@ class ConversationService:
     ) -> Conversation:
         """Return ``conversation_id`` scoped to ``(tenant_id, workspace_id)``.
 
-        Plan 6 Task 1: the scope kwargs are MANDATORY. A conversation
-        owned by a different workspace (same tenant) raises
+        The scope kwargs are MANDATORY. A conversation owned by a
+        different workspace (same tenant) raises
         :class:`ConversationNotFound`.
         """
         conv = await self._repository.get(

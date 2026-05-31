@@ -34,7 +34,7 @@ from flycanon.models.entities.candidate import CandidateRow
 from flycanon.models.entities.ingest_job import IngestJobRow
 from flycanon.models.entities.knowledge_item import KnowledgeItemRow
 
-# Plan 4: every canon_* row carries a non-null scope. Tests use the
+# Every canon_* row carries a non-null scope. Tests use the
 # "default" / "default" pair since the scenarios under test don't
 # exercise multi-tenant isolation -- that's covered by the dedicated
 # pg-isolation suite (test_pgvector_scope_isolation.py et al.).

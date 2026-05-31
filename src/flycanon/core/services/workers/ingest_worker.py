@@ -35,8 +35,8 @@ the lifecycle plumbing.
 RLS bypass
 ==========
 
-Plan 6 Task 3 enables row-level security on every tenant-scoped
-table. Worker invocations have no :class:`TenantContext` bound, so
+Row-level security is enabled on every tenant-scoped table. Worker
+invocations have no :class:`TenantContext` bound, so
 :func:`flycanon.web.conventions.db.install_tenant_guc_hook` no-ops
 on the worker path. Deployment must therefore connect the worker
 process as a Postgres role with ``BYPASSRLS`` privilege (planned:

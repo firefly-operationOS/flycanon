@@ -424,7 +424,7 @@ class KnowledgeService:
     ) -> KnowledgeItemRow:
         """Fetch the item or raise :class:`KnowledgeItemNotFound`.
 
-        Plan 6 Task 1: scope kwargs are MANDATORY.
+        Scope kwargs are MANDATORY.
         """
         item = await self._repository.get_item(
             item_id,

@@ -3,8 +3,9 @@
 
 flycanon exposes two retrieval surfaces:
 
-* **``POST /api/v1/search``** -- raw hybrid retrieval. BM25 (SQLite
-  FTS5) is fused with dense-vector search via Reciprocal Rank Fusion
+* **``POST /api/v1/search``** -- raw hybrid retrieval. BM25 (Postgres
+  ``tsvector`` + GIN on ``canon_chunks``) is fused with dense-vector
+  search (pgvector) via Reciprocal Rank Fusion
   (parameter ``k`` from :class:`CanonSettings.retrieval_rrf_k`); the
   result is a ranked list of :class:`Hit` rows with the original
   chunk content + source pointers + fused score. No LLM call.

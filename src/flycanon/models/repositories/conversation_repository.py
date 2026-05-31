@@ -57,9 +57,9 @@ class ConversationRepository:
     ) -> ConversationRow | None:
         """Look up one conversation, scoped to ``(tenant_id, workspace_id)``.
 
-        Plan 6 Task 1: scope kwargs are MANDATORY. A conversation
-        living in a different workspace (same tenant) returns
-        ``None`` instead of leaking.
+        Scope kwargs are MANDATORY. A conversation living in a
+        different workspace (same tenant) returns ``None`` instead of
+        leaking.
         """
         async with self._session_factory() as session:
             result = await session.execute(
@@ -97,9 +97,9 @@ class ConversationRepository:
     ) -> list[ConversationTurnRow]:
         """Return turns for ``conversation_id``, scoped to ``(tenant, workspace)``.
 
-        Scope kwargs are MANDATORY -- Plan 6 Task 1. Turns belonging
-        to a conversation owned by a different workspace (same
-        tenant) return an empty list.
+        Scope kwargs are MANDATORY. Turns belonging to a conversation
+        owned by a different workspace (same tenant) return an empty
+        list.
         """
         async with self._session_factory() as session:
             result = await session.execute(

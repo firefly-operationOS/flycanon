@@ -177,8 +177,8 @@ class AsyncIngestService:
 
         RLS bypass
         ----------
-        Plan 6 Task 3 enables row-level security on every tenant-scoped
-        table. The request flow sets ``app.tenant_id`` /
+        Row-level security is enabled on every tenant-scoped table.
+        The request flow sets ``app.tenant_id`` /
         ``app.workspace_id`` via :func:`install_tenant_guc_hook`, but
         worker invocations have no :class:`TenantContext` bound -- so
         the GUCs stay empty and RLS would reject the first read.

@@ -102,7 +102,7 @@ required for production:
 | `FLYCANON_ANSWER_MODEL` | `<provider>:<model>` for the RAG answer endpoint (default `anthropic:claude-sonnet-4-6`) | **Yes** for `/api/v1/query`, optional for ingestion-only deployments. |
 | `FLYCANON_ANSWER_FALLBACK_MODEL` | Used when the primary model errors (e.g. provider 5xx, rate limit). | Recommended. |
 | Provider API keys | `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `VOYAGEAI_API_KEY`, `COHERE_API_KEY`, ... -- read by `fireflyframework-agentic` from env at boot. | As needed for your provider mix. |
-| `FLYCANON_VECTOR_STORE` | `pgvector` -- the only supported value (the `sqlite-vec` / `chroma` / `qdrant` / `pinecone` / `memory` backends were removed in the pgvector-only RAG migration). | Defaults to `pgvector`. |
+| `FLYCANON_VECTOR_STORE` | `pgvector` -- the only supported value. | Defaults to `pgvector`. |
 | `FLYCANON_EDA_ADAPTER` | `postgres` (default -- durable outbox + LISTEN/NOTIFY), `memory`, `redis`, `kafka`. | Defaults to `postgres`. |
 | `FLYCANON_API_KEYS` | Comma-separated static API keys. When set, every `/api/v1/*` request requires `Authorization: Bearer <key>`. | Optional. |
 | `FLYCANON_CORS_ORIGINS` | Comma-separated origins for `Access-Control-Allow-Origin`. | Optional. |
@@ -192,9 +192,7 @@ for the rationale; the integration suite
 flycanon is **Postgres-native** for both retrieval channels: BM25 rides
 on a `tsvector` + GIN index on `canon_chunks.tsv` (generated column from
 `canon_chunks.content`), and dense vectors live in `pgvector` in the same
-Postgres. No SQLite file is involved -- the deploy needs Postgres only.
-The SQLite FTS5 corpus fallback (for non-pgvector backends) was removed
-in the pgvector-only migration.
+Postgres. The deploy needs Postgres only.
 
 ---
 

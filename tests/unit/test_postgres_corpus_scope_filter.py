@@ -60,7 +60,7 @@ class TestPublicSurfaceSignatures:
         assert "workspace_id" in params, f"{method_name} must accept workspace_id"
         # Keyword-only -- callers must spell them out so we cannot
         # accidentally pass positional scope values (mirrors the
-        # PgVectorVectorStore convention from Task 3).
+        # PgVectorVectorStore convention).
         assert params["tenant_id"].kind == inspect.Parameter.KEYWORD_ONLY
         assert params["workspace_id"].kind == inspect.Parameter.KEYWORD_ONLY
 

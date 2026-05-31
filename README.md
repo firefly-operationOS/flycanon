@@ -135,10 +135,8 @@ retrieval is a single-host, Postgres-native operation:
 | ------------ | --------------------------------------------------------------------------------------------------------------------------------------- |
 | **`pgvector`**   | The only supported value. PostgreSQL + pgvector extension. HNSW index on `vector_cosine_ops`, tuneable `m` / `ef_construction`. Same operational Postgres as the canonical store AND the BM25 projection. |
 
-The `sqlite-vec` / `chroma` / `qdrant` / `pinecone` / `memory`
-backends and the file-backed SQLite FTS5 corpus fallback were
-removed in the pgvector-only RAG migration. Fusion always happens
-via Reciprocal Rank Fusion over the two channels.
+`pgvector` is the only supported backend. Fusion always happens via
+Reciprocal Rank Fusion over the two channels.
 
 ---
 

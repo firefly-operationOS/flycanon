@@ -48,17 +48,16 @@ class QueryController:
     ) -> SearchResponse:
         """Hybrid retrieval over the canon corpus.
 
-        BM25 (Postgres ``tsvector`` + GIN on ``canon_chunks`` for the
-        default ``pgvector`` backend; SQLite FTS5 only for the
-        file-backed ``sqlite-vec`` backend) is fused with dense-vector
-        search via Reciprocal Rank Fusion::
+        BM25 (Postgres ``tsvector`` + GIN on ``canon_chunks``) is fused
+        with dense-vector search (pgvector) via Reciprocal Rank
+        Fusion::
 
             score(chunk) = sum_over_modalities( 1 / (k + rank) )
 
         with ``k`` from ``FLYCANON_RETRIEVAL_RRF_K`` (default 60).
         The vector half uses the embedding provider configured in
         ``FLYCANON_EMBEDDING_MODEL``; the BM25 half uses the
-        FTS5-indexed chunk content.
+        ``tsvector``-indexed chunk content.
 
         Filters in the request body compose with ``AND`` and are
         applied *post-retrieval*; the retriever widens internally by

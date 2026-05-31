@@ -56,10 +56,9 @@ class TestListEvents:
 
     @pytest.mark.asyncio
     async def test_actor_filter_narrows(self, cost_service):
-        """Post-Plan 4 the actor proxy was retired -- ``list_events``
-        now narrows by tenant + workspace (real scope keys), not by
-        ``actor`` (audit metadata). Verify the rows are partitioned by
-        the right tenant_id."""
+        """``list_events`` narrows by tenant + workspace (the real
+        scope keys), not by ``actor`` (audit metadata). Verify the rows
+        are partitioned by the right tenant_id."""
         await _seed_call(cost_service, actor="alice", tenant_id="t-a")
         await _seed_call(cost_service, actor="bob", tenant_id="t-b")
         rows = await cost_service.list_events(tenant_id="t-a", limit=10)
@@ -77,22 +76,21 @@ class TestSummary:
 
     @pytest.mark.asyncio
     async def test_top_model_and_actor_picked_in_window(self, cost_service):
-        """Post-Plan 4 ``summary`` returns the top model only; the
-        legacy ``top_actor`` field tracked the retired actor proxy."""
+        """``summary`` returns the top model only; there is no
+        ``top_actor`` field."""
         await _seed_call(cost_service, model="openai:gpt-4o", cost_usd="0.10", actor="alice")
         await _seed_call(cost_service, model="anthropic:claude", cost_usd="0.50", actor="bob")
         snapshot = await cost_service.summary()
         assert snapshot["last_24h"]["top_model"] == "anthropic:claude"
-        # ``top_actor`` is no longer surfaced -- actor is audit metadata,
+        # ``top_actor`` is not surfaced -- actor is audit metadata,
         # not a partitioning key.
         assert "top_actor" not in snapshot["last_24h"]
 
     @pytest.mark.asyncio
     async def test_actor_filter_omits_top_actor(self, cost_service):
-        """Post-Plan 4 the ``summary`` API no longer accepts ``actor``;
-        scope flows from tenant + workspace headers. The legacy
-        "omit top_actor when actor-scoped" branch is now naturally
-        the universal case -- ``top_actor`` is never returned."""
+        """The ``summary`` API does not accept ``actor``; scope flows
+        from tenant + workspace headers. ``top_actor`` is never
+        returned."""
         await _seed_call(cost_service, cost_usd="0.10", actor="alice", tenant_id="t-a")
         snapshot = await cost_service.summary(tenant_id="t-a")
         assert "top_actor" not in snapshot["last_24h"]

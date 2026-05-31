@@ -1,18 +1,18 @@
 # Copyright 2026 Firefly Software Solutions Inc
 """Scope-requirement coverage for the source-intake CQRS commands.
 
-The Plan 6 audit found that ``SubmitSourceCommand`` / ``ReplaceSourceCommand``
-and ``AsyncIngestService.submit_async`` accepted optional ``tenant_id`` /
-``workspace_id`` with a silent ``"default"`` fallback in the handlers. That
-means a controller bug -- a forgotten scope kwarg on the request path --
-would silently route every ingested source to the ``("default", "default")``
-RLS bucket, invisible to the caller's real tenant/workspace under migration
-0013's policies.
+``SubmitSourceCommand`` / ``ReplaceSourceCommand`` and
+``AsyncIngestService.submit_async`` require ``tenant_id`` /
+``workspace_id`` with no default. A controller bug -- a forgotten
+scope kwarg on the request path -- would otherwise silently route
+every ingested source to the ``("default", "default")`` RLS bucket,
+invisible to the caller's real tenant/workspace under the RLS
+policies.
 
-Both Command DTOs now require ``tenant_id`` / ``workspace_id`` (no default),
-so a missing scope surfaces as a TypeError at construction time -- loud,
-local, fixable at the controller. ``AsyncIngestService.submit_async`` follows
-the same contract.
+Both Command DTOs require ``tenant_id`` / ``workspace_id`` (no
+default), so a missing scope surfaces as a TypeError at construction
+time -- loud, local, fixable at the controller.
+``AsyncIngestService.submit_async`` follows the same contract.
 """
 
 from __future__ import annotations

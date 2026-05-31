@@ -2,7 +2,7 @@
 """Workspace wire DTOs.
 
 These match the ``canon_workspaces`` row shape. CRUD controllers
-(Plan 4) consume them; internal services can use them too.
+consume them; internal services can use them too.
 """
 
 from __future__ import annotations

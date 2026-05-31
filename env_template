@@ -140,9 +140,8 @@ FLYCANON_PII_POLICY=warn
 # projection means one operational service, not two. The docker-compose
 # stack uses the ``pgvector/pgvector:pg16`` image so the ``vector``
 # extension is ready out of the box. The BM25 channel rides on a
-# ``tsvector`` + GIN index in the same Postgres -- there is no separate
-# file-backed corpus. (The sqlite-vec / chroma / qdrant / pinecone /
-# memory backends were removed in the pgvector-only RAG migration.)
+# ``tsvector`` + GIN index in the same Postgres. ``pgvector`` is the
+# only supported value.
 FLYCANON_VECTOR_STORE=pgvector
 
 # --- pgvector backend (FLYCANON_VECTOR_STORE=pgvector) ----------------------

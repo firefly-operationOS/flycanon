@@ -13,7 +13,8 @@ intake pipeline above this layer takes care of:
 
 By the time bytes reach this service the kind is canonical and the
 loader registry can dispatch directly to the right loader (or fall
-through to MarkItDown for kinds not explicitly registered).
+through to the plain-text :class:`TextLoader` for kinds not explicitly
+registered).
 """
 
 from __future__ import annotations

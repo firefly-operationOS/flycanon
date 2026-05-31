@@ -32,7 +32,7 @@ Every cost event carries:
 | `input_tokens` / `output_tokens` / `total_tokens` | Token counters captured from the agent's usage block. |
 | `cost_usd`       | Decimal (6-place) USD spent. Serialised as a string in JSON to preserve precision. |
 | `latency_ms`     | End-to-end latency of the call. |
-| `actor`          | Caller identity -- audit metadata only since Plan 4 (partitioning moved to `(tenant_id, workspace_id)` on the headers). |
+| `actor`          | Caller identity -- audit metadata only; partitioning is by `(tenant_id, workspace_id)` from the headers. |
 | `tenant_id` / `workspace_id` | Scope columns supplied by `X-Tenant-Id` + `X-Workspace-Id` on every cost-recording call. Aggregations group on this pair. |
 | `correlation_id` | W3C correlation id from the originating request -- pivot back to the audit log. |
 | `subject_kind` / `subject_id` | Optional breadcrumb: `source`/`source_id`, `knowledge_item`/`item_id`, etc. Powers `/by-subject`. |
@@ -44,8 +44,7 @@ Every cost event carries:
 
 Query: `group_by` (csv of `date` / `model` / `agent_name`),
 `since`, `until`. Scope is supplied via the `X-Tenant-Id` +
-`X-Workspace-Id` headers (Plan 4); the legacy `actor` Query param
-is retired.
+`X-Workspace-Id` headers; there is no `actor` Query param.
 
 ```json
 {
@@ -67,7 +66,7 @@ is retired.
 ### `GET /api/v1/billing/events` -- per-call drill-down
 
 Query: `agent_name`, `since`, `until`, `limit` (1-500), `offset`.
-Scope is supplied via the request headers (Plan 4).
+Scope is supplied via the request headers.
 
 ```json
 {
@@ -121,13 +120,13 @@ Three windows always populated (zero rows when no data, not 404):
 ```
 
 The summary is always scoped to the tenant + workspace from the
-request headers; the legacy `top_actor` field is retired.
+request headers; there is no `top_actor` field.
 
 ### `GET /api/v1/billing/top` -- top-N consumers
 
 Query: `dimension` (one of `model` / `agent_name`), `since`,
 `until`, `limit` (1-100, default 10). Scope is supplied via the
-request headers (Plan 4 -- `actor` is no longer a valid dimension).
+request headers; `actor` is not a valid dimension.
 
 ```json
 {
@@ -168,7 +167,7 @@ here.
 ### `GET /api/v1/billing/latency` -- p50 / p95 / p99
 
 Query: `group_by` (csv of `model` / `agent_name`), `since`,
-`until`. Scope is supplied via the request headers (Plan 4).
+`until`. Scope is supplied via the request headers.
 
 ```json
 {

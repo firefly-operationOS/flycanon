@@ -11,13 +11,11 @@ treats every format uniformly:
    expansion, email decomposition, optional Office -> PDF).
 3. Load via the per-format loader (DocxLoader, PdfLoader,
    HtmlLoader, MarkdownLoader, ImageLoader (OCR), TranscriptLoader,
-   or the universal MarkitdownLoader fallback).
+   or the plain-text TextLoader fallback).
 4. Chunk into retrieval-grade fragments with heading-path metadata.
 5. Embed every chunk via the configured provider.
-6. Index BM25 (Postgres tsvector + GIN on ``canon_chunks`` for the
-   default pgvector backend; SQLite FTS5 for the file-backed
-   ``sqlite-vec`` backend) + dense vectors (pgvector / sqlite-vec /
-   chroma / qdrant / pinecone -- backend selectable).
+6. Index BM25 (Postgres tsvector + GIN on ``canon_chunks``) + dense
+   vectors (pgvector), both on the canonical Postgres.
 7. Audit + broadcast ``SourceIngested`` on ``flycanon.ingest``.
 
 The canonical bytes are never stored. The :class:`SourceRecord`

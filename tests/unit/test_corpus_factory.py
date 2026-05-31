@@ -4,9 +4,7 @@
 flycanon is pgvector-only: the factory routes
 ``FLYCANON_VECTOR_STORE=pgvector`` to :class:`PostgresCorpus` (BM25 over the
 ``tsv`` column on ``canon_chunks``) + :class:`PgVectorVectorStore` (dense),
-and rejects every other backend. The SQLite-vec / Chroma / Qdrant / Pinecone
-/ memory fallbacks were removed with the ``fireflyframework_agentic.rag``
-dependency.
+and rejects every other backend.
 """
 
 from __future__ import annotations

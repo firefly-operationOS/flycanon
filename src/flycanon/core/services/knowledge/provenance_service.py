@@ -41,9 +41,9 @@ class ProvenanceService:
         """Build the provenance dict for ``(item_id, version)``.
 
         When ``version`` is omitted, resolves the item's current version.
-        Plan 6 Task 1: ``tenant_id`` / ``workspace_id`` are MANDATORY
-        and threaded through every repository lookup so cross-workspace
-        provenance leaks are impossible.
+        ``tenant_id`` / ``workspace_id`` are MANDATORY and threaded
+        through every repository lookup so cross-workspace provenance
+        leaks are impossible.
         """
         item = await self._knowledge.get_item(
             item_id,

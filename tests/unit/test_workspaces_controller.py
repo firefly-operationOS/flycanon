@@ -7,7 +7,7 @@ Exercises the controller methods directly with a stubbed Starlette
 the pyfly DI graph. Mirrors how the other controller-flavoured unit
 tests interact with their services.
 
-Coverage matches the Plan 4 contract:
+Coverage matches the workspace CRUD contract:
 
 * ``POST``           -> 201 + :class:`WorkspaceSpec`.
 * ``GET ""``         -> list of :class:`WorkspaceSummary` filtered by tenant.

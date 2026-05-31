@@ -7,8 +7,8 @@ producing a normalised representation of one source: a list of
 text under each section, and a small bit of positional metadata
 (``page``, ``order``).
 
-Every supported format has a dedicated, dependency-light loader with no
-Microsoft MarkItDown dependency: DOCX (python-docx), PDF (PyMuPDF +
+Every supported format has a dedicated, dependency-light loader:
+DOCX (python-docx), PDF (PyMuPDF +
 Tesseract OCR), HTML (BeautifulSoup), Markdown / Text, XLSX (openpyxl),
 PPTX (python-pptx), CSV / TSV (stdlib), JSON (stdlib), XML (lxml), RTF
 (striprtf), ODT / ODS / ODP (odfpy), images (Tesseract OCR) and
@@ -176,8 +176,7 @@ class PdfLoader:
 
     pypdf is intentionally NOT used here -- it is reserved for
     :class:`PdfGuard`'s lightweight encryption / corruption
-    pre-flight. MarkItDown is also not on the PDF path; it remains
-    the last-resort fallback for exotic formats only.
+    pre-flight.
     """
 
     kind = SourceKind.pdf
@@ -196,7 +195,7 @@ class PdfLoader:
         try:
             import pymupdf
         except ImportError as exc:  # pragma: no cover -- runtime dep guard
-            raise RuntimeError("pymupdf is required for PDF ingestion (replaces pypdf/MarkItDown)") from exc
+            raise RuntimeError("pymupdf is required for PDF ingestion") from exc
 
         try:
             doc = pymupdf.open(stream=content, filetype="pdf")

@@ -1,8 +1,8 @@
 # Copyright 2026 Firefly Software Solutions Inc
 """``require_tenant_context`` parses headers into a ``TenantContext``.
 
-This task covers the no-JWT path (tenant/workspace/correlation
-headers only). JWT cross-check is added in Task 8.
+This covers the no-JWT path (tenant/workspace/correlation headers
+only); the JWT cross-check is exercised separately.
 """
 
 from __future__ import annotations
@@ -92,7 +92,7 @@ def test_correlation_id_generated_if_absent() -> None:
     assert isinstance(correlation, str) and len(correlation) >= 8
 
 
-# --- JWT cross-check tests (Task 8) ---------------------------------
+# --- JWT cross-check tests ------------------------------------------
 
 
 def _decoded_jwt_header(payload: dict, *, alg: str = "none") -> str:

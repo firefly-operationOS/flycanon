@@ -1,7 +1,7 @@
 # Copyright 2026 Firefly Software Solutions Inc
 """End-to-end coverage for the ``/api/v1/agent/*`` controllers.
 
-Exercises the eight agent-tier endpoints added in Plan 5 Task 5:
+Exercises the eight agent-tier endpoints:
 
 * ``POST /api/v1/agent/sources``                       (idempotent)
 * ``GET  /api/v1/agent/sources/{id}``
