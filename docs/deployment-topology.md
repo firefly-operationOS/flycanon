@@ -481,10 +481,13 @@ else has a working default. Every row was verified against
 | `FLYCANON_QUERY_EXPANSION_ENABLED` | no | `false` | Multi-query expansion (+1 LLM call per `/search` and `/query`). |
 | `FLYCANON_PII_SCANNER` | no | `regex` | `regex`, `presidio`, or `disabled`. |
 | `FLYCANON_PII_POLICY` | no | `warn` | `warn`, `redact`, `reject`. |
-| `FLYCANON_VECTOR_STORE` | no | `pgvector` | `pgvector` is the only supported value (HNSW in same Postgres; BM25 rides on `tsvector` + GIN). |
+| `FLYCANON_VECTOR_STORE` | no | `pgvector` | Dense backend: `pgvector` (default), `qdrant`, or `chroma`. BM25 always rides on `tsvector` + GIN in Postgres. |
 | `FLYCANON_PGVECTOR_TABLE` | no | `canon_chunk_vectors` | |
 | `FLYCANON_PGVECTOR_HNSW_M` | no | `16` | HNSW degree. |
 | `FLYCANON_PGVECTOR_HNSW_EF_CONSTRUCTION` | no | `64` | HNSW build-time candidate list. |
+| `FLYCANON_PGVECTOR_HNSW_EF_SEARCH` | no | `200` | HNSW query-time candidate list (recall vs latency). |
+| `FLYCANON_QDRANT_URL` / `_API_KEY` / `_COLLECTION` | no | `http://localhost:6333` / – / `canon_vectors` | Qdrant backend (`uv sync --extra qdrant`). |
+| `FLYCANON_CHROMA_HOST` / `_PORT` / `_COLLECTION` | no | – / `8000` / `canon_vectors` | Chroma backend (`uv sync --extra chroma`); empty host = in-process ephemeral. |
 | `FLYCANON_CHUNK_SIZE_TOKENS` | no | `1200` | |
 | `FLYCANON_CHUNK_OVERLAP_TOKENS` | no | `150` | |
 | `FLYCANON_CHUNK_STRATEGY` | no | `paragraph` | |

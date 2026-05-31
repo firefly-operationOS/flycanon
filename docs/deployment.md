@@ -102,7 +102,7 @@ required for production:
 | `FLYCANON_ANSWER_MODEL` | `<provider>:<model>` for the RAG answer endpoint (default `anthropic:claude-sonnet-4-6`) | **Yes** for `/api/v1/query`, optional for ingestion-only deployments. |
 | `FLYCANON_ANSWER_FALLBACK_MODEL` | Used when the primary model errors (e.g. provider 5xx, rate limit). | Recommended. |
 | Provider API keys | `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `VOYAGEAI_API_KEY`, `COHERE_API_KEY`, ... -- read by `fireflyframework-agentic` from env at boot. | As needed for your provider mix. |
-| `FLYCANON_VECTOR_STORE` | `pgvector` -- the only supported value. | Defaults to `pgvector`. |
+| `FLYCANON_VECTOR_STORE` | Dense backend: `pgvector` (default), `qdrant` (`--extra qdrant`), or `chroma` (`--extra chroma`). | Defaults to `pgvector`. |
 | `FLYCANON_EDA_ADAPTER` | `postgres` (default -- durable outbox + LISTEN/NOTIFY), `memory`, `redis`, `kafka`. | Defaults to `postgres`. |
 | `FLYCANON_API_KEYS` | Comma-separated static API keys. When set, every `/api/v1/*` request requires `Authorization: Bearer <key>`. | Optional. |
 | `FLYCANON_CORS_ORIGINS` | Comma-separated origins for `Access-Control-Allow-Origin`. | Optional. |

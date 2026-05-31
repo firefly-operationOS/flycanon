@@ -103,23 +103,9 @@ class _FakeScopeAwareCorpus:
         return []
 
 
-class _FakeLegacyCorpus:
-    """Stand-in for a corpus whose read methods take no scope kwargs."""
-
-    def __init__(self) -> None:
-        self.bm25_calls: list[dict[str, Any]] = []
-        self.get_chunks_calls: list[dict[str, Any]] = []
-
-    async def bm25_search(self, query: str, *, top_k: int = 30) -> list[Any]:
-        self.bm25_calls.append({"query": query, "top_k": top_k})
-        return []
-
-    async def get_chunks(self, chunk_ids: list[str]) -> list[Any]:
-        self.get_chunks_calls.append({"chunk_ids": chunk_ids})
-        return []
-
-
 class _FakeScopeAwareVectorStore:
+    """Stand-in for the scoped vector store: scope kwargs are required."""
+
     def __init__(self) -> None:
         self.calls: list[dict[str, Any]] = []
 
@@ -128,8 +114,8 @@ class _FakeScopeAwareVectorStore:
         query_embedding: list[float],
         top_k: int = 5,
         *,
-        tenant_id: str = "default",
-        workspace_id: str = "default",
+        tenant_id: str,
+        workspace_id: str,
     ) -> list[Any]:
         self.calls.append(
             {
@@ -141,22 +127,9 @@ class _FakeScopeAwareVectorStore:
         return []
 
 
-class _FakeLegacyVectorStore:
-    def __init__(self) -> None:
-        self.calls: list[dict[str, Any]] = []
-
-    async def search(
-        self,
-        query_embedding: list[float],
-        top_k: int = 5,
-    ) -> list[Any]:
-        self.calls.append({"top_k": top_k})
-        return []
-
-
 class TestScopedCorpusProxy:
     @pytest.mark.asyncio
-    async def test_threads_scope_to_scope_aware_corpus(self):
+    async def test_threads_scope_to_corpus(self):
         inner = _FakeScopeAwareCorpus()
         scoped = _ScopedCorpus(inner, tenant_id="acme", workspace_id="ws-a")
         await scoped.bm25_search("hello", top_k=7)
@@ -168,33 +141,14 @@ class TestScopedCorpusProxy:
             {"chunk_ids": ["c-1", "c-2"], "tenant_id": "acme", "workspace_id": "ws-a"}
         ]
 
-    @pytest.mark.asyncio
-    async def test_falls_back_for_legacy_corpus_without_scope(self):
-        # A corpus whose read methods take no scope kwargs: the proxy
-        # must detect that and call them without the extras (passing
-        # tenant_id would raise TypeError).
-        inner = _FakeLegacyCorpus()
-        scoped = _ScopedCorpus(inner, tenant_id="acme", workspace_id="ws-a")
-        await scoped.bm25_search("hello", top_k=3)
-        await scoped.get_chunks(["c-1"])
-        assert inner.bm25_calls == [{"query": "hello", "top_k": 3}]
-        assert inner.get_chunks_calls == [{"chunk_ids": ["c-1"]}]
-
 
 class TestScopedVectorStoreProxy:
     @pytest.mark.asyncio
-    async def test_threads_scope_to_scope_aware_store(self):
+    async def test_threads_scope_to_store(self):
         inner = _FakeScopeAwareVectorStore()
         scoped = _ScopedVectorStore(inner, tenant_id="acme", workspace_id="ws-a")
         await scoped.search([0.1, 0.2, 0.3], top_k=10)
         assert inner.calls == [{"top_k": 10, "tenant_id": "acme", "workspace_id": "ws-a"}]
-
-    @pytest.mark.asyncio
-    async def test_falls_back_for_legacy_store(self):
-        inner = _FakeLegacyVectorStore()
-        scoped = _ScopedVectorStore(inner, tenant_id="acme", workspace_id="ws-a")
-        await scoped.search([0.1, 0.2, 0.3], top_k=10)
-        assert inner.calls == [{"top_k": 10}]
 
 
 # ----------------------------------------------------------------------

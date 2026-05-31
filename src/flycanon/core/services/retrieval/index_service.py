@@ -29,8 +29,12 @@ class IndexService:
     holds the searchable projection.
     """
 
-    def __init__(self, *, context: CorpusContext) -> None:
+    def __init__(self, *, context: CorpusContext, chunk_repository: object | None = None) -> None:
         self._context = context
+        # Optional: lets ``remove_for_source`` resolve a source's chunk ids so
+        # it can purge the dense vectors explicitly (external stores have no FK
+        # cascade). When absent, the dense purge is skipped.
+        self._chunk_repo = chunk_repository
 
     async def initialise(self) -> None:
         await self._context.initialise()
@@ -86,7 +90,6 @@ class IndexService:
                     "section_path": chunk.section_path or "",
                     "page": str(chunk.page) if chunk.page is not None else "",
                 },
-                namespace="default",
             )
             for chunk, emb in zip(chunks, embeddings, strict=True)
         ]
@@ -100,9 +103,14 @@ class IndexService:
         if stored_chunks:
             await self._context.corpus.upsert_chunks(stored_chunks)  # type: ignore[attr-defined]
         if vector_documents:
-            # Probe the upsert signature so scope is only pushed when
-            # the vector store accepts it; PgVectorVectorStore does.
-            await self._upsert_vectors(vector_documents, tenant_id=tenant_id, workspace_id=workspace_id)
+            # The dense store is a scoped wrapper: tenant_id / workspace_id are
+            # required and fold into the canonical namespace. No probing -- a
+            # backend that lost the scope contract fails loud here.
+            await self._context.vector_store.upsert(
+                vector_documents,
+                tenant_id=tenant_id,
+                workspace_id=workspace_id,
+            )
 
         # Note the model on the entity so re-embedding with a different
         # model can detect the mismatch.
@@ -119,53 +127,32 @@ class IndexService:
         )
         return len(stored_chunks)
 
-    async def _upsert_vectors(
-        self,
-        documents: Sequence[object],
-        *,
-        tenant_id: str,
-        workspace_id: str,
-    ) -> None:
-        """Thread scope to vector-store ``upsert`` when supported.
-
-        The signature is probed so scope is only pushed when the
-        vector store accepts ``tenant_id`` / ``workspace_id`` kwargs;
-        :class:`PgVectorVectorStore` always accepts them.
-        """
-        import inspect
-
-        upsert = self._context.vector_store.upsert  # type: ignore[attr-defined]
-        try:
-            sig = inspect.signature(upsert)
-            supports_scope = "tenant_id" in sig.parameters and "workspace_id" in sig.parameters
-        except (TypeError, ValueError):
-            supports_scope = False
-        if supports_scope:
-            await upsert(list(documents), tenant_id=tenant_id, workspace_id=workspace_id)
-        else:
-            await upsert(list(documents))
-
     async def remove_for_source(
         self,
         source_id: str,
         *,
-        tenant_id: str,  # noqa: ARG002 -- reserved for signature symmetry with replace_for_source
-        workspace_id: str,  # noqa: ARG002
+        tenant_id: str,
+        workspace_id: str,
     ) -> int:
         """Wipe every projection for ``source_id``. Idempotent.
 
-        ``tenant_id`` / ``workspace_id`` are REQUIRED for signature
-        symmetry with :meth:`replace_for_source` -- the BM25 wipe
-        already runs through the source's FK cascade (canonical
-        store enforces the scope at delete time) and the vector
-        cleanup happens lazily via id-overwrite at next ingest.
-        Callers that need an immediate vector-store purge should
-        also call ``vector_store.delete([...])`` with the chunk ids.
-        Making the kwargs required matches the write-path tightening
-        on :meth:`replace_for_source` so forgotten scope on either
-        surface fails loud at the call site.
+        Deletes the BM25 rows (corpus) and, when a chunk repository is wired,
+        purges the dense vectors explicitly -- external stores have no FK
+        cascade, so the embeddings would otherwise leak on a source delete. The
+        dense delete is scoped via the scoped vector store. ``tenant_id`` /
+        ``workspace_id`` are REQUIRED, mirroring :meth:`replace_for_source`, so
+        forgetting the scope on either write surface fails loud at the call site.
         """
         deleted = await self._context.corpus.delete_by_doc_id(source_id)  # type: ignore[attr-defined]
+        if self._chunk_repo is not None:
+            chunk_rows = await self._chunk_repo.list_for_source(source_id)  # type: ignore[attr-defined]
+            chunk_ids = [row.id for row in chunk_rows]
+            if chunk_ids:
+                await self._context.vector_store.delete(
+                    chunk_ids,
+                    tenant_id=tenant_id,
+                    workspace_id=workspace_id,
+                )
         return int(deleted or 0)
 
     @staticmethod

@@ -4,6 +4,30 @@ All notable changes to **flycanon** are documented here.
 
 ## [Unreleased] -- Multitenancy backbone
 
+### Added -- multi-backend vector stores
+
+- **Pluggable dense backend.** `FLYCANON_VECTOR_STORE` now selects the dense
+  projection backend: `pgvector` (default), `qdrant`, or `chroma`. The lexical
+  BM25 half and RRF fusion always stay on Postgres. Qdrant/Chroma use the
+  adapters that ship in `fireflyframework-agentic` (install `--extra qdrant` /
+  `--extra chroma`); new `FLYCANON_QDRANT_*` / `FLYCANON_CHROMA_*` settings
+  configure them.
+- **Explicit, fail-loud scope contract.** Every dense backend is wrapped in the
+  framework's `TenantScopedVectorStore`, which folds `(tenant_id, workspace_id)`
+  into a canonical `t/<tenant>/w/<workspace>` namespace. The previous
+  `inspect.signature` scope-probe (which could silently skip isolation on a
+  scope-blind store) is gone; missing scope now fails loud.
+- **pgvector moved upstream.** flycanon's bespoke pgvector adapter was replaced
+  by the framework's generic `PgVectorVectorStore`; flycanon keeps a thin
+  `RlsPgVectorVectorStore` subclass that adds namespace-keyed Postgres RLS via
+  the adapter's `_prepare_session` hook. Requires `fireflyframework-agentic`
+  >= 26.5.31. Migration `0014` retires the legacy column-shaped
+  `canon_chunk_vectors` table (the adapter recreates the namespace-shaped table
+  on boot; **re-index after upgrading** to repopulate the derived projection).
+- **Vector purge on source delete.** `IndexService.remove_for_source` now purges
+  the dense vectors for a deleted source's chunks (external stores have no FK
+  cascade).
+
 ### Changed -- retrieval and intake internals (26.5.7)
 
 - **Native per-format document intake.** Document intake runs on native
@@ -23,11 +47,14 @@ All notable changes to **flycanon** are documented here.
   `reciprocal_rank_fusion` and `HybridRetriever` live in
   `core/services/retrieval/fusion.py`. `HybridRetriever` honours
   `FLYCANON_RETRIEVAL_RRF_K`.
-- **pgvector-only retrieval.** `corpus_factory` builds the pgvector
-  backend; `FLYCANON_VECTOR_STORE` accepts only `pgvector`.
+- **Hybrid retrieval, pluggable dense half.** `corpus_factory` keeps BM25 on
+  Postgres and routes the dense half to the configured backend (see *Added --
+  multi-backend vector stores* above). _Previously pgvector-only._
 - **Dependencies.** `fireflyframework-agentic` is pulled with the
-  `[openai-embeddings,binary]` extras; the `[binary]` extra provides
-  pillow-heif, cairosvg, py7zr and extract-msg.
+  `[openai-embeddings,binary,vectorstores-pgvector]` extras; the `[binary]`
+  extra provides pillow-heif, cairosvg, py7zr and extract-msg. Qdrant/Chroma
+  client libraries come from the framework's `vectorstores-*` extras via
+  flycanon's optional `qdrant` / `chroma` extras.
 
 ### Added -- Redis-backed adapters for rate-limit + idempotency
 

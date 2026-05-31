@@ -1,40 +1,26 @@
 # Copyright 2026 Firefly Software Solutions Inc
-"""``PgVectorVectorStore`` -- pgvector-backed dense vector projection.
+"""``RlsPgVectorVectorStore`` -- pgvector dense projection with Postgres RLS.
 
-flycanon-side adapter that implements
-:class:`fireflyframework_agentic.vectorstores.base.VectorStoreProtocol`
-on top of PostgreSQL with the ``pgvector`` extension. Co-locates the
-vector projection with the canonical store (Postgres) so production
-deployments don't have to operate a separate vector database.
+The generic pgvector adapter ships in the framework
+(:class:`fireflyframework_agentic.vectorstores.PgVectorVectorStore`): asyncpg,
+namespace-scoped, with an HNSW cosine index. flycanon co-locates the dense
+projection with the canonical Postgres instance and adds a second, DB-enforced
+isolation layer on top of the application-level namespace scoping: Postgres
+Row-Level Security.
 
-The store creates one table per service deployment
-(``canon_chunk_vectors`` by default) with the following shape::
+This subclass keeps ~all of the adapter upstream and adds only the RLS coupling
+that cannot generalize to a framework-level adapter:
 
-    CREATE TABLE canon_chunk_vectors (
-        id           TEXT PRIMARY KEY,
-        namespace    TEXT NOT NULL DEFAULT 'default',
-        tenant_id    TEXT NOT NULL DEFAULT 'default',
-        workspace_id TEXT NOT NULL DEFAULT 'default',
-        embedding    vector(<dimensions>) NOT NULL,
-        metadata     JSONB NOT NULL DEFAULT '{}'::jsonb,
-        text         TEXT NOT NULL,
-        created_at   TIMESTAMPTZ NOT NULL DEFAULT now()
-    );
-    CREATE INDEX canon_chunk_vectors_hnsw ON canon_chunk_vectors
-        USING hnsw (embedding vector_cosine_ops);
-    CREATE INDEX canon_chunk_vectors_namespace ON canon_chunk_vectors (namespace);
-    CREATE INDEX canon_chunk_vectors_scope
-        ON canon_chunk_vectors (tenant_id, workspace_id);
+* :meth:`_create_schema` installs an idempotent, namespace-keyed RLS policy on
+  the vector table (``USING namespace = current_setting('app.scope_namespace')``),
+  ``FORCE``\\ d so even the table owner is subject to it.
+* :meth:`_prepare_session` sets that GUC, transaction-locally, from the scope
+  namespace the :class:`TenantScopedVectorStore` wrapper already encodes -- so
+  every read/write/delete runs under the matching RLS predicate. An unset GUC
+  matches no rows (fail-safe): the table is never reachable unscoped.
 
-The HNSW index gives sub-millisecond ANN over millions of rows; the
-namespace column carries a diagnostic ``t/<tenant>/w/<workspace>``
-label, and the ``(tenant_id, workspace_id)`` composite is the
-canonical scope used by the retrieval filters.
-
-Activated when ``FLYCANON_VECTOR_STORE=pgvector``; requires the
-``pgvector`` extra (``uv sync --extra pgvector``) and the pgvector
-extension installed on the Postgres instance
-(``CREATE EXTENSION IF NOT EXISTS vector``).
+Activated when ``FLYCANON_VECTOR_STORE=pgvector`` (the default). Requires the
+``pgvector`` extension on the Postgres server.
 """
 
 from __future__ import annotations
@@ -42,38 +28,24 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from sqlalchemy import text
-from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker, create_async_engine
+from fireflyframework_agentic.vectorstores import PgVectorVectorStore
 
 logger = logging.getLogger(__name__)
 
 
-# Default for ``hnsw.ef_search``. The HNSW index builder picks a small
-# candidate-list size by default (~40); 200 trades ~2ms of extra query
-# time for recall that's competitive with brute force. ``SET LOCAL``
-# scopes the bump to a single transaction, so other workloads on the same
-# connection pool are unaffected.
-_HNSW_EF_SEARCH = 200
+def _asyncpg_dsn(database_url: str) -> str:
+    """Coerce a SQLAlchemy URL to the plain DSN asyncpg accepts.
 
-# Default widening factor for the post-fetch ANN window. The query pulls
-# ``top_k * widening_factor`` candidates from the ANN index so that the
-# downstream cross-encoder / RRF reranker can rescore a wider pool and
-# the trim happens server-side instead of in Python.
-_DEFAULT_WIDENING_FACTOR = 5
-
-
-def _scope_namespace(tenant_id: str, workspace_id: str) -> str:
-    """Canonical ``t/<tenant>/w/<workspace>`` namespace string.
-
-    The scope columns are the authoritative filter; mirroring them onto
-    the ``namespace`` field keeps the diagnostic label aligned with the
-    scope.
+    flycanon's ``database_url`` is the SQLAlchemy ``postgresql+asyncpg://`` form;
+    ``asyncpg.create_pool`` wants a driverless ``postgresql://`` DSN.
     """
-    return f"t/{tenant_id}/w/{workspace_id}"
+    for marker in ("+asyncpg", "+psycopg2", "+psycopg"):
+        database_url = database_url.replace(marker, "", 1)
+    return database_url
 
 
-class PgVectorVectorStore:
-    """VectorStoreProtocol implementation over pgvector."""
+class RlsPgVectorVectorStore(PgVectorVectorStore):
+    """pgvector dense store + flycanon namespace-keyed Postgres RLS."""
 
     def __init__(
         self,
@@ -83,327 +55,55 @@ class PgVectorVectorStore:
         table_name: str = "canon_chunk_vectors",
         hnsw_m: int = 16,
         hnsw_ef_construction: int = 64,
+        hnsw_ef_search: int = 200,
     ) -> None:
-        try:
-            import pgvector  # noqa: F401  -- import to surface missing-extra failures
-        except ImportError as exc:
-            raise RuntimeError(
-                "pgvector backend requires the ``pgvector`` extra (``uv sync --extra pgvector``)."
-            ) from exc
-
-        self._url = _to_async_url(database_url)
-        self._dim = dimension
-        self._table = table_name
-        self._hnsw_m = hnsw_m
-        self._hnsw_ef_construction = hnsw_ef_construction
-        self._engine: AsyncEngine | None = None
-        self._factory: async_sessionmaker | None = None
-        self._initialised = False
-
-    async def _ensure_engine(self) -> async_sessionmaker:
-        if self._factory is None:
-            self._engine = create_async_engine(self._url, future=True, pool_pre_ping=True)
-            self._factory = async_sessionmaker(self._engine, expire_on_commit=False)
-        if not self._initialised:
-            await self._initialise_schema()
-            self._initialised = True
-        return self._factory
-
-    async def _initialise_schema(self) -> None:
-        assert self._engine is not None
-        async with self._engine.begin() as conn:
-            await conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
-            await conn.execute(
-                text(
-                    f"""
-                    CREATE TABLE IF NOT EXISTS {self._table} (
-                        id           TEXT PRIMARY KEY,
-                        namespace    TEXT NOT NULL DEFAULT 'default',
-                        tenant_id    TEXT NOT NULL DEFAULT 'default',
-                        workspace_id TEXT NOT NULL DEFAULT 'default',
-                        embedding    vector({self._dim}) NOT NULL,
-                        metadata     JSONB NOT NULL DEFAULT '{{}}'::jsonb,
-                        text         TEXT NOT NULL,
-                        created_at   TIMESTAMPTZ NOT NULL DEFAULT now()
-                    )
-                    """
-                )
-            )
-            await conn.execute(
-                text(
-                    f"""
-                    CREATE INDEX IF NOT EXISTS {self._table}_hnsw
-                    ON {self._table} USING hnsw (embedding vector_cosine_ops)
-                    WITH (m = {self._hnsw_m}, ef_construction = {self._hnsw_ef_construction})
-                    """
-                )
-            )
-            await conn.execute(
-                text(f"CREATE INDEX IF NOT EXISTS {self._table}_namespace ON {self._table} (namespace)")
-            )
-            await conn.execute(
-                text(
-                    f"CREATE INDEX IF NOT EXISTS {self._table}_scope "
-                    f"ON {self._table} (tenant_id, workspace_id)"
-                )
-            )
-            # Install Postgres RLS policies in-band with table creation so
-            # the table is never reachable from the application without
-            # tenant/workspace scoping -- closes the deploy-ordering gap
-            # where migration ``0013_rls_policies`` runs before the
-            # PgvectorStore boots for the first time on a fresh deploy
-            # (the migration's ``IF EXISTS`` guard no-ops in that case).
-            #
-            # The DO block is idempotent (skips if the policy already
-            # exists) and soft-fails on insufficient_privilege so a
-            # non-admin boot logs a warning instead of crashing.
-            await conn.execute(
-                text(
-                    f"""
-                    DO $$
-                    BEGIN
-                        IF NOT EXISTS (
-                            SELECT 1 FROM pg_policies
-                            WHERE schemaname = 'public'
-                              AND tablename = '{self._table}'
-                              AND policyname = 'tenant_workspace_isolation'
-                        ) THEN
-                            BEGIN
-                                EXECUTE 'ALTER TABLE {self._table} ENABLE ROW LEVEL SECURITY';
-                                EXECUTE 'ALTER TABLE {self._table} FORCE ROW LEVEL SECURITY';
-                                EXECUTE $POLICY$
-                                    CREATE POLICY tenant_workspace_isolation ON {self._table}
-                                      USING (
-                                        tenant_id = current_setting('app.tenant_id', true)
-                                        AND workspace_id = current_setting('app.workspace_id', true)
-                                      )
-                                $POLICY$;
-                            EXCEPTION WHEN insufficient_privilege THEN
-                                RAISE WARNING
-                                    'Insufficient privilege to apply RLS on %; install via admin role.',
-                                    '{self._table}';
-                            END;
-                        END IF;
-                    END
-                    $$;
-                    """
-                )
-            )
-
-    # ------------------------------------------------------------------
-    # VectorStoreProtocol surface
-    # ------------------------------------------------------------------
-
-    async def upsert(
-        self,
-        documents: list[Any],
-        namespace: str = "default",
-        *,
-        tenant_id: str,
-        workspace_id: str,
-    ) -> None:
-        """Persist documents with scope columns + canonical namespace.
-
-        ``tenant_id`` / ``workspace_id`` are the authoritative scope and
-        required: callers must propagate the request-bound scope rather
-        than rely on a silent ``"default"`` fallback. The ``namespace``
-        argument carries the diagnostic label and is overridden by the
-        canonical ``t/<tenant>/w/<workspace>`` template whenever it
-        applies.
-        """
-        factory = await self._ensure_engine()
-        scope_namespace = _scope_namespace(tenant_id, workspace_id)
-        rows = [
-            _doc_to_row(
-                doc,
-                namespace=scope_namespace if namespace == "default" else namespace,
-                tenant_id=tenant_id,
-                workspace_id=workspace_id,
-            )
-            for doc in documents
-        ]
-        if not rows:
-            return
-        async with factory() as session, session.begin():
-            # Bulk upsert via INSERT ... ON CONFLICT (id) DO UPDATE.
-            # All values are parametrized; only the table identifier is
-            # interpolated (it's controlled by configuration, not user
-            # input).
-            await session.execute(
-                text(
-                    f"""
-                        INSERT INTO {self._table}
-                            (id, namespace, tenant_id, workspace_id, embedding, metadata, text)
-                        VALUES
-                            (:id, :namespace, :tenant_id, :workspace_id,
-                             :embedding, CAST(:metadata AS jsonb), :text)
-                        ON CONFLICT (id) DO UPDATE
-                        SET namespace    = EXCLUDED.namespace,
-                            tenant_id    = EXCLUDED.tenant_id,
-                            workspace_id = EXCLUDED.workspace_id,
-                            embedding    = EXCLUDED.embedding,
-                            metadata     = EXCLUDED.metadata,
-                            text         = EXCLUDED.text
-                        """
-                ),
-                rows,
-            )
-
-    async def search(
-        self,
-        query_embedding: list[float],
-        top_k: int = 5,
-        namespace: str = "default",
-        filters: list[Any] | None = None,
-        *,
-        tenant_id: str,
-        workspace_id: str,
-        widening_factor: int = _DEFAULT_WIDENING_FACTOR,
-    ) -> list[Any]:
-        """ANN search filtered to ``(tenant_id, workspace_id)`` scope.
-
-        The query runs inside an explicit transaction that bumps
-        ``hnsw.ef_search`` for higher recall, then filters on the
-        scope columns. ``LIMIT`` is widened server-side by
-        ``widening_factor`` (default 5) so that the downstream
-        cross-encoder / RRF reranker can rescore a larger pool;
-        the result list is trimmed to ``top_k`` before returning.
-        """
-        from fireflyframework_agentic.vectorstores.types import SearchResult, VectorDocument
-
-        factory = await self._ensure_engine()
-        embedding_literal = _vector_literal(query_embedding)
-        widened_limit = max(1, top_k * widening_factor)
-        async with factory() as session, session.begin():
-            # ``SET LOCAL`` is per-transaction and only valid on
-            # Postgres. The pgvector adapter is Postgres-only at
-            # construction time (we import the ``pgvector`` extra
-            # in ``__init__``), so the dialect check below is
-            # belt-and-suspenders for tests that swap in a SQLite
-            # engine via monkeypatching.
-            dialect = session.bind.dialect.name if session.bind is not None else ""
-            if dialect == "postgresql":
-                await session.execute(text(f"SET LOCAL hnsw.ef_search = {_HNSW_EF_SEARCH}"))
-            result = await session.execute(
-                text(
-                    f"""
-                    SELECT id, namespace, metadata, text,
-                           1 - (embedding <=> :query_embedding) AS score
-                    FROM {self._table}
-                    WHERE tenant_id = :tenant_id
-                      AND workspace_id = :workspace_id
-                    ORDER BY embedding <=> :query_embedding
-                    LIMIT :limit
-                    """
-                ),
-                {
-                    "query_embedding": embedding_literal,
-                    "tenant_id": tenant_id,
-                    "workspace_id": workspace_id,
-                    "limit": widened_limit,
-                },
-            )
-            rows = result.all()
-
-        hits = [
-            SearchResult(
-                document=VectorDocument(
-                    id=str(row.id),
-                    text=row.text,
-                    embedding=None,
-                    metadata=dict(row.metadata or {}),
-                    namespace=row.namespace,
-                ),
-                score=float(row.score),
-            )
-            for row in rows
-        ]
-        # Trim post-fetch -- the SQL ``LIMIT`` widens the candidate
-        # pool for the downstream reranker; here we cap to the
-        # caller's requested top_k.
-        return hits[:top_k]
-
-    async def search_text(
-        self,
-        query: str,
-        top_k: int = 5,
-        namespace: str = "default",
-        filters: list[Any] | None = None,
-        *,
-        tenant_id: str,
-        workspace_id: str,
-    ) -> list[Any]:
-        raise NotImplementedError(
-            "pgvector adapter requires a precomputed embedding; use search(query_embedding=...) instead."
+        super().__init__(
+            _asyncpg_dsn(database_url),
+            dimension=dimension,
+            table_name=table_name,
+            hnsw_m=hnsw_m,
+            hnsw_ef_construction=hnsw_ef_construction,
+            hnsw_ef_search=hnsw_ef_search,
         )
 
-    async def delete(
-        self,
-        ids: list[str],
-        namespace: str = "default",
-        *,
-        tenant_id: str,
-        workspace_id: str,
-    ) -> None:
-        if not ids:
-            return
-        factory = await self._ensure_engine()
-        async with factory() as session, session.begin():
-            await session.execute(
-                text(
-                    f"DELETE FROM {self._table} "
-                    f"WHERE tenant_id = :tenant_id "
-                    f"  AND workspace_id = :workspace_id "
-                    f"  AND id = ANY(:ids)"
-                ),
-                {
-                    "tenant_id": tenant_id,
-                    "workspace_id": workspace_id,
-                    "ids": list(ids),
-                },
-            )
+    async def _create_schema(self, conn: Any) -> None:
+        await super()._create_schema(conn)
+        # Install the RLS policy in-band with table creation so the table is
+        # never reachable from the application without scope -- closes the
+        # deploy-ordering gap where a migration's ``IF EXISTS`` guard no-ops on
+        # a fresh deploy. The DO block is idempotent (skips if the policy
+        # already exists) and soft-fails on insufficient_privilege so a
+        # non-admin boot logs a warning instead of crashing.
+        await conn.execute(
+            f"""
+            DO $$
+            BEGIN
+                IF NOT EXISTS (
+                    SELECT 1 FROM pg_policies
+                    WHERE schemaname = 'public'
+                      AND tablename = '{self._table}'
+                      AND policyname = 'tenant_workspace_isolation'
+                ) THEN
+                    BEGIN
+                        EXECUTE 'ALTER TABLE {self._table} ENABLE ROW LEVEL SECURITY';
+                        EXECUTE 'ALTER TABLE {self._table} FORCE ROW LEVEL SECURITY';
+                        EXECUTE $POLICY$
+                            CREATE POLICY tenant_workspace_isolation ON {self._table}
+                              USING (namespace = current_setting('app.scope_namespace', true))
+                              WITH CHECK (namespace = current_setting('app.scope_namespace', true))
+                        $POLICY$;
+                    EXCEPTION WHEN insufficient_privilege THEN
+                        RAISE WARNING
+                            'Insufficient privilege to apply RLS on %; install via admin role.',
+                            '{self._table}';
+                    END;
+                END IF;
+            END
+            $$;
+            """
+        )
 
-    async def close(self) -> None:
-        if self._engine is not None:
-            await self._engine.dispose()
-            self._engine = None
-            self._factory = None
-
-
-def _doc_to_row(
-    doc: Any,
-    *,
-    namespace: str,
-    tenant_id: str,
-    workspace_id: str,
-) -> dict[str, Any]:
-    import json
-
-    embedding = list(doc.embedding or [])
-    if not embedding:
-        raise ValueError(f"VectorDocument {doc.id!r} has no embedding; pgvector requires one")
-    return {
-        "id": str(doc.id),
-        "namespace": getattr(doc, "namespace", None) or namespace,
-        "tenant_id": tenant_id,
-        "workspace_id": workspace_id,
-        "embedding": _vector_literal(embedding),
-        "metadata": json.dumps(dict(getattr(doc, "metadata", {}) or {})),
-        "text": getattr(doc, "text", "") or "",
-    }
-
-
-def _vector_literal(values: list[float]) -> str:
-    """Render a Python list as a pgvector input literal."""
-    return "[" + ",".join(f"{float(v):.7f}" for v in values) + "]"
-
-
-def _to_async_url(database_url: str) -> str:
-    """Coerce any SQLAlchemy URL to its asyncpg variant for pgvector use."""
-    if "+asyncpg" in database_url:
-        return database_url
-    if database_url.startswith("postgresql+psycopg"):
-        return database_url.replace("+psycopg", "+asyncpg", 1)
-    if database_url.startswith("postgresql://"):
-        return database_url.replace("postgresql://", "postgresql+asyncpg://", 1)
-    return database_url
+    async def _prepare_session(self, conn: Any, *, namespace: str) -> None:
+        # Transaction-local GUC consumed by the RLS policy above. ``set_config``
+        # (unlike ``SET LOCAL``) takes the value as a bind parameter.
+        await conn.execute("SELECT set_config('app.scope_namespace', $1, true)", namespace)

@@ -125,18 +125,24 @@ retrieval is a single-host, Postgres-native operation:
   service, no SQLite file. Text-search config is `simple` by default
   (multilingual); switch to `english` / `spanish` / … via
   `FLYCANON_BM25_TEXT_SEARCH_CONFIG`.
-- **Dense vectors** live in `pgvector` in the same operational
-  Postgres — an HNSW index on `vector_cosine_ops`, tuneable `m` /
-  `ef_construction`.
+- **Dense vectors** live in a pluggable backend. `pgvector` (default) keeps
+  them in the same operational Postgres — an HNSW index on `vector_cosine_ops`,
+  tuneable `m` / `ef_construction`. `qdrant` and `chroma` use the adapters that
+  ship in `fireflyframework-agentic`.
 
-`FLYCANON_VECTOR_STORE` accepts only `pgvector`:
+`FLYCANON_VECTOR_STORE` selects the **dense** backend (BM25 always stays on
+Postgres):
 
-| Backend      | Use case                                                                                                                                |
-| ------------ | --------------------------------------------------------------------------------------------------------------------------------------- |
-| **`pgvector`**   | The only supported value. PostgreSQL + pgvector extension. HNSW index on `vector_cosine_ops`, tuneable `m` / `ef_construction`. Same operational Postgres as the canonical store AND the BM25 projection. |
+| Backend       | Use case                                                                                                                                |
+| ------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| **`pgvector`** (default) | PostgreSQL + pgvector extension. HNSW on `vector_cosine_ops`, tuneable `m` / `ef_construction`. Same operational Postgres as the canonical store AND the BM25 projection, with DB-enforced Row-Level Security per scope. |
+| **`qdrant`**  | Self-hosted or Qdrant Cloud (`uv sync --extra qdrant`). Good filtering + scaling when you want the dense index off Postgres. |
+| **`chroma`**  | ChromaDB, in-process or server (`uv sync --extra chroma`). Simplest external option. |
 
-`pgvector` is the only supported backend. Fusion always happens via
-Reciprocal Rank Fusion over the two channels.
+Every backend is wrapped in a tenant/workspace-scoped layer, so reads and
+writes are confined to `(tenant_id, workspace_id)` via a canonical
+`t/<tenant>/w/<workspace>` namespace. Fusion always happens via Reciprocal Rank
+Fusion over the two channels.
 
 ---
 

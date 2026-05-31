@@ -25,7 +25,7 @@ dependencies = [
     # ChunkHit / HybridRetriever / reciprocal_rank_fusion -- lives in
     # ``core/services/retrieval/fusion.py``. Document intake runs on
     # flycanon's own per-format SourceLoaders.
-    "fireflyframework-agentic[rest,security,redis,openai-embeddings,binary]>=26.5.11",
+    "fireflyframework-agentic[rest,security,redis,openai-embeddings,binary,vectorstores-pgvector]>=26.5.31",
 
     # Source intake -- the high-fidelity per-format SourceLoaders. Binary
     # normalisation (HEIC / SVG / TIFF rasterisation, archive + email
@@ -74,17 +74,16 @@ dependencies = [
     # Persistence stack. asyncpg drives the runtime (async engine);
     # psycopg is the sync sibling used by Alembic for migrations
     # (env.py rewrites ``+asyncpg`` -> ``+psycopg`` so a single
-    # DATABASE_URL covers both). ``pgvector`` is core (not an extra)
-    # because Postgres + the pgvector extension is the DEFAULT
-    # vector backend -- the canonical store + the dense-vector
-    # projection co-reside in one operational Postgres instance.
+    # DATABASE_URL covers both). The default dense backend (pgvector) needs
+    # the ``vector`` EXTENSION on the Postgres server; the adapter ships in
+    # fireflyframework-agentic (the ``vectorstores-pgvector`` extra above) and
+    # talks to it over asyncpg -- no ``pgvector`` Python package needed here.
     "sqlalchemy[asyncio]>=2.0",
     "asyncpg>=0.30",
     "psycopg[binary]>=3.2",
     "aiosqlite>=0.22",
     "alembic>=1.14",
     "redis>=5.2",
-    "pgvector>=0.3.6",
 
     # Structured logging + tracing.
     "structlog>=25.5.0",
@@ -119,20 +118,17 @@ docling = [
 ]
 
 # Optional Chroma adapter (managed or self-hosted ChromaDB). Activates
-# when FLYCANON_VECTOR_STORE=chroma.
+# when FLYCANON_VECTOR_STORE=chroma. Delegates to the framework's
+# vector-store extra so the client version stays aligned with the
+# adapter that ships in fireflyframework-agentic.
 chroma = [
-    "chromadb>=0.5.0",
+    "fireflyframework-agentic[vectorstores-chroma]",
 ]
 
 # Optional Qdrant adapter (self-hosted or Qdrant Cloud). Activates
 # when FLYCANON_VECTOR_STORE=qdrant.
 qdrant = [
-    "qdrant-client>=1.12.0",
-]
-
-# Optional Pinecone adapter. Activates when FLYCANON_VECTOR_STORE=pinecone.
-pinecone = [
-    "pinecone>=5.0.0",
+    "fireflyframework-agentic[vectorstores-qdrant]",
 ]
 
 [build-system]
@@ -154,9 +150,10 @@ override-dependencies = [
 [tool.uv.sources]
 # Agentic is consumed from its published git tag so fresh clones / CI resolve
 # it without the sibling path; pyfly stays on the local checkout (released on
-# its own cadence).
+# its own cadence). v26.05.31 adds the pgvector adapter + tenant-scoped
+# vector-store layer that flycanon's multi-backend retrieval depends on.
 pyfly = { path = "../../fireflyframework/fireflyframework-pyfly", editable = true }
-fireflyframework-agentic = { git = "https://github.com/fireflyframework/fireflyframework-agentic.git", tag = "v26.05.30" }
+fireflyframework-agentic = { git = "https://github.com/fireflyframework/fireflyframework-agentic.git", tag = "v26.05.31" }
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/flycanon"]

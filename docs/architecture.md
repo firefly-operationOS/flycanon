@@ -201,12 +201,15 @@ retrieval is a single-host, Postgres-native operation:
   defaults to `simple` (multilingual, no stemming); flip
   `FLYCANON_BM25_TEXT_SEARCH_CONFIG` to `english` / `spanish` / &hellip;
   for language-aware stemming.
-* The dense projection lives in `pgvector` in the same operational
-  Postgres -- an HNSW index on `vector_cosine_ops`, tuneable `m` /
-  `ef_construction`.
+* The dense projection lives in a pluggable backend selected by
+  `FLYCANON_VECTOR_STORE`: `pgvector` (default -- co-located in the same
+  Postgres with an HNSW index on `vector_cosine_ops` and DB-enforced
+  Row-Level Security), `qdrant`, or `chroma`.
 
-`FLYCANON_VECTOR_STORE` accepts only `pgvector`. Both projections
-live in the same operational Postgres, and fusion always happens via
+`FLYCANON_VECTOR_STORE` selects the **dense** backend; the BM25 projection
+always stays in Postgres. Every backend is wrapped in a tenant/workspace
+scope layer (isolation per `(tenant_id, workspace_id)` via a canonical
+`t/<tenant>/w/<workspace>` namespace), and fusion always happens via
 Reciprocal Rank Fusion (RRF) over the two channels.
 
 ## Layers

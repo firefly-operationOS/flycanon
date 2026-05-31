@@ -379,58 +379,42 @@ def test_canon_agent_tokens_tenant_only_policy(
 
 
 # ---------------------------------------------------------------------------
-# Runtime-created table: canon_chunk_vectors. The 0013 migration's
-# DO block guards with ``IF EXISTS`` -- on a fresh container the table
-# doesn't exist when the migration runs, so it no-ops. Production now
-# relies on ``PgVectorVectorStore._initialise_schema`` installing the
-# policy in-band with the CREATE TABLE on first boot; this test exercises
-# that real bootstrap path end-to-end.
+# Runtime-created table: canon_chunk_vectors. The dense projection now uses the
+# framework's namespace-based pgvector adapter; flycanon's
+# ``RlsPgVectorVectorStore`` installs a NAMESPACE-keyed RLS policy in-band with
+# CREATE TABLE (``app.scope_namespace`` GUC). This drives that real bootstrap
+# and verifies the policy isolates by namespace and fails closed when unset.
 # ---------------------------------------------------------------------------
 
 
-def test_canon_chunk_vectors_runtime_table_isolation(
+def test_canon_chunk_vectors_namespace_rls_isolation(
     pg_container,  # type: PostgresContainer -- import is guarded by skip
     pg_admin_engine: sa.Engine,
     pg_app_engine: sa.Engine,
 ) -> None:
-    """Boot the pgvector table via the real store, verify RLS is enforced."""
+    """Boot the pgvector table via RlsPgVectorVectorStore; verify namespace RLS."""
     import asyncio
 
-    from flycanon.core.services.retrieval.pgvector_store import PgVectorVectorStore
+    from flycanon.core.services.retrieval.pgvector_store import RlsPgVectorVectorStore
 
-    # Drive the production bootstrap path -- ``_initialise_schema``
-    # both creates the table AND installs the RLS policy (the fix
-    # under test). We run it once and dispose; the policy survives
-    # the engine going away.
-    #
-    # The PostgresContainer hands back a ``+psycopg2`` URL but
-    # PgVectorVectorStore expects ``+asyncpg``; coerce explicitly
-    # to avoid the store's helper mangling ``+psycopg2`` into
-    # ``+asyncpg2``.
-    container_url = pg_container.get_connection_url()
-    if container_url.startswith("postgresql+psycopg2"):
-        async_url = container_url.replace("postgresql+psycopg2", "postgresql+asyncpg", 1)
-    elif container_url.startswith("postgresql://"):
-        async_url = container_url.replace("postgresql://", "postgresql+asyncpg://", 1)
-    else:
-        async_url = container_url
-
+    # Drive the production bootstrap path -- ``initialise`` creates the table
+    # AND installs the namespace-keyed RLS policy. The store accepts the
+    # container's ``+psycopg2`` URL and coerces it to an asyncpg DSN itself.
     async def _bootstrap() -> None:
-        store = PgVectorVectorStore(
-            database_url=async_url,
+        store = RlsPgVectorVectorStore(
+            database_url=pg_container.get_connection_url(),
             dimension=3,
+            table_name="canon_chunk_vectors",
         )
         try:
-            await store._ensure_engine()
+            await store.initialise()
         finally:
             await store.close()
 
     asyncio.run(_bootstrap())
 
-    # The runtime-created table needs an explicit grant for app_user
-    # (the conftest ALTER DEFAULT PRIVILEGES only covers tables created
-    # AFTER it ran, but the bootstrap above ran inside this test, so
-    # we re-issue the grant defensively).
+    # The runtime-created table needs an explicit grant for app_user (the
+    # conftest ALTER DEFAULT PRIVILEGES only covers tables created after it ran).
     with pg_admin_engine.begin() as conn:
         conn.execute(sa.text("GRANT ALL ON canon_chunk_vectors TO app_user"))
 
@@ -438,31 +422,35 @@ def test_canon_chunk_vectors_runtime_table_isolation(
         conn.execute(
             sa.text(
                 """
-                INSERT INTO canon_chunk_vectors
-                    (id, namespace, tenant_id, workspace_id, embedding, text)
+                INSERT INTO canon_chunk_vectors (id, namespace, embedding, text)
                 VALUES
-                    ('vec-a', 't/acme/w/ws-a', 'acme', 'ws-a',
-                     CAST('[1.0,0.0,0.0]' AS vector), 'alpha'),
-                    ('vec-b', 't/acme/w/ws-b', 'acme', 'ws-b',
-                     CAST('[0.0,1.0,0.0]' AS vector), 'bravo')
+                    ('vec-a', 't/acme/w/ws-a', CAST('[1.0,0.0,0.0]' AS vector), 'alpha'),
+                    ('vec-b', 't/acme/w/ws-b', CAST('[0.0,1.0,0.0]' AS vector), 'bravo')
                 ON CONFLICT (id) DO NOTHING
                 """
             )
         )
 
     with pg_app_engine.begin() as conn:
-        _set_scope(conn, tenant_id="acme", workspace_id="ws-a")
+        conn.execute(sa.text("SELECT set_config('app.scope_namespace', 't/acme/w/ws-a', true)"))
         rows = conn.execute(
             sa.text("SELECT id FROM canon_chunk_vectors WHERE id IN ('vec-a', 'vec-b')")
         ).all()
         assert {r.id for r in rows} == {"vec-a"}
 
     with pg_app_engine.begin() as conn:
-        _set_scope(conn, tenant_id="acme", workspace_id="ws-b")
+        conn.execute(sa.text("SELECT set_config('app.scope_namespace', 't/acme/w/ws-b', true)"))
         rows = conn.execute(
             sa.text("SELECT id FROM canon_chunk_vectors WHERE id IN ('vec-a', 'vec-b')")
         ).all()
         assert {r.id for r in rows} == {"vec-b"}
+
+    # Unset GUC -> fail-closed: zero rows visible.
+    with pg_app_engine.begin() as conn:
+        rows = conn.execute(
+            sa.text("SELECT id FROM canon_chunk_vectors WHERE id IN ('vec-a', 'vec-b')")
+        ).all()
+        assert rows == []
 
 
 # ---------------------------------------------------------------------------

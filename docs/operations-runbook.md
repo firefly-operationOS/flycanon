@@ -323,10 +323,14 @@ Special considerations:
   rotated does NOT restore the working secret -- the secret is only
   in the original mint response, never in flycanon's storage. Mint
   new tokens after a restore + propagate to consumers.
-- **Vector projection** lives in `pgvector` in the same Postgres
-  (`FLYCANON_VECTOR_STORE=pgvector` is the only supported value), so a
-  single `pg_dump` captures it -- there is no separate vector store
-  to back up.
+- **Vector projection** lives in `pgvector` in the same Postgres by
+  default (`FLYCANON_VECTOR_STORE=pgvector`), so a single `pg_dump`
+  captures it -- there is no separate vector store to back up. With an
+  external dense backend (`qdrant` / `chroma`) the projection lives
+  outside Postgres and must be backed up separately -- though it is a
+  DERIVED projection and can always be rebuilt by re-indexing from
+  `canon_chunks`, so a Postgres-only backup remains sufficient for
+  recovery.
 - **BM25 projection** lives in `canon_chunks.tsv` (a Postgres
   GENERATED column with a GIN index, per migration `0003_bm25_tsv`);
   a `pg_dump` captures it too. There is no separate corpus to back

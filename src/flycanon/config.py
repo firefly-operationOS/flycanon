@@ -190,19 +190,37 @@ class CanonSettings(BaseSettings):
     pii_policy: str = Field(default="warn")
 
     # -- Vector store ---------------------------------------------------
-    # Backend selector. flycanon is Postgres-native: BM25 rides on the
-    # ``tsv`` column of ``canon_chunks`` and dense vectors live in
-    # pgvector, both co-located with the canonical Postgres instance.
-    # ``pgvector`` is the only supported value.
+    # Backend selector for the DENSE half of hybrid retrieval. The lexical
+    # BM25 half always rides on the ``tsv`` column of ``canon_chunks`` on the
+    # canonical Postgres instance; only the dense projection is pluggable.
+    # ``pgvector`` (default) co-locates dense vectors with Postgres; ``qdrant``
+    # and ``chroma`` use the adapters that ship in fireflyframework-agentic.
+    # Whatever the backend, isolation is enforced per ``(tenant_id,
+    # workspace_id)`` by the scoped vector-store wrapper.
     vector_store: str = Field(
         default="pgvector",
-        description="Dense-vector backend. Only ``pgvector`` is supported.",
+        description="Dense-vector backend: ``pgvector`` (default), ``qdrant``, or ``chroma``.",
     )
 
     # -- pgvector backend ----------------------------------------------
     pgvector_table: str = "canon_chunk_vectors"
     pgvector_hnsw_m: int = Field(default=16, ge=4, le=64)
     pgvector_hnsw_ef_construction: int = Field(default=64, ge=8, le=1024)
+    # ``hnsw.ef_search`` set per query: higher = better recall, more latency.
+    pgvector_hnsw_ef_search: int = Field(default=200, ge=1, le=1000)
+
+    # -- qdrant backend (FLYCANON_VECTOR_STORE=qdrant) -----------------
+    # Requires ``uv sync --extra qdrant``. Self-hosted or Qdrant Cloud.
+    qdrant_url: str = Field(default="http://localhost:6333")
+    qdrant_api_key: str | None = Field(default=None)
+    qdrant_collection: str = Field(default="canon_vectors")
+
+    # -- chroma backend (FLYCANON_VECTOR_STORE=chroma) -----------------
+    # Requires ``uv sync --extra chroma``. An empty ``chroma_host`` uses an
+    # in-process ephemeral client (dev/test); set it for a Chroma server.
+    chroma_host: str = Field(default="")
+    chroma_port: int = Field(default=8000, ge=1, le=65535)
+    chroma_collection: str = Field(default="canon_vectors")
     # BM25 / Postgres FTS text-search configuration. ``simple`` is
     # the safest multilingual default (no stemming, no stopwords);
     # switch to ``english`` / ``spanish`` / etc. when the deployment

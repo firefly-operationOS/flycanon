@@ -139,15 +139,36 @@ FLYCANON_PII_POLICY=warn
 # canonical store already runs Postgres, so co-locating the vector
 # projection means one operational service, not two. The docker-compose
 # stack uses the ``pgvector/pgvector:pg16`` image so the ``vector``
-# extension is ready out of the box. The BM25 channel rides on a
-# ``tsvector`` + GIN index in the same Postgres. ``pgvector`` is the
-# only supported value.
+# extension is ready out of the box. The BM25 channel always rides on a
+# ``tsvector`` + GIN index in the same Postgres regardless of the dense
+# backend.
+#
+# Selects the DENSE backend only: ``pgvector`` (default, co-located +
+# RLS-isolated), ``qdrant``, or ``chroma`` (the latter two use the
+# adapters that ship in fireflyframework-agentic; install the matching
+# extra -- ``uv sync --extra qdrant`` / ``--extra chroma``). Isolation is
+# enforced per (tenant_id, workspace_id) for every backend.
 FLYCANON_VECTOR_STORE=pgvector
 
 # --- pgvector backend (FLYCANON_VECTOR_STORE=pgvector) ----------------------
 FLYCANON_PGVECTOR_TABLE=canon_chunk_vectors
 FLYCANON_PGVECTOR_HNSW_M=16
 FLYCANON_PGVECTOR_HNSW_EF_CONSTRUCTION=64
+# ``hnsw.ef_search`` set per query (higher = better recall, more latency).
+FLYCANON_PGVECTOR_HNSW_EF_SEARCH=200
+
+# --- qdrant backend (FLYCANON_VECTOR_STORE=qdrant) --------------------------
+# Requires ``uv sync --extra qdrant``. Self-hosted or Qdrant Cloud.
+FLYCANON_QDRANT_URL=http://localhost:6333
+# FLYCANON_QDRANT_API_KEY=
+FLYCANON_QDRANT_COLLECTION=canon_vectors
+
+# --- chroma backend (FLYCANON_VECTOR_STORE=chroma) --------------------------
+# Requires ``uv sync --extra chroma``. Empty host = in-process ephemeral
+# client (dev/test); set it for a Chroma server.
+FLYCANON_CHROMA_HOST=
+FLYCANON_CHROMA_PORT=8000
+FLYCANON_CHROMA_COLLECTION=canon_vectors
 
 # ----------------------------------------------------------------------------
 # Ingestion
