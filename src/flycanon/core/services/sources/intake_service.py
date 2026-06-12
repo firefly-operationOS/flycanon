@@ -198,7 +198,11 @@ class IntakeService:
         # the recovery branch, the second caller would see a 500
         # IntegrityError from the partial-unique index on
         # ``content_sha256``).
-        existing = await self._sources.get_by_content_sha256(result.source.content_sha256)
+        existing = await self._sources.get_by_content_sha256(
+            result.source.content_sha256,
+            tenant_id=tenant_id,
+            workspace_id=workspace_id,
+        )
         if existing is not None:
             logger.info(
                 "intake idempotent: content_sha256=%s already mapped to source_id=%s",
@@ -209,7 +213,11 @@ class IntakeService:
         try:
             await self._sources.add(result.source)
         except IntegrityError:
-            existing = await self._sources.get_by_content_sha256(result.source.content_sha256)
+            existing = await self._sources.get_by_content_sha256(
+                result.source.content_sha256,
+                tenant_id=tenant_id,
+                workspace_id=workspace_id,
+            )
             if existing is not None:
                 logger.info(
                     "intake idempotent (race-resolved): content_sha256=%s -> source_id=%s",

@@ -106,11 +106,20 @@ class SourceRepository:
             result = await session.execute(select(SourceRow).where(SourceRow.id.in_(ids)))
             return list(result.scalars().all())
 
-    async def get_by_content_sha256(self, content_sha256: str) -> SourceRow | None:
+    async def get_by_content_sha256(
+        self,
+        content_sha256: str,
+        *,
+        tenant_id: str | None = None,
+        workspace_id: str | None = None,
+    ) -> SourceRow | None:
         async with self._session_factory() as session:
-            result = await session.execute(
-                select(SourceRow).where(SourceRow.content_sha256 == content_sha256)
-            )
+            query = select(SourceRow).where(SourceRow.content_sha256 == content_sha256)
+            if tenant_id is not None:
+                query = query.where(SourceRow.tenant_id == tenant_id)
+            if workspace_id is not None:
+                query = query.where(SourceRow.workspace_id == workspace_id)
+            result = await session.execute(query)
             return result.scalars().first()
 
     async def list_sources(
