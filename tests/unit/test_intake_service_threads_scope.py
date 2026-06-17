@@ -77,6 +77,7 @@ def _settings() -> CanonSettings:
     s.ingest_topic = "flycanon.ingest"
     s.source_ingested_event = "SourceIngested"
     s.source_ingestion_failed_event = "SourceIngestionFailed"
+    s.store_originals = True
     return s
 
 
@@ -136,6 +137,9 @@ def _make_intake(
     event_publisher = MagicMock()
     event_publisher.publish = AsyncMock(return_value=None)
 
+    object_store = MagicMock()
+    object_store.put = AsyncMock(return_value=None)
+
     service = IntakeService(
         binary_normalizer=binary_normalizer,
         ingestion=ingestion,
@@ -147,6 +151,7 @@ def _make_intake(
         chunk_repository=chunk_repository,
         audit=audit,
         event_publisher=event_publisher,
+        object_store=object_store,
         settings=_settings(),
     )
     return service, sources
