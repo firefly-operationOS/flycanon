@@ -99,9 +99,11 @@ required for production:
 | `FLYCANON_DATABASE_URL` | Async-SQLAlchemy URL (`postgresql+asyncpg://user:pass@host:5432/db`) | **Yes** |
 | `FLYCANON_EMBEDDING_MODEL` | `<provider>:<model>` (e.g. `openai:text-embedding-3-small`, `voyageai:voyage-large-2`, `ollama:nomic-embed-text`) | **Yes** |
 | `FLYCANON_EMBEDDING_DIMENSIONS` | Dimensions of the chosen embedding model. **Must match `pgvector` index dimension** -- a mismatch produces a runtime error on first insert. | **Yes** |
-| `FLYCANON_ANSWER_MODEL` | `<provider>:<model>` for the RAG answer endpoint (default `anthropic:claude-sonnet-4-6`) | **Yes** for `/api/v1/query`, optional for ingestion-only deployments. |
-| `FLYCANON_ANSWER_FALLBACK_MODEL` | Used when the primary model errors (e.g. provider 5xx, rate limit). | Recommended. |
-| Provider API keys | `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `VOYAGEAI_API_KEY`, `COHERE_API_KEY`, ... -- read by `fireflyframework-agentic` from env at boot. | As needed for your provider mix. |
+| `FLYCANON_ANSWER_MODE` | Answer engine for `/api/v1/query`: `rlm` (default) or `rag` (deprecated, opt-in). See [Answer mode](#answer-mode-rlm-default--rag-deprecated). | Defaults to `rlm`. |
+| `FLYCANON_ANSWER_MODEL` | `<provider>:<model>` for the **RAG** answer endpoint (default `anthropic:claude-sonnet-4-6`). Only used when `FLYCANON_ANSWER_MODE=rag`. | Needed only for `rag` mode. |
+| `FLYCANON_ANSWER_FALLBACK_MODEL` | Used when the primary RAG model errors (e.g. provider 5xx, rate limit). | Recommended for `rag` mode. |
+| `FLYCANON_STORE_ORIGINALS` | Persist original document bytes to the object store so RLM can reason over whole documents. **Required (`true`, the default) for RLM.** See [Answer mode](#answer-mode-rlm-default--rag-deprecated). | Defaults to `true`. |
+| Provider API keys | `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `VOYAGEAI_API_KEY`, `COHERE_API_KEY`, ... -- read by `fireflyframework-agentic` from env at boot. **`ANTHROPIC_API_KEY` is required at runtime in the default RLM mode** (the RLM engine calls the Anthropic Messages API directly). | As needed for your provider mix. |
 | `FLYCANON_VECTOR_STORE` | Dense backend: `pgvector` (default), `qdrant` (`--extra qdrant`), or `chroma` (`--extra chroma`). | Defaults to `pgvector`. |
 | `FLYCANON_EDA_ADAPTER` | `postgres` (default -- durable outbox + LISTEN/NOTIFY), `memory`, `redis`, `kafka`. | Defaults to `postgres`. |
 | `FLYCANON_API_KEYS` | Comma-separated static API keys. When set, every `/api/v1/*` request requires `Authorization: Bearer <key>`. | Optional. |
@@ -112,6 +114,81 @@ For a complete list with defaults and inline docs, run:
 ```bash
 docker run --rm ghcr.io/firefly-operationos/flycanon:latest cat /app/env_template
 ```
+
+---
+
+## Answer mode (RLM default / RAG deprecated)
+
+`FLYCANON_ANSWER_MODE` selects the engine for the non-streaming answer
+path (`/api/v1/query`, `/api/v1/query:stream`, and the agent-tier
+equivalents). `rlm` is the default; `rag` is opt-in and deprecated. Any
+value other than `rag` is normalised to `rlm`.
+
+| Key | What it is | Default |
+|-----|------------|---------|
+| `FLYCANON_ANSWER_MODE` | `rlm` (default) routes to the Recursive Language Model answerer; `rag` routes to the legacy hybrid-retrieval answerer. | `rlm` |
+| `FLYCANON_RLM_ROOT_MODEL` | Orchestrator model that drives the CodeAct REPL loop. `<provider>:<model>`. | `anthropic:claude-sonnet-4-6` |
+| `FLYCANON_RLM_SUB_MODEL` | Model for flat recursive sub-calls made from REPL code. | `anthropic:claude-sonnet-4-6` |
+| `FLYCANON_RLM_ANSWER_MODEL` | Model for the final single-shot answer synthesis. | `anthropic:claude-sonnet-4-6` |
+| `FLYCANON_RLM_MAX_ITERS` | Max orchestrator turns before the loop gives up and asks for a plain-text answer from the transcript. | `8` |
+| `FLYCANON_RLM_SUB_BUDGET` | Total recursive sub-call budget across one root session. | `12` |
+| `FLYCANON_RLM_MAX_DEPTH` | How deep `rlm(...)` may nest before degrading to a flat `llm`. | `1` |
+
+### What RLM is
+
+The Recursive Language Model engine is a code-driven CodeAct REPL. A
+root orchestrator model writes Python against the in-scope document
+corpus (handed to it as a `docs` variable: `docs.keys()` lists the
+documents, `docs[key]` returns the full text, `docs.pages(key)` returns
+the page list for precise citation), makes recursive sub-calls on
+slices of that corpus, and finishes by citing the filings / pages it
+used. It reasons over **whole documents** rather than retrieving
+chunks, which is why it depends on the object store below.
+
+### RLM operational requirements
+
+- **Originals persisted in the object store.** RLM reads the original
+  document bytes, so intake must persist each original to the object
+  store (`FLYCANON_STORE_ORIGINALS=true`, the default) and record its
+  key on the source row. Sources without a stored original (no
+  `object_store_key`) are silently skipped by the RLM corpus builder.
+- **`ANTHROPIC_API_KEY` at runtime.** The RLM engine calls the
+  Anthropic Messages API directly for all three RLM models; the
+  `anthropic:` prefix is stripped before the id is sent.
+
+### RAG deprecation
+
+When `FLYCANON_ANSWER_MODE=rag`, the answer dispatcher emits a
+server-side deprecation **warning log** on every RAG-mode answer:
+
+```
+FLYCANON_ANSWER_MODE=rag is deprecated and will be removed in a future release; RLM is the default
+```
+
+The legacy RAG answer path is slated for removal in a future release.
+Migrate to the default `rlm` mode. The `/api/v1/search` surface (raw
+hybrid retrieval, no LLM) is unaffected and stays.
+
+---
+
+## Object store (RLM document originals)
+
+The object store holds the original document bytes the intake persisted
+so RLM can replay them. `localfs` (default) writes files under a root
+directory for dev / test; `s3` (requires `uv sync --extra s3`) writes to
+a bucket. AWS credentials for the `s3` backend are read from the
+standard environment (`AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` /
+profiles / instance roles), not from these settings.
+
+| Key | What it is | Default |
+|-----|------------|---------|
+| `FLYCANON_OBJECT_STORE_BACKEND` | `localfs` (default) or `s3`. | `localfs` |
+| `FLYCANON_OBJECT_STORE_LOCALFS_ROOT` | Root directory for the `localfs` backend. | `./var/objects` |
+| `FLYCANON_OBJECT_STORE_S3_BUCKET` | Bucket name for the `s3` backend. | _(empty)_ |
+| `FLYCANON_OBJECT_STORE_S3_PREFIX` | Key prefix prepended to every object key within the bucket. | _(empty)_ |
+| `FLYCANON_OBJECT_STORE_S3_ENDPOINT_URL` | Custom endpoint for MinIO / S3-compatible services; empty = default AWS. | _(empty)_ |
+| `FLYCANON_OBJECT_STORE_S3_REGION` | Region; empty defers to boto3's standard region resolution. | _(empty)_ |
+| `FLYCANON_STORE_ORIGINALS` | Whether intake persists original bytes and records the key on the source row. On by default so RLM has a whole-document corpus; a write failure is best-effort and never fails the ingest. | `true` |
 
 ---
 
