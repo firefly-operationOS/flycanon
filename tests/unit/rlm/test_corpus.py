@@ -79,6 +79,32 @@ class FakeSourceRepository:
         return rows[offset : offset + limit], total
 
 
+class FakeKnowledgeRepository:
+    """Resolves ``item_id -> {source_id}`` from a canned mapping.
+
+    Mirrors :meth:`KnowledgeRepository.resolve_source_ids_for_items`: the
+    union of cited source ids for the given items, scoped to the workspace.
+    """
+
+    def __init__(self, item_to_sources: dict[str, set[str]] | None = None):
+        self._map = item_to_sources or {}
+
+    async def resolve_source_ids_for_items(self, item_ids, *, tenant_id, workspace_id):
+        resolved: set[str] = set()
+        for item_id in item_ids:
+            resolved |= self._map.get(item_id, set())
+        return resolved
+
+
+def _builder(rows, blobs, *, item_to_sources=None):
+    """A CanonCorpusBuilder over fake repositories + an in-memory store."""
+    return CanonCorpusBuilder(
+        source_repository=FakeSourceRepository(rows),
+        knowledge_repository=FakeKnowledgeRepository(item_to_sources),
+        object_store=FakeObjectStore(blobs),
+    )
+
+
 def _row(
     source_id,
     *,
@@ -107,6 +133,7 @@ async def test_text_source_loads_as_pages_and_keys_are_readable():
     blobs = {"k1": b"the scope is broad"}
     builder = CanonCorpusBuilder(
         source_repository=FakeSourceRepository(rows),
+        knowledge_repository=FakeKnowledgeRepository(),
         object_store=FakeObjectStore(blobs),
     )
     store = await builder.build(tenant_id="t1", workspace_id="w1")
@@ -124,6 +151,7 @@ async def test_satisfies_doccorpus_protocol():
     rows = [_row("s1", object_store_key="k1")]
     builder = CanonCorpusBuilder(
         source_repository=FakeSourceRepository(rows),
+        knowledge_repository=FakeKnowledgeRepository(),
         object_store=FakeObjectStore({"k1": b"hello"}),
     )
     store = await builder.build(tenant_id="t1", workspace_id="w1")
@@ -138,6 +166,7 @@ async def test_source_without_object_store_key_is_skipped():
     ]
     builder = CanonCorpusBuilder(
         source_repository=FakeSourceRepository(rows),
+        knowledge_repository=FakeKnowledgeRepository(),
         object_store=FakeObjectStore({"k1": b"body"}),
     )
     store = await builder.build(tenant_id="t1", workspace_id="w1")
@@ -152,6 +181,7 @@ async def test_source_ids_filter_restricts_keys():
     ]
     builder = CanonCorpusBuilder(
         source_repository=FakeSourceRepository(rows),
+        knowledge_repository=FakeKnowledgeRepository(),
         object_store=FakeObjectStore({"k1": b"a", "k2": b"b"}),
     )
     store = await builder.build(
@@ -171,6 +201,7 @@ async def test_metadata_filters_compose_with_and():
     ]
     builder = CanonCorpusBuilder(
         source_repository=FakeSourceRepository(rows),
+        knowledge_repository=FakeKnowledgeRepository(),
         object_store=FakeObjectStore({"k1": b"a", "k2": b"b"}),
     )
     store = await builder.build(
@@ -189,6 +220,7 @@ async def test_tags_filter_matches_on_overlap():
     ]
     builder = CanonCorpusBuilder(
         source_repository=FakeSourceRepository(rows),
+        knowledge_repository=FakeKnowledgeRepository(),
         object_store=FakeObjectStore({"k1": b"a", "k2": b"b"}),
     )
     store = await builder.build(
@@ -207,6 +239,7 @@ async def test_statuses_filter_pushed_to_repository():
     ]
     builder = CanonCorpusBuilder(
         source_repository=FakeSourceRepository(rows),
+        knowledge_repository=FakeKnowledgeRepository(),
         object_store=FakeObjectStore({"k1": b"a", "k2": b"b"}),
     )
     store = await builder.build(
@@ -225,6 +258,7 @@ async def test_keys_are_deduplicated():
     ]
     builder = CanonCorpusBuilder(
         source_repository=FakeSourceRepository(rows),
+        knowledge_repository=FakeKnowledgeRepository(),
         object_store=FakeObjectStore({"k1": b"a", "k2": b"b"}),
     )
     store = await builder.build(tenant_id="t1", workspace_id="w1")
@@ -239,6 +273,7 @@ async def test_accessed_tracks_touched_keys_only():
     ]
     builder = CanonCorpusBuilder(
         source_repository=FakeSourceRepository(rows),
+        knowledge_repository=FakeKnowledgeRepository(),
         object_store=FakeObjectStore({"k1": b"a", "k2": b"b"}),
     )
     store = await builder.build(tenant_id="t1", workspace_id="w1")
@@ -262,6 +297,7 @@ async def test_resolve_returns_source_pointer():
     ]
     builder = CanonCorpusBuilder(
         source_repository=FakeSourceRepository(rows),
+        knowledge_repository=FakeKnowledgeRepository(),
         object_store=FakeObjectStore({"k1": b"a"}),
     )
     store = await builder.build(tenant_id="t1", workspace_id="w1")
@@ -284,6 +320,7 @@ async def test_pdf_branch_uses_extract_helper(monkeypatch):
     rows = [_row("s1", kind="pdf", filename="filing.pdf", object_store_key="k1")]
     builder = CanonCorpusBuilder(
         source_repository=FakeSourceRepository(rows),
+        knowledge_repository=FakeKnowledgeRepository(),
         object_store=FakeObjectStore({"k1": b"%PDF-fake"}),
     )
     store = await builder.build(tenant_id="t1", workspace_id="w1")
@@ -301,7 +338,111 @@ async def test_key_fallbacks_to_title_then_id():
     ]
     builder = CanonCorpusBuilder(
         source_repository=FakeSourceRepository(rows),
+        knowledge_repository=FakeKnowledgeRepository(),
         object_store=FakeObjectStore({"k1": b"a", "k2": b"b"}),
     )
     store = await builder.build(tenant_id="t1", workspace_id="w1")
     assert set(store.keys()) == {"Titled Doc", "s2"}
+
+
+@pytest.mark.asyncio
+async def test_knowledge_item_ids_restricts_to_cited_sources():
+    rows = [
+        _row("s1", filename="one.txt", object_store_key="k1"),
+        _row("s2", filename="two.txt", object_store_key="k2"),
+        _row("s3", filename="three.txt", object_store_key="k3"),
+    ]
+    builder = _builder(
+        rows,
+        {"k1": b"a", "k2": b"b", "k3": b"c"},
+        item_to_sources={"ki1": {"s1", "s3"}},
+    )
+    store = await builder.build(
+        tenant_id="t1",
+        workspace_id="w1",
+        filters=Filters(knowledge_item_ids=["ki1"]),
+    )
+    assert set(store.keys()) == {"one", "three"}
+
+
+@pytest.mark.asyncio
+async def test_knowledge_item_ids_citing_nothing_yields_empty_corpus():
+    rows = [_row("s1", filename="one.txt", object_store_key="k1")]
+    builder = _builder(rows, {"k1": b"a"}, item_to_sources={})
+    store = await builder.build(
+        tenant_id="t1",
+        workspace_id="w1",
+        filters=Filters(knowledge_item_ids=["ki-unknown"]),
+    )
+    assert store.keys() == []
+
+
+@pytest.mark.asyncio
+async def test_knowledge_item_ids_compose_with_source_ids_and():
+    rows = [
+        _row("s1", filename="one.txt", object_store_key="k1"),
+        _row("s2", filename="two.txt", object_store_key="k2"),
+        _row("s3", filename="three.txt", object_store_key="k3"),
+    ]
+    builder = _builder(
+        rows,
+        {"k1": b"a", "k2": b"b", "k3": b"c"},
+        item_to_sources={"ki1": {"s1", "s2"}},
+    )
+    # knowledge resolves to {s1, s2}; source_ids restricts to {s2, s3};
+    # AND => only s2 survives.
+    store = await builder.build(
+        tenant_id="t1",
+        workspace_id="w1",
+        filters=Filters(knowledge_item_ids=["ki1"], source_ids=["s2", "s3"]),
+    )
+    assert store.keys() == ["two"]
+
+
+@pytest.mark.asyncio
+async def test_domains_and_tags_both_must_match():
+    rows = [
+        _row(
+            "s1",
+            filename="a.txt",
+            object_store_key="k1",
+            metadata_json={"domain": "compliance", "tags": ["aml"]},
+        ),
+        _row(
+            "s2",
+            filename="b.txt",
+            object_store_key="k2",
+            metadata_json={"domain": "compliance", "tags": ["kyc"]},
+        ),
+        _row(
+            "s3",
+            filename="c.txt",
+            object_store_key="k3",
+            metadata_json={"domain": "process", "tags": ["aml"]},
+        ),
+    ]
+    builder = _builder(rows, {"k1": b"a", "k2": b"b", "k3": b"c"})
+    # Only s1 satisfies BOTH domain=compliance AND tag=aml.
+    store = await builder.build(
+        tenant_id="t1",
+        workspace_id="w1",
+        filters=Filters(domains=["compliance"], tags=["aml"]),
+    )
+    assert store.keys() == ["a"]
+
+
+@pytest.mark.asyncio
+async def test_statuses_and_source_ids_both_must_match():
+    rows = [
+        _row("s1", filename="a.txt", object_store_key="k1", status="published"),
+        _row("s2", filename="b.txt", object_store_key="k2", status="published"),
+        _row("s3", filename="c.txt", object_store_key="k3", status="draft"),
+    ]
+    builder = _builder(rows, {"k1": b"a", "k2": b"b", "k3": b"c"})
+    # statuses keeps {s1, s2}; source_ids keeps {s2, s3}; AND => s2.
+    store = await builder.build(
+        tenant_id="t1",
+        workspace_id="w1",
+        filters=Filters(statuses=["published"], source_ids=["s2", "s3"]),
+    )
+    assert store.keys() == ["b"]
