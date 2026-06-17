@@ -88,9 +88,32 @@ consistent even when a future repository forgets the WHERE clause.
 | Method | Path | Description |
 |--------|------|-------------|
 | `POST` | `/api/v1/search` | Hybrid retrieval (BM25 + vector + RRF + optional rerank + optional query expansion). Body: `SearchRequest`. |
-| `POST` | `/api/v1/query`  | RAG answer with citations. Body: `AnswerRequest`. |
-| `POST` | `/api/v1/query/stream` | Same as `/query` but streams tokens as Server-Sent Events. |
+| `POST` | `/api/v1/query`  | Answer with citations. Engine selected by `FLYCANON_ANSWER_MODE` (RLM by default; RAG opt-in). Body: `AnswerRequest`. |
+| `POST` | `/api/v1/query/stream` | Same as `/query` but streams the answer as Server-Sent Events. |
 | `POST` | `/api/v1/query/suggest` | Suggest follow-up questions for an existing answer. Body: `AnswerRequest`. |
+
+### Answer mode (RLM default / RAG deprecated)
+
+The answer endpoints (`/api/v1/query`, `/api/v1/query/stream`, and the
+agent-tier `/api/v1/agent/query[/stream]`) route to one of two engines,
+selected by `FLYCANON_ANSWER_MODE`:
+
+- **`rlm`** (default) — the Recursive Language Model engine reasons over
+  whole documents (read from the object store) and returns the same
+  `AnswerResponse` shape (answer text + citations + `model` +
+  `elapsed_ms`). The request and response contracts are identical to
+  RAG, so callers need no changes. The streaming variant emits a single
+  `status` frame (`{"stage":"reasoning",...}`) instead of pre-retrieval
+  `hit` frames before the terminal `final` frame.
+- **`rag`** (opt-in, **deprecated**) — the legacy hybrid-retrieval
+  answerer. When selected, the server logs a deprecation warning on
+  every RAG-mode answer and the path is slated for removal in a future
+  release. The streaming variant still emits per-`hit` citation frames
+  first.
+
+The request / response shapes are unchanged across modes; `AnswerRequest`
+in, `AnswerResponse` out. `/api/v1/search` (raw retrieval, no LLM) is
+independent of the answer mode and always available.
 
 ## Conversations
 
@@ -198,8 +221,8 @@ candidates, or queries.)
 |--------|------|-------|-------------|
 | `POST` | `/api/v1/agent/sources` | `agent.sources:ingest` | Ingest a Source (sync default; `?mode=async` allowed). Body: `SubmitSourceJsonPayload`. **`Idempotency-Key` mandatory.** Reuses the same handler as the user-tier `POST /api/v1/sources`. |
 | `GET`  | `/api/v1/agent/sources/{id}` | `agent.sources:read` | Retrieve a Source row. 404 -> `resource_not_found`. |
-| `POST` | `/api/v1/agent/query` | `agent.query:run` | RAG answer with citations. Body: `AnswerRequest`. **`Idempotency-Key` mandatory.** Reuses the user-tier `POST /api/v1/query` handler. |
-| `POST` | `/api/v1/agent/query/stream` | `agent.query:run` | Streaming RAG answer (Server-Sent Events). Body: `AnswerRequest`. **`Idempotency-Key` mandatory.** Same wire format as the user-tier `POST /api/v1/query/stream`. |
+| `POST` | `/api/v1/agent/query` | `agent.query:run` | Answer with citations (engine per `FLYCANON_ANSWER_MODE`; RLM by default). Body: `AnswerRequest`. **`Idempotency-Key` mandatory.** Same dispatcher as the user-tier `POST /api/v1/query`. |
+| `POST` | `/api/v1/agent/query/stream` | `agent.query:run` | Streaming answer (Server-Sent Events). Body: `AnswerRequest`. **`Idempotency-Key` mandatory.** Same wire format as the user-tier `POST /api/v1/query/stream`. |
 | `POST` | `/api/v1/agent/search` | `agent.query:run` | Hybrid retrieval (BM25 + vector + RRF), no LLM. Body: `SearchRequest`. **`Idempotency-Key` mandatory.** Reuses the user-tier `POST /api/v1/search` handler. |
 | `GET`  | `/api/v1/agent/knowledge/{id}` | `agent.knowledge:read` | Fetch a KnowledgeItem (pointer view). 404 -> `knowledge_item_not_found`. |
 | `GET`  | `/api/v1/agent/knowledge/{id}/provenance` | `agent.knowledge:read` | Fetch citation provenance for the current version. Query: `version` (optional explicit). |
