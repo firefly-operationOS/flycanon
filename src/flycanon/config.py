@@ -248,6 +248,31 @@ class CanonSettings(BaseSettings):
         ),
     )
 
+    # -- Object store ---------------------------------------------------
+    # Where the original document bytes an intake submitted are persisted
+    # so RLM can later replay them. The port lives in
+    # ``core/services/storage/``; ``localfs`` (default) writes files under
+    # a root directory for dev / test, ``s3`` (requires ``uv sync --extra
+    # s3``) writes to a bucket. AWS credentials are read from the standard
+    # environment (``AWS_ACCESS_KEY_ID`` / ``AWS_SECRET_ACCESS_KEY`` /
+    # profiles / instance roles), not from these settings. Keys follow the
+    # ``tenant/workspace/.../files/{id}.{ext}`` layout shared with flyquery.
+    object_store_backend: str = Field(
+        default="localfs",
+        description="Object-store backend: ``localfs`` (default) or ``s3``.",
+    )
+    # localfs backend (FLYCANON_OBJECT_STORE_LOCALFS_ROOT).
+    object_store_localfs_root: str = Field(default="./var/objects")
+    # s3 backend (FLYCANON_OBJECT_STORE_S3_*). Requires ``uv sync --extra s3``.
+    object_store_s3_bucket: str = Field(default="")
+    # Key prefix prepended to every object key within the bucket.
+    object_store_s3_prefix: str = Field(default="")
+    # Optional custom endpoint for MinIO / S3-compatible services; empty
+    # means the default AWS endpoint.
+    object_store_s3_endpoint_url: str = Field(default="")
+    # Optional region; empty defers to boto3's standard region resolution.
+    object_store_s3_region: str = Field(default="")
+
     # -- Ingestion ------------------------------------------------------
     chunk_size_tokens: int = Field(default=1200, ge=128, le=8192)
     chunk_overlap_tokens: int = Field(default=150, ge=0, le=1024)
