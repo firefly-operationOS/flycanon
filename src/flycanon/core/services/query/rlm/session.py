@@ -75,9 +75,7 @@ _PY_TOOL = [
         "`final(answer, filings=[...], pages=[...])` from code to finish.",
         "input_schema": {
             "type": "object",
-            "properties": {
-                "code": {"type": "string", "description": "Python source to execute"}
-            },
+            "properties": {"code": {"type": "string", "description": "Python source to execute"}},
             "required": ["code"],
         },
     }
@@ -260,9 +258,7 @@ class RLMSession:
                 )
             messages.append({"role": "user", "content": results})
         # ran out of turns -> ask for a direct answer from the transcript
-        messages.append(
-            {"role": "user", "content": "Stop now and state your final answer as plain text."}
-        )
+        messages.append({"role": "user", "content": "Stop now and state your final answer as plain text."})
         text = "".join(
             b.get("text", "")
             for b in self.client.chat_raw(messages, system, _PY_TOOL).get("content", [])
@@ -275,13 +271,7 @@ class RLMSession:
             return []
         if isinstance(filings, str):
             filings = [filings]
-        pages = (
-            pages
-            if isinstance(pages, (list, tuple))
-            else [pages]
-            if pages is not None
-            else []
-        )
+        pages = pages if isinstance(pages, (list, tuple)) else [pages] if pages is not None else []
         cites = []
         for i, fid in enumerate(filings):
             page = pages[i] if i < len(pages) and pages[i] is not None else None
