@@ -248,6 +248,33 @@ class CanonSettings(BaseSettings):
         ),
     )
 
+    # -- RLM engine -----------------------------------------------------
+    # The Recursive Language Model query engine (``core/services/query/
+    # rlm/``) is a CodeAct REPL: a root orchestrator that writes Python
+    # against the document corpus, makes recursive sub-calls on slices,
+    # and finishes by citing the filings/pages it used. All three models
+    # are in ``<provider>:<model>`` form; the ``anthropic:`` prefix is
+    # stripped before the id is sent to the Anthropic Messages API.
+    rlm_root_model: str = Field(
+        default="anthropic:claude-sonnet-4-6",
+        description="Orchestrator model that drives the CodeAct REPL loop.",
+    )
+    rlm_sub_model: str = Field(
+        default="anthropic:claude-sonnet-4-6",
+        description="Model for flat recursive sub-calls made from REPL code.",
+    )
+    rlm_answer_model: str = Field(
+        default="anthropic:claude-sonnet-4-6",
+        description="Model for the final single-shot answer synthesis.",
+    )
+    # Max orchestrator turns before the loop gives up and asks for a
+    # plain-text answer from the transcript.
+    rlm_max_iters: int = Field(default=8, ge=1, le=64)
+    # Total recursive sub-call budget across one root session.
+    rlm_sub_budget: int = Field(default=12, ge=0, le=128)
+    # How deep ``rlm(...)`` may nest before it degrades to a flat ``llm``.
+    rlm_max_depth: int = Field(default=1, ge=0, le=8)
+
     # -- Object store ---------------------------------------------------
     # Where the original document bytes an intake submitted are persisted
     # so RLM can later replay them. The port lives in
