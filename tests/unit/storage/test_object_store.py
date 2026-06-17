@@ -85,6 +85,13 @@ async def test_localfs_rejects_path_traversal(tmp_path):
         await store.put("../escape", b"x")
 
 
+async def test_localfs_rejects_absolute_key(tmp_path):
+    store = LocalFsObjectStore(root=str(tmp_path))
+    with pytest.raises(ValueError):
+        await store.put("/tmp/escape.bin", b"x")
+    assert not (tmp_path / "tmp" / "escape.bin").exists()
+
+
 async def test_localfs_creates_root(tmp_path):
     root = tmp_path / "nested" / "objects"
     LocalFsObjectStore(root=str(root))
@@ -179,6 +186,13 @@ async def test_s3_rejects_path_traversal(fake_s3):
     store = S3ObjectStore(bucket="b")
     with pytest.raises(ValueError):
         await store.put("a/../b", b"x")
+
+
+async def test_s3_rejects_absolute_key(fake_s3):
+    store = S3ObjectStore(bucket="b")
+    with pytest.raises(ValueError):
+        await store.put("/etc/passwd", b"x")
+    assert fake_s3.calls == []
 
 
 # ---------------------------------------------------------------- factory ----

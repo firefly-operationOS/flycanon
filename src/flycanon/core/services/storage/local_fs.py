@@ -36,9 +36,15 @@ class LocalFsObjectStore(ObjectStore):
         self._root.mkdir(parents=True, exist_ok=True)
 
     def _path(self, key: str) -> Path:
-        if ".." in key.split("/"):
+        if ".." in key.split("/") or key.startswith("/"):
             raise ValueError(f"illegal key {key!r}")
-        return self._root / key
+        # ``Path(root) / key`` discards the root when ``key`` is absolute, so
+        # the leading-slash check above is the real guard; resolve and confirm
+        # the result is still inside the root as defence in depth.
+        path = (self._root / key).resolve()
+        if path != self._root and self._root not in path.parents:
+            raise ValueError(f"illegal key {key!r}")
+        return path
 
     async def put(self, key: str, data: bytes, content_type: str | None = None) -> None:
         # content_type is not persisted on the local filesystem; it is part of
