@@ -402,11 +402,13 @@ class CanonCoreConfiguration:
     def canon_corpus_builder(
         self,
         source_repository: SourceRepository,
+        knowledge_repository: KnowledgeRepository,
         object_store: ObjectStore,
         loader_registry: LoaderRegistry,
     ) -> CanonCorpusBuilder:
         return CanonCorpusBuilder(
             source_repository=source_repository,
+            knowledge_repository=knowledge_repository,
             object_store=object_store,
             registry=loader_registry,
         )
