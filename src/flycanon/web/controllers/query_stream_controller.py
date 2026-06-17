@@ -16,13 +16,18 @@
 
 Two surfaces complementary to the blocking ``/api/v1/query``:
 
-* ``POST /api/v1/query/stream`` -- SSE stream. The retrieval hits
-  arrive first as ``hit`` frames so the UI can render citation
-  chips before the answer is ready. The answer body lands as a
-  single ``final`` frame in v1 (the underlying pydantic-ai
-  ``output_type`` contract doesn't support partial-output
-  streaming yet); future work upgrades this to per-token
-  ``delta`` frames once we wire the framework's streaming path.
+* ``POST /api/v1/query/stream`` -- SSE stream routed through the
+  :class:`AnswerDispatcher` so it honours ``FLYCANON_ANSWER_MODE``.
+  In RLM mode (the default) there is no pre-retrieval step: the
+  stream emits a single ``status`` frame (``reasoning``) then the
+  terminal ``final`` frame once the engine returns. In the legacy
+  RAG mode the retrieval hits arrive first as ``hit`` frames so the
+  UI can render citation chips before the answer is ready, then the
+  same ``final`` frame lands. The answer body is a single ``final``
+  frame in v1 (the underlying ``output_type`` contract doesn't
+  support partial-output streaming yet); future work upgrades this
+  to per-token ``delta`` frames once we wire the framework's
+  streaming path.
 
 * ``POST /api/v1/query/suggest`` -- emits N suggested follow-up
   questions (chat UI quick-reply chips).
@@ -41,8 +46,9 @@ from starlette.requests import Request
 from starlette.responses import StreamingResponse
 
 from flycanon.core.services.conversations import QuestionSuggester
+from flycanon.core.services.query.answer_dispatcher import AnswerDispatcher
 from flycanon.core.services.query.answer_service import AnswerService
-from flycanon.core.services.query.search_service import _filters_from_request
+from flycanon.core.services.query.search_service import _filters_from_request, _hit_dto
 from flycanon.interfaces.dtos.conversation import SuggestRequest, SuggestResponse
 from flycanon.interfaces.dtos.query import AnswerRequest, SearchRequest
 from flycanon.web.conventions import TenantContext, tenant_context_from_request
@@ -57,9 +63,14 @@ class QueryStreamController:
         self,
         queries: DefaultQueryBus,  # noqa: ARG002 -- future commands
         answer_service: AnswerService,
+        answer_dispatcher: AnswerDispatcher,
         suggester: QuestionSuggester,
     ) -> None:
+        # ``_answer`` still supplies the retrieval pipeline for the RAG
+        # ``hit``-frame path; ``_dispatcher`` selects the engine and runs
+        # the answer call so the stream honours ``FLYCANON_ANSWER_MODE``.
         self._answer = answer_service
+        self._dispatcher = answer_dispatcher
         self._suggester = suggester
 
     @post_mapping("/stream")
@@ -68,14 +79,20 @@ class QueryStreamController:
         http_request: Request,
         request: Valid[Body[AnswerRequest]],
     ) -> StreamingResponse:
-        """SSE answer stream.
+        """SSE answer stream routed through the answer dispatcher.
 
-        Frames:
+        Frames (RAG mode, ``FLYCANON_ANSWER_MODE=rag``):
 
         * ``event: hit`` -- one frame per retrieved citation
           (UI can render citation badges immediately).
         * ``event: final`` -- terminal frame with the full answer
           + the cited subset + model + elapsed_ms + no_answer flag.
+
+        Frames (RLM mode, the default):
+
+        * ``event: status`` -- a single ``reasoning`` frame; RLM has
+          no pre-retrieval step so there are no ``hit`` frames.
+        * ``event: final`` -- the same terminal frame shape.
 
         Scope is fixed to the (tenant, workspace) carried by the
         request headers; the :class:`RetrievalService` fails closed
@@ -86,37 +103,44 @@ class QueryStreamController:
         async def _stream():
             started = time.perf_counter()
             try:
-                # Reuse the answer service's retrieval -> answer pipeline.
-                # We emit the hits first so the UI gets citation chips
-                # before the model finishes writing.
-                search_request = SearchRequest(
-                    query=request.question,
-                    top_k=request.top_k,
-                    source_ids=request.source_ids,
-                    knowledge_item_ids=request.knowledge_item_ids,
-                    domains=request.domains,
-                    jurisdictions=request.jurisdictions,
-                    tags=request.tags,
-                    statuses=request.statuses,
-                )
-                retrieval = await self._answer._retrieval.search(  # noqa: SLF001
-                    query=request.question,
-                    tenant_id=ctx.tenant_id,
-                    workspace_id=ctx.workspace_id,
-                    top_k=request.top_k,
-                    filters=_filters_from_request(search_request),
-                )
-                from flycanon.core.services.query.search_service import _hit_dto
+                if self._dispatcher.is_rag:
+                    # Legacy RAG path: emit the retrieval hits first so the
+                    # UI gets citation chips before the model finishes
+                    # writing.
+                    search_request = SearchRequest(
+                        query=request.question,
+                        top_k=request.top_k,
+                        source_ids=request.source_ids,
+                        knowledge_item_ids=request.knowledge_item_ids,
+                        domains=request.domains,
+                        jurisdictions=request.jurisdictions,
+                        tags=request.tags,
+                        statuses=request.statuses,
+                    )
+                    retrieval = await self._answer._retrieval.search(  # noqa: SLF001
+                        query=request.question,
+                        tenant_id=ctx.tenant_id,
+                        workspace_id=ctx.workspace_id,
+                        top_k=request.top_k,
+                        filters=_filters_from_request(search_request),
+                    )
+                    for hit in retrieval.hits:
+                        dto = _hit_dto(hit)
+                        yield _sse_frame("hit", dto.model_dump(mode="json"))
+                else:
+                    # RLM (default): no pre-retrieval step. Emit a single
+                    # status frame so the UI can show progress while the
+                    # engine reasons over the whole-document corpus.
+                    yield _sse_frame(
+                        "status",
+                        {"stage": "reasoning", "message": "Reasoning over documents with RLM…"},
+                    )
 
-                for hit in retrieval.hits:
-                    dto = _hit_dto(hit)
-                    yield _sse_frame("hit", dto.model_dump(mode="json"))
-
-                # Answer in one shot. Per-token streaming is a follow-up
-                # once the agentic framework's streaming surface lands;
-                # in the meantime callers can still render citations
-                # immediately and the answer body when it arrives.
-                response = await self._answer.answer(
+                # Answer in one shot via the dispatcher (RLM or RAG).
+                # Per-token streaming is a follow-up once the agentic
+                # framework's streaming surface lands; in the meantime
+                # callers can still render the answer body when it arrives.
+                response = await self._dispatcher.answer(
                     request,
                     tenant_id=ctx.tenant_id,
                     workspace_id=ctx.workspace_id,
