@@ -48,6 +48,7 @@ from starlette.requests import Request
 from starlette.responses import StreamingResponse
 
 from flycanon.core.services.auth.agent_token_service import AgentTokenService
+from flycanon.core.services.query.answer_dispatcher import AnswerDispatcher
 from flycanon.core.services.query.answer_service import AnswerService
 from flycanon.core.services.query.handlers import (
     AnswerKnowledgeQuery,
@@ -92,11 +93,16 @@ class AgentQueryController:
         agent_token_service: AgentTokenService,
         queries: DefaultQueryBus,
         answer_service: AnswerService,
+        answer_dispatcher: AnswerDispatcher,
         idempotency_store: IdempotencyStore,
     ) -> None:
         self._agent_token_service = agent_token_service
         self._queries = queries
+        # ``_answer`` still supplies the retrieval pipeline for the RAG
+        # ``hit``-frame path; ``_dispatcher`` selects the engine and runs
+        # the answer call so the stream honours ``FLYCANON_ANSWER_MODE``.
         self._answer = answer_service
+        self._dispatcher = answer_dispatcher
         self._idempotency_store = idempotency_store
 
     @post_mapping("/query")
@@ -152,12 +158,15 @@ class AgentQueryController:
 
         Scope: ``agent.query:run``. Mandatory ``Idempotency-Key``.
         Wire format matches the user-tier
-        ``POST /api/v1/query/stream`` byte-for-byte:
+        ``POST /api/v1/query/stream`` byte-for-byte and is routed
+        through the same :class:`AnswerDispatcher`:
 
-        * ``event: hit``   -- one frame per retrieved citation.
-        * ``event: final`` -- terminal frame with the full answer.
+        * RAG mode -- ``event: hit`` per retrieved citation, then
+          ``event: final`` with the full answer.
+        * RLM mode (default) -- a single ``event: status``
+          (``reasoning``) frame, then ``event: final``.
 
-        The generator is a verbatim copy of the user-tier
+        The generator mirrors the user-tier
         iterator. Token verification + idempotency-header check
         happen synchronously before the streaming response is
         returned, so authentication failures surface as a normal
@@ -182,36 +191,44 @@ class AgentQueryController:
         async def _stream():
             started = time.perf_counter()
             try:
-                # Reuse the answer service's retrieval -> answer
-                # pipeline. We emit the hits first so the consuming
-                # agent gets citation chips before the model finishes
-                # writing.
-                search_request = SearchRequest(
-                    query=request.question,
-                    top_k=request.top_k,
-                    source_ids=request.source_ids,
-                    knowledge_item_ids=request.knowledge_item_ids,
-                    domains=request.domains,
-                    jurisdictions=request.jurisdictions,
-                    tags=request.tags,
-                    statuses=request.statuses,
-                )
-                retrieval = await self._answer._retrieval.search(  # noqa: SLF001
-                    query=request.question,
-                    tenant_id=ctx.tenant_id,
-                    workspace_id=ctx.workspace_id,
-                    top_k=request.top_k,
-                    filters=_filters_from_request(search_request),
-                )
+                if self._dispatcher.is_rag:
+                    # Legacy RAG path: emit the retrieval hits first so the
+                    # consuming agent gets citation chips before the model
+                    # finishes writing.
+                    search_request = SearchRequest(
+                        query=request.question,
+                        top_k=request.top_k,
+                        source_ids=request.source_ids,
+                        knowledge_item_ids=request.knowledge_item_ids,
+                        domains=request.domains,
+                        jurisdictions=request.jurisdictions,
+                        tags=request.tags,
+                        statuses=request.statuses,
+                    )
+                    retrieval = await self._answer._retrieval.search(  # noqa: SLF001
+                        query=request.question,
+                        tenant_id=ctx.tenant_id,
+                        workspace_id=ctx.workspace_id,
+                        top_k=request.top_k,
+                        filters=_filters_from_request(search_request),
+                    )
+                    for hit in retrieval.hits:
+                        dto = _hit_dto(hit)
+                        yield _sse_frame("hit", dto.model_dump(mode="json"))
+                else:
+                    # RLM (default): no pre-retrieval step. Emit a single
+                    # status frame so the consuming agent can show progress
+                    # while the engine reasons over the corpus.
+                    yield _sse_frame(
+                        "status",
+                        {"stage": "reasoning", "message": "Reasoning over documents with RLM…"},
+                    )
 
-                for hit in retrieval.hits:
-                    dto = _hit_dto(hit)
-                    yield _sse_frame("hit", dto.model_dump(mode="json"))
-
-                # Answer in one shot. Per-token streaming is a
-                # follow-up once the agentic framework's streaming
-                # surface lands; matches the user-tier behaviour.
-                response = await self._answer.answer(
+                # Answer in one shot via the dispatcher (RLM or RAG).
+                # Per-token streaming is a follow-up once the agentic
+                # framework's streaming surface lands; matches the
+                # user-tier behaviour.
+                response = await self._dispatcher.answer(
                     request,
                     tenant_id=ctx.tenant_id,
                     workspace_id=ctx.workspace_id,
