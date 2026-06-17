@@ -58,9 +58,7 @@ class S3ObjectStore(ObjectStore):
         region: str | None = None,
     ) -> None:
         if not _HAS_BOTO3:
-            raise RuntimeError(
-                "S3ObjectStore requires the 's3' extra; run: uv sync --extra s3"
-            )
+            raise RuntimeError("S3ObjectStore requires the 's3' extra; run: uv sync --extra s3")
         self._bucket = bucket
         self._prefix = prefix.strip("/")
         self._client = boto3.client(
@@ -90,9 +88,7 @@ class S3ObjectStore(ObjectStore):
     async def get(self, key: str) -> bytes:
         full = self._full_key(key)
         try:
-            resp = await asyncio.to_thread(
-                self._client.get_object, Bucket=self._bucket, Key=full
-            )
+            resp = await asyncio.to_thread(self._client.get_object, Bucket=self._bucket, Key=full)
         except ClientError as exc:
             if _is_not_found(exc):
                 raise FileNotFoundError(key) from exc
@@ -101,16 +97,12 @@ class S3ObjectStore(ObjectStore):
 
     async def delete(self, key: str) -> None:
         full = self._full_key(key)
-        await asyncio.to_thread(
-            self._client.delete_object, Bucket=self._bucket, Key=full
-        )
+        await asyncio.to_thread(self._client.delete_object, Bucket=self._bucket, Key=full)
 
     async def exists(self, key: str) -> bool:
         full = self._full_key(key)
         try:
-            await asyncio.to_thread(
-                self._client.head_object, Bucket=self._bucket, Key=full
-            )
+            await asyncio.to_thread(self._client.head_object, Bucket=self._bucket, Key=full)
         except ClientError as exc:
             if _is_not_found(exc):
                 return False
