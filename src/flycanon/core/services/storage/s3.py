@@ -68,7 +68,7 @@ class S3ObjectStore(ObjectStore):
         )
 
     def _full_key(self, key: str) -> str:
-        if ".." in key.split("/"):
+        if ".." in key.split("/") or key.startswith("/"):
             raise ValueError(f"illegal key {key!r}")
         if not self._prefix:
             return key
