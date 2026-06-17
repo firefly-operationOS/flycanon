@@ -131,6 +131,12 @@ qdrant = [
     "fireflyframework-agentic[vectorstores-qdrant]",
 ]
 
+# Optional S3 object-store backend. Activates when
+# FLYCANON_OBJECT_STORE_BACKEND=s3; the localfs default needs no extra.
+s3 = [
+    "boto3>=1.34",
+]
+
 [build-system]
 requires = ["hatchling>=1.18"]
 build-backend = "hatchling.build"
