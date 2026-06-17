@@ -417,17 +417,32 @@ class TestAgentSourcesGet:
 # ---------------------------------------------------------------------
 
 
+class _FakeDispatcher:
+    """RAG-mode dispatcher delegating ``answer`` to the answer service."""
+
+    def __init__(self, answer_service: Any) -> None:
+        self.is_rag = True
+        self.mode = "rag"
+        self._answer_service = answer_service
+
+    async def answer(self, request, *, tenant_id=None, workspace_id=None):
+        return await self._answer_service.answer(request, tenant_id=tenant_id, workspace_id=workspace_id)
+
+
 def _query_controller(
     agent_token_service: AgentTokenService,
     *,
     queries: Any = None,
     answer_service: Any = None,
+    answer_dispatcher: Any = None,
     idempotency_store: Any = None,
 ) -> AgentQueryController:
+    answer_service = answer_service or AsyncMock()
     return AgentQueryController(
         agent_token_service=agent_token_service,
         queries=queries or _query_bus(),
-        answer_service=answer_service or AsyncMock(),
+        answer_service=answer_service,
+        answer_dispatcher=answer_dispatcher or _FakeDispatcher(answer_service),
         idempotency_store=idempotency_store or InMemoryIdempotencyStore(),
     )
 

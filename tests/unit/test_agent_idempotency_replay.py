@@ -382,6 +382,7 @@ class TestAgentQueryAnswerReplay:
             agent_token_service=service_a,
             queries=queries,
             answer_service=AsyncMock(),
+            answer_dispatcher=AsyncMock(),
             idempotency_store=store,
         )
 
@@ -408,6 +409,7 @@ class TestAgentQueryAnswerReplay:
             agent_token_service=service_a,
             queries=queries,
             answer_service=AsyncMock(),
+            answer_dispatcher=AsyncMock(),
             idempotency_store=store,
         )
 
@@ -435,6 +437,7 @@ class TestAgentSearchReplay:
             agent_token_service=service_a,
             queries=queries,
             answer_service=AsyncMock(),
+            answer_dispatcher=AsyncMock(),
             idempotency_store=store,
         )
 
@@ -460,6 +463,7 @@ class TestAgentSearchReplay:
             agent_token_service=service_a,
             queries=queries,
             answer_service=AsyncMock(),
+            answer_dispatcher=AsyncMock(),
             idempotency_store=store,
         )
 
