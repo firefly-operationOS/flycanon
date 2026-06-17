@@ -35,7 +35,8 @@ class ObjectStore(ABC):
 
     Keys are forward-slash-delimited paths relative to the backend root (the
     local base directory or the ``s3://bucket/prefix``). Implementations reject
-    ``..`` segments so a caller-supplied key cannot escape that root.
+    ``..`` segments and absolute keys so a caller-supplied key cannot escape
+    that root.
     """
 
     @abstractmethod
