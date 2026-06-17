@@ -40,12 +40,14 @@ from __future__ import annotations
 import json
 import logging
 import time
+from typing import Any
 
+from pydantic import BaseModel
 from pyfly.container import rest_controller
 from pyfly.cqrs import DefaultQueryBus
 from pyfly.web import Body, Valid, post_mapping, request_mapping
 from starlette.requests import Request
-from starlette.responses import StreamingResponse
+from starlette.responses import JSONResponse, StreamingResponse
 
 from flycanon.core.services.auth.agent_token_service import AgentTokenService
 from flycanon.core.services.query.answer_dispatcher import AnswerDispatcher
@@ -71,6 +73,7 @@ from flycanon.web.controllers.agent._helpers import (
     verify_agent_token,
 )
 from flycanon.web.conventions import IdempotencyStore
+from flycanon.web.conventions.headers import DEPRECATION_RAG_MESSAGE, HEADER_DEPRECATION
 
 logger = logging.getLogger(__name__)
 
@@ -123,6 +126,10 @@ class AgentQueryController:
         :class:`AnswerResponse` re-hydrated from the stored JSON
         body, without re-running retrieval + the LLM call.
         """
+        # In the deprecated RAG mode the response carries an
+        # ``X-Flycanon-Deprecation`` header; RLM (the default) is silent.
+        # The header is a pure signal -- the body is byte-for-byte the
+        # same ``AnswerResponse``, so the OpenAPI schema is unchanged.
         ctx = await verify_agent_token(
             http_request,
             service=self._agent_token_service,
@@ -131,7 +138,9 @@ class AgentQueryController:
         scope = "agent.query:run"
         cached = await check_idempotency_replay(http_request, self._idempotency_store, scope)
         if cached is not None:
-            return AnswerResponse.model_validate(cached.body)
+            return _maybe_deprecation_response(
+                AnswerResponse.model_validate(cached.body), is_rag=self._dispatcher.is_rag
+            )
         response = await self._queries.query(
             AnswerKnowledgeQuery(
                 request=request,
@@ -146,7 +155,7 @@ class AgentQueryController:
             status=200,
             response=response,
         )
-        return response
+        return _maybe_deprecation_response(response, is_rag=self._dispatcher.is_rag)
 
     @post_mapping("/query/stream")
     async def stream_answer(
@@ -255,13 +264,17 @@ class AgentQueryController:
                     {"code": "stream_error", "message": str(exc)},
                 )
 
+        headers = {
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        }
+        # Surface the RAG deprecation to clients; RLM (the default) is silent.
+        if self._dispatcher.is_rag:
+            headers[HEADER_DEPRECATION] = DEPRECATION_RAG_MESSAGE
         return StreamingResponse(
             _stream(),
             media_type="text/event-stream",
-            headers={
-                "Cache-Control": "no-cache",
-                "X-Accel-Buffering": "no",
-            },
+            headers=headers,
         )
 
     @post_mapping("/search")
@@ -313,6 +326,19 @@ class AgentQueryController:
 def _sse_frame(event: str, data: dict) -> bytes:
     """Render an SSE frame -- verbatim copy of the user-tier helper."""
     return f"event: {event}\ndata: {json.dumps(data)}\n\n".encode()
+
+
+def _maybe_deprecation_response(response: Any, *, is_rag: bool) -> Any:
+    """Attach the RAG deprecation header without altering the body.
+
+    RLM (the default) returns the response untouched so the framework
+    serialises it as usual. In RAG mode the same body is wrapped in a
+    :class:`JSONResponse` carrying the ``X-Flycanon-Deprecation`` header.
+    """
+    if not is_rag:
+        return response
+    body = response.model_dump(mode="json") if isinstance(response, BaseModel) else response
+    return JSONResponse(body, headers={HEADER_DEPRECATION: DEPRECATION_RAG_MESSAGE})
 
 
 __all__ = ["AgentQueryController"]

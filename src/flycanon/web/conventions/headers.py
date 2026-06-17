@@ -27,3 +27,11 @@ HEADER_CORRELATION_ID = "X-Correlation-Id"
 HEADER_IDEMPOTENCY_KEY = "Idempotency-Key"
 HEADER_AGENT_TOKEN = "X-Agent-Token"
 HEADER_AUTHORIZATION = "Authorization"
+HEADER_DEPRECATION = "X-Flycanon-Deprecation"
+
+# Value emitted on the answer endpoints when the legacy RAG engine is
+# selected (``FLYCANON_ANSWER_MODE=rag``); RLM (the default) sets no header.
+DEPRECATION_RAG_MESSAGE = (
+    "FLYCANON_ANSWER_MODE=rag is deprecated and will be removed in a "
+    "future release; RLM is the default answer mode."
+)

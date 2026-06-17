@@ -382,7 +382,7 @@ class TestAgentQueryAnswerReplay:
             agent_token_service=service_a,
             queries=queries,
             answer_service=AsyncMock(),
-            answer_dispatcher=AsyncMock(),
+            answer_dispatcher=AsyncMock(is_rag=False),
             idempotency_store=store,
         )
 
@@ -409,7 +409,7 @@ class TestAgentQueryAnswerReplay:
             agent_token_service=service_a,
             queries=queries,
             answer_service=AsyncMock(),
-            answer_dispatcher=AsyncMock(),
+            answer_dispatcher=AsyncMock(is_rag=False),
             idempotency_store=store,
         )
 
