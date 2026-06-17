@@ -27,8 +27,9 @@ in [`fireflyframework-agentic`](https://github.com/fireflyframework/fireflyframe
 flycanon owns its hybrid-retrieval primitives in
 `core/services/retrieval/fusion.py`.
 flycanon's job is the composition: take raw bytes in any format,
-ground them in a canonical version chain, and expose retrieval + RAG
-over the result.
+ground them in a canonical version chain, and expose retrieval +
+code-driven RLM answering (with deprecated RAG as an opt-in) over the
+result.
 
 ## Data model
 
@@ -212,6 +213,49 @@ scope layer (isolation per `(tenant_id, workspace_id)` via a canonical
 `t/<tenant>/w/<workspace>` namespace), and fusion always happens via
 Reciprocal Rank Fusion (RRF) over the two channels.
 
+## Answer engine (RLM default / RAG deprecated)
+
+The non-streaming answer path is fronted by an `AnswerDispatcher`
+(`core/services/query/answer_dispatcher.py`) that routes to one of two
+engines by `FLYCANON_ANSWER_MODE`. Both implement the same `answer()`
+contract (`AnswerRequest` in, `AnswerResponse` out), so the dispatcher
+is a thin pass-through and the wire contract is identical across modes:
+
+* **`rlm`** (default) -- the Recursive Language Model engine
+  (`core/services/query/rlm/`). It is a code-driven CodeAct REPL: a root
+  orchestrator model writes Python against the in-scope document corpus
+  -- handed to it as a `docs` variable rather than pasted into the
+  prompt -- makes recursive sub-calls on slices, and finishes by citing
+  the filings / pages it used. `CanonCorpusBuilder` materialises that
+  corpus up front by listing the in-scope sources, fetching each
+  original from the `ObjectStore`, and extracting page-structured text;
+  `RLMSession` then drives the REPL inside `asyncio.to_thread` against
+  the synchronous `AnthropicClient`. Because it reasons over **whole
+  documents**, not chunks, it depends on the originals being persisted.
+* **`rag`** (opt-in, **deprecated**) -- the legacy `AnswerService`:
+  hybrid retrieval (same path as `/search`) followed by one grounded
+  LLM call. The dispatcher logs a deprecation warning on every RAG-mode
+  answer and the path is slated for removal in a future release.
+
+`FLYCANON_RLM_ROOT_MODEL` / `FLYCANON_RLM_SUB_MODEL` /
+`FLYCANON_RLM_ANSWER_MODEL` (all default `anthropic:claude-sonnet-4-6`)
+select the three RLM models; `FLYCANON_RLM_MAX_ITERS` /
+`FLYCANON_RLM_SUB_BUDGET` / `FLYCANON_RLM_MAX_DEPTH` bound the loop. The
+engine calls the Anthropic Messages API directly, so an
+`ANTHROPIC_API_KEY` is required at runtime in the default mode.
+
+### Object store (RLM document originals)
+
+RLM replays the original document bytes, so intake persists each
+original to an object store (`core/services/storage/`) and records its
+key on the source row (`object_store_key`). `FLYCANON_OBJECT_STORE_BACKEND`
+selects `localfs` (default, a root directory for dev / test) or `s3`
+(requires `uv sync --extra s3`; bucket / prefix / endpoint / region via
+`FLYCANON_OBJECT_STORE_S3_*`, AWS credentials from the standard
+environment). `FLYCANON_STORE_ORIGINALS` (default `true`) gates the
+persistence; the write is best-effort and never fails the ingest, but a
+source with no stored original is skipped by the RLM corpus builder.
+
 ## Layers
 
 ```
@@ -268,7 +312,9 @@ beans are declared. It registers:
   `TaxonomyService` (each takes the `EventPublisher` so events are
   published as the canonical store mutates)
 * `Consolidator` + `CandidateService`
-* `SearchService` + `AnswerService`
+* `ObjectStore` (`localfs` / `s3` via `FLYCANON_OBJECT_STORE_*`)
+* `SearchService`, `AnswerService` (RAG), `RLMAnswerService`, and the
+  `AnswerDispatcher` that routes the answer path by `FLYCANON_ANSWER_MODE`
 * `IntakeService` (the end-to-end orchestrator)
 
 `EventPublisher` is injected upstream by pyfly's
