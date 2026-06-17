@@ -103,13 +103,32 @@ POST /api/v1/search    (raw hybrid retrieval)
       → SearchResponse { hits, elapsed_ms }
 
 POST /api/v1/query     (grounded answer with citations)
-  → AnswerKnowledgeHandler → AnswerService.answer
-      → RetrievalService.search    (same path as /search)
-      → render answer.yaml prompt + call FireflyAgent (output_type=AnswerOutput)
-      → on primary-model error, fall back to FLYCANON_ANSWER_FALLBACK_MODEL
-      → hydrate citations from the retrieved Hit rows
-      → AnswerResponse { answer, citations, model, elapsed_ms, no_answer }
+  → AnswerKnowledgeHandler → AnswerDispatcher.answer
+      → FLYCANON_ANSWER_MODE selects the engine:
+
+      rlm (default) → RLMAnswerService.answer
+          → CanonCorpusBuilder: list in-scope sources, fetch each
+                original from the ObjectStore, extract page text
+                (sources without a stored original are skipped)
+          → run the Recursive Language Model engine (RLMSession +
+                AnthropicClient) in asyncio.to_thread: a CodeAct REPL
+                that reasons over whole documents, not chunks
+          → map engine citations back to Hit rows
+          → AnswerResponse { answer, citations, model, elapsed_ms, no_answer }
+
+      rag (deprecated, opt-in) → AnswerService.answer
+          → log a deprecation warning (removal slated for a future release)
+          → RetrievalService.search    (same path as /search)
+          → render answer.yaml prompt + call FireflyAgent (output_type=AnswerOutput)
+          → on primary-model error, fall back to FLYCANON_ANSWER_FALLBACK_MODEL
+          → hydrate citations from the retrieved Hit rows
+          → AnswerResponse { answer, citations, model, elapsed_ms, no_answer }
 ```
+
+The RLM (default) path requires the original document bytes in the
+object store -- keep `FLYCANON_STORE_ORIGINALS=true` -- and an
+`ANTHROPIC_API_KEY` at runtime (the engine calls the Anthropic Messages
+API directly). See [deployment.md](deployment.md#answer-mode-rlm-default--rag-deprecated).
 
 ```
 GET /api/v1/knowledge/{id}/provenance
