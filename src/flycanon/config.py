@@ -299,6 +299,11 @@ class CanonSettings(BaseSettings):
     object_store_s3_endpoint_url: str = Field(default="")
     # Optional region; empty defers to boto3's standard region resolution.
     object_store_s3_region: str = Field(default="")
+    # Whether intake persists the original uploaded bytes to the object
+    # store and records the key on the source row (``object_store_key``).
+    # On by default so RLM has a whole-document corpus to reason over; a
+    # write failure is best-effort and never fails the ingest.
+    store_originals: bool = Field(default=True)
 
     # -- Ingestion ------------------------------------------------------
     chunk_size_tokens: int = Field(default=1200, ge=128, le=8192)
