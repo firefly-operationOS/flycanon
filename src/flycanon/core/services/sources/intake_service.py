@@ -47,6 +47,8 @@ new binary. The orchestrator owns:
 from __future__ import annotations
 
 import logging
+import mimetypes
+import os
 import uuid
 from typing import Any
 
@@ -69,6 +71,7 @@ from flycanon.core.services.pii import (
 )
 from flycanon.core.services.pii.scanner import redact as pii_redact
 from flycanon.core.services.retrieval import IndexService
+from flycanon.core.services.storage.object_store import ObjectStore
 from flycanon.interfaces.dtos.source import SourceMetadata, SubmitSourceRequest
 from flycanon.interfaces.enums import SourceKind, SourceStatus
 from flycanon.models.entities.source import SourceRow
@@ -94,6 +97,7 @@ class IntakeService:
         chunk_repository: ChunkRepository,
         audit: AuditService,
         event_publisher: EventPublisher,
+        object_store: ObjectStore,
         settings: CanonSettings,
     ) -> None:
         self._binary_normalizer = binary_normalizer
@@ -106,6 +110,7 @@ class IntakeService:
         self._chunks = chunk_repository
         self._audit = audit
         self._publisher = event_publisher
+        self._object_store = object_store
         self._settings = settings
         # Resolve the configured PII scanner once at construction.
         # ``None`` when the scanner is disabled (or the policy is
@@ -210,6 +215,22 @@ class IntakeService:
                 existing.id,
             )
             return existing
+
+        # Persist the ORIGINAL uploaded bytes (not merged_content) so RLM
+        # can re-extract whole-document text from the canonical file via
+        # the loaders. Best-effort: a storage failure logs a warning and
+        # leaves ``object_store_key`` null rather than failing the ingest.
+        # Setting the key before the INSERT lands it on the same row.
+        if self._settings.store_originals:
+            await self._store_original(
+                source=result.source,
+                content=content,
+                tenant_id=tenant_id,
+                workspace_id=workspace_id,
+                filename=filename,
+                content_type=content_type,
+            )
+
         try:
             await self._sources.add(result.source)
         except IntegrityError:
@@ -393,6 +414,20 @@ class IntakeService:
         existing.metadata_json = metadata
         existing.error_code = None
         existing.error_message = None
+
+        # Persist the NEW original bytes on the re-ingest path too, so the
+        # stored corpus follows the replaced content. Best-effort: a write
+        # failure leaves the key as-is and never fails the replace.
+        if self._settings.store_originals:
+            await self._store_original(
+                source=existing,
+                content=content,
+                tenant_id=tenant_id,
+                workspace_id=workspace_id,
+                filename=existing.filename,
+                content_type=existing.content_type,
+            )
+
         updated_row = await self._sources.update(existing)
 
         if result.chunks:
@@ -484,6 +519,52 @@ class IntakeService:
             [{"kind": f.kind, "start": f.start, "end": f.end} for f in findings],
         )
         return content, metadata
+
+    async def _store_original(
+        self,
+        *,
+        source: SourceRow,
+        content: bytes,
+        tenant_id: str,
+        workspace_id: str,
+        filename: str | None,
+        content_type: str | None,
+    ) -> None:
+        """Write the original bytes to the object store and stamp the key.
+
+        Key layout mirrors flyquery's convention:
+        ``flycanon/{tenant}/{workspace}/sources/{source_id}{ext}``. The
+        extension is taken from the filename when present, else guessed
+        from ``content_type``, else ``.bin``. Best-effort: on any failure
+        we log a warning and leave ``object_store_key`` unchanged so the
+        ingest still succeeds.
+        """
+        ext = self._original_extension(filename, content_type)
+        key = f"flycanon/{tenant_id}/{workspace_id}/sources/{source.id}{ext}"
+        try:
+            await self._object_store.put(key, content, content_type)
+        except Exception as exc:
+            logger.warning(
+                "object-store put failed source_id=%s key=%s: %s",
+                source.id,
+                key,
+                exc,
+            )
+            return
+        source.object_store_key = key
+
+    @staticmethod
+    def _original_extension(filename: str | None, content_type: str | None) -> str:
+        """Derive a file extension for the stored original."""
+        if filename:
+            ext = os.path.splitext(filename)[1]
+            if ext:
+                return ext
+        if content_type:
+            guessed = mimetypes.guess_extension(content_type.split(";")[0].strip())
+            if guessed:
+                return guessed
+        return ".bin"
 
     @staticmethod
     def _decode_for_scan(content: bytes) -> str:
