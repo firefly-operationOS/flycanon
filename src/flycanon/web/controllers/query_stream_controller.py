@@ -52,6 +52,7 @@ from flycanon.core.services.query.search_service import _filters_from_request, _
 from flycanon.interfaces.dtos.conversation import SuggestRequest, SuggestResponse
 from flycanon.interfaces.dtos.query import AnswerRequest, SearchRequest
 from flycanon.web.conventions import TenantContext, tenant_context_from_request
+from flycanon.web.conventions.headers import DEPRECATION_RAG_MESSAGE, HEADER_DEPRECATION
 
 logger = logging.getLogger(__name__)
 
@@ -167,13 +168,17 @@ class QueryStreamController:
                     {"code": "stream_error", "message": str(exc)},
                 )
 
+        headers = {
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        }
+        # Surface the RAG deprecation to clients; RLM (the default) is silent.
+        if self._dispatcher.is_rag:
+            headers[HEADER_DEPRECATION] = DEPRECATION_RAG_MESSAGE
         return StreamingResponse(
             _stream(),
             media_type="text/event-stream",
-            headers={
-                "Cache-Control": "no-cache",
-                "X-Accel-Buffering": "no",
-            },
+            headers=headers,
         )
 
     @post_mapping("/suggest")
