@@ -166,11 +166,10 @@ FLYCANON_ANSWER_MODE=rag is deprecated and will be removed in a future release; 
 ```
 
 The legacy RAG answer path is slated for removal in a future release;
-migrate to the default `rlm` mode. The dispatcher exposes the active
-mode (`is_rag`) so the deprecation can also be surfaced to clients as an
-`X-Flycanon-Deprecation` response header on the answer endpoints when
-`answer_mode=rag` -- the design's client-facing deprecation signal
-alongside the server log. The `/api/v1/search` surface (raw hybrid
+migrate to the default `rlm` mode. When `answer_mode=rag`, the answer
+endpoints return an `X-Flycanon-Deprecation` response header to clients
+-- the client-facing deprecation signal alongside the server log. The
+`/api/v1/search` surface (raw hybrid
 retrieval, no LLM) is unaffected and stays.
 
 ---

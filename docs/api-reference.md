@@ -107,9 +107,9 @@ selected by `FLYCANON_ANSWER_MODE`:
   `hit` frames before the terminal `final` frame.
 - **`rag`** (opt-in, **deprecated**) — the legacy hybrid-retrieval
   answerer. When selected, the server logs a deprecation warning on
-  every RAG-mode answer; a client-facing `X-Flycanon-Deprecation`
-  response header is planned but not yet implemented. The path is
-  slated for removal in a future
+  every RAG-mode answer and returns a client-facing
+  `X-Flycanon-Deprecation` response header (carrying the same message)
+  on the answer endpoints. The path is slated for removal in a future
   release. The streaming variant still emits per-`hit` citation frames
   first.
 
