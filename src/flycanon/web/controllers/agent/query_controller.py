@@ -47,7 +47,7 @@ from pyfly.container import rest_controller
 from pyfly.cqrs import DefaultQueryBus
 from pyfly.web import Body, Valid, post_mapping, request_mapping
 from starlette.requests import Request
-from starlette.responses import JSONResponse, Response, StreamingResponse
+from starlette.responses import JSONResponse, StreamingResponse
 
 from flycanon.core.services.auth.agent_token_service import AgentTokenService
 from flycanon.core.services.query.answer_dispatcher import AnswerDispatcher
@@ -113,7 +113,7 @@ class AgentQueryController:
         self,
         http_request: Request,
         request: Valid[Body[AnswerRequest]],
-    ) -> AnswerResponse | Response:
+    ) -> AnswerResponse:
         """Grounded RAG answer with explicit citations (agent tier).
 
         Scope: ``agent.query:run``. Mandatory ``Idempotency-Key``.
@@ -125,12 +125,11 @@ class AgentQueryController:
         within the store TTL) returns the cached
         :class:`AnswerResponse` re-hydrated from the stored JSON
         body, without re-running retrieval + the LLM call.
-
-        In the deprecated RAG mode the response carries an
-        ``X-Flycanon-Deprecation`` header; RLM (the default) is silent.
-        The header is a pure signal -- the body is byte-for-byte the
-        same :class:`AnswerResponse`.
         """
+        # In the deprecated RAG mode the response carries an
+        # ``X-Flycanon-Deprecation`` header; RLM (the default) is silent.
+        # The header is a pure signal -- the body is byte-for-byte the
+        # same ``AnswerResponse``, so the OpenAPI schema is unchanged.
         ctx = await verify_agent_token(
             http_request,
             service=self._agent_token_service,

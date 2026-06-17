@@ -32,7 +32,7 @@ from pyfly.container import rest_controller
 from pyfly.cqrs import DefaultQueryBus
 from pyfly.web import Body, Valid, post_mapping, request_mapping
 from starlette.requests import Request
-from starlette.responses import JSONResponse, Response
+from starlette.responses import JSONResponse
 
 from flycanon.core.services.query.answer_dispatcher import AnswerDispatcher
 from flycanon.core.services.query.handlers import (
@@ -115,7 +115,7 @@ class QueryController:
         self,
         http_request: Request,
         request: Valid[Body[AnswerRequest]],
-    ) -> AnswerResponse | Response:
+    ) -> AnswerResponse:
         """Grounded RAG answer with explicit citations.
 
         Pipeline:
