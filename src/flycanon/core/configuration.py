@@ -76,6 +76,8 @@ from flycanon.core.services.retrieval import (
 )
 from flycanon.core.services.retrieval.query_expander import QueryExpander
 from flycanon.core.services.retrieval.reranker import build_reranker
+from flycanon.core.services.storage.factory import build_object_store
+from flycanon.core.services.storage.object_store import ObjectStore
 from flycanon.models.repositories import (
     AgentTokenRepository,
     AuditRepository,
@@ -251,6 +253,10 @@ class CanonCoreConfiguration:
         chunker: Chunker,
     ) -> IngestionService:
         return IngestionService(loaders=loader_registry, chunker=chunker)
+
+    @bean
+    def object_store(self, settings: CanonSettings) -> ObjectStore:
+        return build_object_store(settings)
 
     @bean
     def embedding_service(self, settings: CanonSettings) -> EmbeddingService:
