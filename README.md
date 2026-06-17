@@ -160,9 +160,11 @@ of two engines, selected by `FLYCANON_ANSWER_MODE`:
 RAG is opt-in and **deprecated**: when `FLYCANON_ANSWER_MODE=rag` the
 dispatcher emits a server-side deprecation warning log on every
 RAG-mode answer (`FLYCANON_ANSWER_MODE=rag is deprecated and will be
-removed in a future release; RLM is the default`). The legacy RAG
-answer path is slated for removal in a future release — `/search`
-(raw hybrid retrieval, no LLM) is unaffected and stays.
+removed in a future release; RLM is the default`), and surfaces an
+`X-Flycanon-Deprecation` response header on the answer endpoints as the
+client-facing deprecation signal. The legacy RAG answer path is slated
+for removal in a future release — `/search` (raw hybrid retrieval, no
+LLM) is unaffected and stays.
 
 **Operational requirements for RLM (the default):**
 
