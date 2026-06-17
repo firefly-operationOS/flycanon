@@ -68,6 +68,9 @@ from flycanon.core.services.ingestion import (
 from flycanon.core.services.ingestion.chunker import build_default_chunker
 from flycanon.core.services.ingestion.loaders import default_registry
 from flycanon.core.services.query import AnswerService, SearchService
+from flycanon.core.services.query.rlm.client import AnthropicClient
+from flycanon.core.services.query.rlm.corpus import CanonCorpusBuilder
+from flycanon.core.services.query.rlm_answer_service import RLMAnswerService
 from flycanon.core.services.retrieval import (
     CorpusContext,
     IndexService,
@@ -380,6 +383,47 @@ class CanonCoreConfiguration:
             prompt=load_prompt("answer"),
             default_model=settings.answer_model,
             fallback_model=settings.answer_fallback_model,
+            settings=settings,
+        )
+
+    # ------------------------------------------------------------------
+    # RLM query engine
+    #
+    # The Recursive Language Model answerer is a drop-in alternative to
+    # the RAG ``answer_service`` (same ``answer()`` contract). It needs a
+    # whole-document corpus builder (sources + object store + loaders) and
+    # a synchronous Anthropic client to drive the CodeAct REPL; the engine
+    # is run inside ``asyncio.to_thread`` by the service. No call site uses
+    # it yet -- the mode dispatch lands in a later PR.
+    # ------------------------------------------------------------------
+
+    @bean
+    def canon_corpus_builder(
+        self,
+        source_repository: SourceRepository,
+        object_store: ObjectStore,
+        loader_registry: LoaderRegistry,
+    ) -> CanonCorpusBuilder:
+        return CanonCorpusBuilder(
+            source_repository=source_repository,
+            object_store=object_store,
+            registry=loader_registry,
+        )
+
+    @bean
+    def anthropic_client(self, settings: CanonSettings) -> AnthropicClient:
+        return AnthropicClient(settings)
+
+    @bean
+    def rlm_answer_service(
+        self,
+        canon_corpus_builder: CanonCorpusBuilder,
+        anthropic_client: AnthropicClient,
+        settings: CanonSettings,
+    ) -> RLMAnswerService:
+        return RLMAnswerService(
+            corpus_builder=canon_corpus_builder,
+            client=anthropic_client,
             settings=settings,
         )
 
