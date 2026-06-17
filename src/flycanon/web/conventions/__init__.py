@@ -64,9 +64,11 @@ from flycanon.web.conventions.exceptions import (
 )
 from flycanon.web.conventions.handlers import register_exception_handlers
 from flycanon.web.conventions.headers import (
+    DEPRECATION_RAG_MESSAGE,
     HEADER_AGENT_TOKEN,
     HEADER_AUTHORIZATION,
     HEADER_CORRELATION_ID,
+    HEADER_DEPRECATION,
     HEADER_IDEMPOTENCY_KEY,
     HEADER_TENANT_ID,
     HEADER_WORKSPACE_ID,
@@ -118,9 +120,11 @@ __all__ = [
     # handlers
     "register_exception_handlers",
     # headers
+    "DEPRECATION_RAG_MESSAGE",
     "HEADER_AGENT_TOKEN",
     "HEADER_AUTHORIZATION",
     "HEADER_CORRELATION_ID",
+    "HEADER_DEPRECATION",
     "HEADER_IDEMPOTENCY_KEY",
     "HEADER_TENANT_ID",
     "HEADER_WORKSPACE_ID",
