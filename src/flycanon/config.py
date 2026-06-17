@@ -24,7 +24,7 @@ from __future__ import annotations
 
 from functools import lru_cache
 
-from pydantic import Field
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -255,6 +255,18 @@ class CanonSettings(BaseSettings):
     # and finishes by citing the filings/pages it used. All three models
     # are in ``<provider>:<model>`` form; the ``anthropic:`` prefix is
     # stripped before the id is sent to the Anthropic Messages API.
+    #
+    # ``answer_mode`` (FLYCANON_ANSWER_MODE) selects which engine the
+    # non-streaming ``/api/v1/query`` answer path uses: ``rlm`` (default)
+    # routes to the Recursive Language Model answerer, ``rag`` routes to
+    # the legacy hybrid-retrieval :class:`AnswerService`. RAG is opt-in
+    # and deprecated -- the :class:`AnswerDispatcher` logs a deprecation
+    # warning whenever it is selected. The value is normalised to
+    # lowercase; any value other than ``rag`` falls back to ``rlm``.
+    answer_mode: str = Field(
+        default="rlm",
+        description="Answer engine for the non-streaming query path: ``rlm`` (default) or ``rag``.",
+    )
     rlm_root_model: str = Field(
         default="anthropic:claude-sonnet-4-6",
         description="Orchestrator model that drives the CodeAct REPL loop.",
@@ -366,6 +378,14 @@ class CanonSettings(BaseSettings):
         if not self.api_keys:
             return set()
         return {k.strip() for k in self.api_keys.split(",") if k.strip()}
+
+    @field_validator("answer_mode", mode="before")
+    @classmethod
+    def _normalise_answer_mode(cls, value: object) -> str:
+        # Normalise to lowercase and treat any unrecognised value as the
+        # ``rlm`` default -- only ``rag`` opts into the deprecated path.
+        text = str(value).strip().lower() if value is not None else ""
+        return "rag" if text == "rag" else "rlm"
 
 
 @lru_cache(maxsize=1)

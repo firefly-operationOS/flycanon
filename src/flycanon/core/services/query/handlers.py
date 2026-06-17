@@ -21,7 +21,7 @@ from dataclasses import dataclass
 from pyfly.container import service
 from pyfly.cqrs import Query, QueryHandler, query_handler
 
-from flycanon.core.services.query.answer_service import AnswerService
+from flycanon.core.services.query.answer_dispatcher import AnswerDispatcher
 from flycanon.core.services.query.search_service import SearchService
 from flycanon.interfaces.dtos.query import (
     AnswerRequest,
@@ -63,7 +63,7 @@ class AnswerKnowledgeQuery(Query[AnswerResponse]):
 @query_handler
 @service
 class AnswerKnowledgeHandler(QueryHandler[AnswerKnowledgeQuery, AnswerResponse]):
-    def __init__(self, answer: AnswerService) -> None:
+    def __init__(self, answer: AnswerDispatcher) -> None:
         super().__init__()
         self._answer = answer
 

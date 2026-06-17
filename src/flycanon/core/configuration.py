@@ -68,6 +68,7 @@ from flycanon.core.services.ingestion import (
 from flycanon.core.services.ingestion.chunker import build_default_chunker
 from flycanon.core.services.ingestion.loaders import default_registry
 from flycanon.core.services.query import AnswerService, SearchService
+from flycanon.core.services.query.answer_dispatcher import AnswerDispatcher
 from flycanon.core.services.query.rlm.client import AnthropicClient
 from flycanon.core.services.query.rlm.corpus import CanonCorpusBuilder
 from flycanon.core.services.query.rlm_answer_service import RLMAnswerService
@@ -424,6 +425,21 @@ class CanonCoreConfiguration:
         return RLMAnswerService(
             corpus_builder=canon_corpus_builder,
             client=anthropic_client,
+            settings=settings,
+        )
+
+    @bean
+    def answer_dispatcher(
+        self,
+        answer_service: AnswerService,
+        rlm_answer_service: RLMAnswerService,
+        settings: CanonSettings,
+    ) -> AnswerDispatcher:
+        # Routes the non-streaming answer path to RLM (default) or the
+        # legacy RAG ``answer_service`` per ``FLYCANON_ANSWER_MODE``.
+        return AnswerDispatcher(
+            rag=answer_service,
+            rlm=rlm_answer_service,
             settings=settings,
         )
 
