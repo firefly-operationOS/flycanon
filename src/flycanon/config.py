@@ -265,7 +265,7 @@ class CanonSettings(BaseSettings):
     # lowercase; any value other than ``rag`` falls back to ``rlm``.
     answer_mode: str = Field(
         default="rlm",
-        description="Answer engine for the non-streaming query path: ``rlm`` (default) or ``rag`` (deprecated).",
+        description="Answer engine for the non-streaming query path: ``rlm`` (default) or ``rag``.",
     )
     rlm_root_model: str = Field(
         default="anthropic:claude-sonnet-4-6",
