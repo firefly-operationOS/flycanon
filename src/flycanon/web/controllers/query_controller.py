@@ -27,11 +27,14 @@ Two surfaces, one retrieval engine:
 
 from __future__ import annotations
 
+from pydantic import BaseModel
 from pyfly.container import rest_controller
 from pyfly.cqrs import DefaultQueryBus
 from pyfly.web import Body, Valid, post_mapping, request_mapping
 from starlette.requests import Request
+from starlette.responses import JSONResponse, Response
 
+from flycanon.core.services.query.answer_dispatcher import AnswerDispatcher
 from flycanon.core.services.query.handlers import (
     AnswerKnowledgeQuery,
     SearchKnowledgeQuery,
@@ -43,6 +46,7 @@ from flycanon.interfaces.dtos.query import (
     SearchResponse,
 )
 from flycanon.web.conventions import TenantContext, tenant_context_from_request
+from flycanon.web.conventions.headers import DEPRECATION_RAG_MESSAGE, HEADER_DEPRECATION
 
 
 @rest_controller
@@ -50,8 +54,12 @@ from flycanon.web.conventions import TenantContext, tenant_context_from_request
 class QueryController:
     """Hybrid search + grounded RAG answering."""
 
-    def __init__(self, queries: DefaultQueryBus) -> None:
+    def __init__(self, queries: DefaultQueryBus, answer_dispatcher: AnswerDispatcher) -> None:
         self._queries = queries
+        # Read-only: the answer routes through the query bus, but the
+        # dispatcher tells us the active mode so the RAG deprecation can
+        # be surfaced as a response header.
+        self._dispatcher = answer_dispatcher
 
     @post_mapping("/search")
     async def search(
@@ -107,7 +115,7 @@ class QueryController:
         self,
         http_request: Request,
         request: Valid[Body[AnswerRequest]],
-    ) -> AnswerResponse:
+    ) -> AnswerResponse | Response:
         """Grounded RAG answer with explicit citations.
 
         Pipeline:
@@ -155,10 +163,17 @@ class QueryController:
         * you're prototyping a chatbot or a copilot integration.
         """
         ctx: TenantContext = tenant_context_from_request(http_request)
-        return await self._queries.query(
+        response = await self._queries.query(
             AnswerKnowledgeQuery(
                 request=request,
                 tenant_id=ctx.tenant_id,
                 workspace_id=ctx.workspace_id,
             )
         )
+        # RAG is deprecated: signal it via a response header. RLM (the
+        # default) returns the DTO untouched. The body is identical either
+        # way -- the header is the only added signal.
+        if not self._dispatcher.is_rag:
+            return response
+        body = response.model_dump(mode="json") if isinstance(response, BaseModel) else response
+        return JSONResponse(body, headers={HEADER_DEPRECATION: DEPRECATION_RAG_MESSAGE})
