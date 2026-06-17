@@ -111,6 +111,71 @@ FLYCANON_QUERY_EXPANSION_ENABLED=false
 FLYCANON_QUERY_EXPANSION_N=3
 
 # ----------------------------------------------------------------------------
+# Answer mode (RLM default / RAG deprecated)
+# ----------------------------------------------------------------------------
+# Selects the engine for the non-streaming /api/v1/query answer path:
+#   rlm  -- (default) the Recursive Language Model engine. A CodeAct REPL
+#           that reasons over whole documents instead of retrieving chunks.
+#   rag  -- the legacy hybrid-retrieval answerer. Opt-in and DEPRECATED:
+#           the dispatcher logs a deprecation warning on every rag-mode
+#           answer and rag will be removed in a future release.
+# Any value other than ``rag`` is normalised to ``rlm``.
+FLYCANON_ANSWER_MODE=rlm
+
+# RLM models, all in ``<provider>:<model>`` form (the ``anthropic:``
+# prefix is stripped before the id is sent to the Anthropic Messages API,
+# which reads ANTHROPIC_API_KEY from the environment -- see below).
+#   root   -- orchestrator model that drives the CodeAct REPL loop.
+#   sub    -- model for flat recursive sub-calls made from REPL code.
+#   answer -- model for the final single-shot answer synthesis.
+FLYCANON_RLM_ROOT_MODEL=anthropic:claude-sonnet-4-6
+FLYCANON_RLM_SUB_MODEL=anthropic:claude-sonnet-4-6
+FLYCANON_RLM_ANSWER_MODEL=anthropic:claude-sonnet-4-6
+
+# RLM budgets.
+#   max_iters  -- max orchestrator turns before the loop gives up and asks
+#                 for a plain-text answer from the transcript.
+#   sub_budget -- total recursive sub-call budget across one root session.
+#   max_depth  -- how deep rlm(...) may nest before degrading to a flat llm.
+FLYCANON_RLM_MAX_ITERS=8
+FLYCANON_RLM_SUB_BUDGET=12
+FLYCANON_RLM_MAX_DEPTH=1
+
+# ----------------------------------------------------------------------------
+# Object store (RLM document originals)
+# ----------------------------------------------------------------------------
+# RLM reasons over the ORIGINAL document bytes, not the chunk index, so the
+# intake must persist each original to the object store and record its key
+# on the source row. Sources without a stored original are skipped by the
+# RLM corpus builder. Keep FLYCANON_STORE_ORIGINALS=true for RLM to work.
+#
+# Backend: ``localfs`` (default; writes files under a root dir for
+# dev / test) or ``s3`` (requires ``uv sync --extra s3``). AWS credentials
+# for the s3 backend come from the standard environment
+# (AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY / profiles / instance roles),
+# not from these settings.
+FLYCANON_OBJECT_STORE_BACKEND=localfs
+
+# --- localfs backend (FLYCANON_OBJECT_STORE_BACKEND=localfs) ----------------
+FLYCANON_OBJECT_STORE_LOCALFS_ROOT=./var/objects
+
+# --- s3 backend (FLYCANON_OBJECT_STORE_BACKEND=s3) --------------------------
+# Requires ``uv sync --extra s3``.
+FLYCANON_OBJECT_STORE_S3_BUCKET=
+# Key prefix prepended to every object key within the bucket.
+FLYCANON_OBJECT_STORE_S3_PREFIX=
+# Custom endpoint for MinIO / S3-compatible services; empty = default AWS.
+FLYCANON_OBJECT_STORE_S3_ENDPOINT_URL=
+# Region; empty defers to boto3's standard region resolution.
+FLYCANON_OBJECT_STORE_S3_REGION=
+
+# Whether intake persists the original uploaded bytes to the object store
+# and records the key on the source row. On by default so RLM has a
+# whole-document corpus to reason over; a write failure is best-effort and
+# never fails the ingest.
+FLYCANON_STORE_ORIGINALS=true
+
+# ----------------------------------------------------------------------------
 # PII guardrail
 # ----------------------------------------------------------------------------
 # The intake pipeline scans every payload (and re-ingest payload) for
@@ -209,7 +274,9 @@ FLYCANON_OCR_LANG=eng+spa
 
 # ----------------------------------------------------------------------------
 # Provider credentials -- pulled from the standard env vars. Set only
-# the ones you need.
+# the ones you need. ANTHROPIC_API_KEY is REQUIRED at runtime in the
+# default answer mode: the RLM engine calls the Anthropic Messages API
+# directly for all three RLM models above.
 # ----------------------------------------------------------------------------
 # OPENAI_API_KEY=
 # ANTHROPIC_API_KEY=

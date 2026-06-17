@@ -5,8 +5,8 @@
 ### **Operational Knowledge Repository**
 
 The living source of truth for canonical operational knowledge.
-Universal ingestion, hybrid retrieval, retrieval-augmented answering
-with citations — all behind a single HTTP service.
+Universal ingestion, hybrid retrieval, and code-driven RLM answering
+over whole documents with citations — all behind a single HTTP service.
 
 [![Python 3.13](https://img.shields.io/badge/python-3.13-blue.svg)](https://www.python.org)
 [![Java 25](https://img.shields.io/badge/java%20sdk-25%20%2B%20Spring%20Boot%203.5.9-orange)](sdks/java/README.md)
@@ -146,6 +146,44 @@ Fusion over the two channels.
 
 ---
 
+## Answer modes (RLM default / RAG deprecated)
+
+The non-streaming answer path (`POST /api/v1/query`, `POST
+/api/v1/query:stream`, and the agent-tier equivalents) is served by one
+of two engines, selected by `FLYCANON_ANSWER_MODE`:
+
+| Mode | Engine | Status |
+| ---- | ------ | ------ |
+| **`rlm`** (default) | **Recursive Language Model** — a code-driven [CodeAct](docs/architecture.md) REPL. A root orchestrator writes Python against the in-scope document corpus (handed to it as a `docs` variable), makes recursive sub-calls on slices, and finishes by citing the filings / pages it used. It reasons over **whole documents** rather than retrieving chunks. | Default. |
+| `rag` | Legacy **hybrid retrieval** answerer (BM25 + dense + RRF, then a grounded LLM answer over the top hits). | **Deprecated**, opt-in. |
+
+RAG is opt-in and **deprecated**: when `FLYCANON_ANSWER_MODE=rag` the
+dispatcher emits a server-side deprecation warning log on every
+RAG-mode answer (`FLYCANON_ANSWER_MODE=rag is deprecated and will be
+removed in a future release; RLM is the default`), and the answer
+endpoints return a client-facing `X-Flycanon-Deprecation` response
+header carrying the same message. The legacy RAG answer path is slated
+for removal in a future release — `/search` (raw hybrid retrieval, no
+LLM) is unaffected and stays.
+
+**Operational requirements for RLM (the default):**
+
+- **Originals in the object store.** RLM reasons over the original
+  document bytes, so intake must persist each original
+  (`FLYCANON_STORE_ORIGINALS=true`, the default) to the configured
+  object store (`FLYCANON_OBJECT_STORE_BACKEND` — `localfs` for
+  dev/test, `s3` for production). Sources without a stored original
+  (no `object_store_key`) are skipped by the RLM corpus builder.
+- **`ANTHROPIC_API_KEY`** must be set at runtime: the RLM engine calls
+  the Anthropic Messages API directly for all three RLM models
+  (`FLYCANON_RLM_ROOT_MODEL` / `FLYCANON_RLM_SUB_MODEL` /
+  `FLYCANON_RLM_ANSWER_MODEL`, all default `anthropic:claude-sonnet-4-6`).
+
+See [docs/deployment.md](docs/deployment.md#answer-mode-rlm-default--rag-deprecated)
+for every RLM / object-store env var and its default.
+
+---
+
 ## Public surface
 
 | Concern                                                          | Endpoint(s)                                |
@@ -158,7 +196,7 @@ Fusion over the two channels.
 | Versioned diff between two knowledge versions                    | `GET /api/v1/knowledge/{id}/diff`          |
 | Knowledge graph (typed edges + JSON / Mermaid view)              | `/api/v1/knowledge/{id}/relations`, `GET /api/v1/knowledge:graph` |
 | Hybrid retrieval (+ optional rerank + query expansion)           | `POST /api/v1/search`                      |
-| RAG answer with citations (+ token streaming)                    | `POST /api/v1/query`, `POST /api/v1/query:stream` |
+| Answer with citations (RLM by default, RAG opt-in; + streaming)  | `POST /api/v1/query`, `POST /api/v1/query:stream` |
 | Multi-turn conversations + suggested follow-ups                  | `/api/v1/conversations/...`                |
 | Candidate proposals (pre-canonical)                              | `/api/v1/candidates/...`                   |
 | Provenance graph                                                 | `GET /api/v1/knowledge/{id}/provenance`    |
