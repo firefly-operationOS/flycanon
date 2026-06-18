@@ -25,6 +25,7 @@ from __future__ import annotations
 import pytest
 
 from flycanon.config import get_settings
+from flycanon.core.services.ingestion.loaders import default_registry
 from flycanon.core.services.query import rlm_answer_service as svc_mod
 from flycanon.core.services.query.rlm.corpus import CanonDocStore, SourceMeta
 from flycanon.core.services.query.rlm_answer_service import RLMAnswerService
@@ -57,8 +58,19 @@ class FakeSession:
         return self._answer, self._citations
 
 
+class _NullObjectStore:
+    """ObjectStore that is never fetched: these tests pre-seed the page memo."""
+
+    def get_sync(self, key: str) -> bytes:  # pragma: no cover -- never reached
+        raise AssertionError(f"unexpected fetch for {key!r}")
+
+
 def _docs(pages: dict[str, list[str]], sources: dict[str, SourceMeta]) -> CanonDocStore:
-    return CanonDocStore(pages, sources)
+    # The store is lazy, but these answer-service tests work from fixed page
+    # lists, so pre-seed the per-key memo and let the object store stay unused.
+    store = CanonDocStore(sources, object_store=_NullObjectStore(), registry=default_registry())
+    store._pages.update(pages)
+    return store
 
 
 def _service(corpus_builder) -> RLMAnswerService:
@@ -95,7 +107,11 @@ async def test_empty_corpus_returns_no_answer():
 @pytest.mark.asyncio
 async def test_normal_run_maps_citations(monkeypatch):
     pages = {"acme-10k": ["page zero text", "revenue was 5M", "page two"]}
-    sources = {"acme-10k": SourceMeta(source_id="src-1", filename="acme.pdf", title="ACME 10-K", kind="pdf")}
+    sources = {
+        "acme-10k": SourceMeta(
+            source_id="src-1", filename="acme.pdf", title="ACME 10-K", kind="pdf", object_store_key="k1"
+        )
+    }
     builder = FakeCorpusBuilder(_docs(pages, sources))
     service = _service(builder)
 
@@ -125,7 +141,11 @@ async def test_normal_run_maps_citations(monkeypatch):
 @pytest.mark.asyncio
 async def test_unresolved_citation_is_dropped(monkeypatch):
     pages = {"acme-10k": ["a", "b"]}
-    sources = {"acme-10k": SourceMeta(source_id="src-1", filename=None, title=None, kind="pdf")}
+    sources = {
+        "acme-10k": SourceMeta(
+            source_id="src-1", filename=None, title=None, kind="pdf", object_store_key="k1"
+        )
+    }
     builder = FakeCorpusBuilder(_docs(pages, sources))
     service = _service(builder)
 
@@ -148,7 +168,11 @@ async def test_unresolved_citation_is_dropped(monkeypatch):
 @pytest.mark.asyncio
 async def test_no_answer_when_not_found_and_no_citations(monkeypatch):
     pages = {"acme-10k": ["a"]}
-    sources = {"acme-10k": SourceMeta(source_id="src-1", filename=None, title=None, kind="pdf")}
+    sources = {
+        "acme-10k": SourceMeta(
+            source_id="src-1", filename=None, title=None, kind="pdf", object_store_key="k1"
+        )
+    }
     builder = FakeCorpusBuilder(_docs(pages, sources))
     service = _service(builder)
 
@@ -164,7 +188,11 @@ async def test_no_answer_when_not_found_and_no_citations(monkeypatch):
 @pytest.mark.asyncio
 async def test_prior_turns_prepended_to_question(monkeypatch):
     pages = {"acme-10k": ["a"]}
-    sources = {"acme-10k": SourceMeta(source_id="src-1", filename=None, title=None, kind="pdf")}
+    sources = {
+        "acme-10k": SourceMeta(
+            source_id="src-1", filename=None, title=None, kind="pdf", object_store_key="k1"
+        )
+    }
     builder = FakeCorpusBuilder(_docs(pages, sources))
     service = _service(builder)
 
@@ -187,7 +215,11 @@ async def test_prior_turns_prepended_to_question(monkeypatch):
 @pytest.mark.asyncio
 async def test_no_prior_turns_leaves_question_untouched(monkeypatch):
     pages = {"acme-10k": ["a"]}
-    sources = {"acme-10k": SourceMeta(source_id="src-1", filename=None, title=None, kind="pdf")}
+    sources = {
+        "acme-10k": SourceMeta(
+            source_id="src-1", filename=None, title=None, kind="pdf", object_store_key="k1"
+        )
+    }
     builder = FakeCorpusBuilder(_docs(pages, sources))
     service = _service(builder)
 
