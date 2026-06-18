@@ -35,6 +35,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+from collections.abc import Callable
 
 from flycanon.config import CanonSettings
 from flycanon.core.services.billing.cost_service import CostService
@@ -86,6 +87,7 @@ class RLMAnswerService:
         prior_turns: list[tuple[str, str]] | None = None,
         tenant_id: str | None = None,
         workspace_id: str | None = None,
+        on_turn: Callable[[int, list[str]], None] | None = None,
     ) -> AnswerResponse:
         """Single-turn (or conversational) RLM answer.
 
@@ -95,6 +97,12 @@ class RLMAnswerService:
         an optional ``[(user_text, assistant_text), ...]`` conversational
         context. The reported ``model`` is the RLM orchestrator model
         (``settings.rlm_root_model``), which drives the CodeAct loop.
+
+        ``on_turn`` is an optional per-REPL-turn progress hook the
+        streaming controllers pass to surface live progress; it stays
+        ``None`` on the non-streaming path. It fires from the engine's
+        worker thread, so the caller is responsible for marshalling work
+        back onto its event loop.
         """
         start = time.perf_counter()
         model_id = self._settings.rlm_root_model
@@ -123,6 +131,7 @@ class RLMAnswerService:
             max_depth=self._settings.rlm_max_depth,
             max_iters=self._settings.rlm_max_iters,
             sub_budget=self._settings.rlm_sub_budget,
+            on_turn=on_turn,
         )
         question = _question_with_history(request.question, prior_turns)
         answer_text, cites, engine_no_answer = await asyncio.to_thread(session.run, question, docs)
