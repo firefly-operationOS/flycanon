@@ -58,6 +58,45 @@ class FakeSession:
         return self._answer, self._citations
 
 
+class FakeClient:
+    """Stands in for the shared :class:`AnthropicClient`.
+
+    ``fork()`` returns self (the session is faked, so no real calls happen)
+    and ``token_totals()`` returns a scripted usage dict, mirroring the real
+    per-query token snapshot the service records.
+    """
+
+    def __init__(self, usage: dict | None = None):
+        self._usage = usage or {
+            "input_tokens": 1200,
+            "output_tokens": 340,
+            "estimated_cost_usd": 0.0072,
+            "by_model": {"claude-sonnet-4-6": {"input": 1200, "output": 340}},
+        }
+        self.forks = 0
+
+    def fork(self) -> FakeClient:
+        self.forks += 1
+        return self
+
+    def token_totals(self) -> dict:
+        return self._usage
+
+
+class FakeCostService:
+    """Records every :meth:`record` call; can be made to raise on demand."""
+
+    def __init__(self, raises: bool = False):
+        self.calls: list[dict] = []
+        self._raises = raises
+
+    async def record(self, **kwargs):
+        self.calls.append(kwargs)
+        if self._raises:
+            raise RuntimeError("billing backend down")
+        return None
+
+
 class _NullObjectStore:
     """ObjectStore that is never fetched: these tests pre-seed the page memo."""
 
@@ -73,13 +112,19 @@ def _docs(pages: dict[str, list[str]], sources: dict[str, SourceMeta]) -> CanonD
     return store
 
 
-def _service(corpus_builder) -> RLMAnswerService:
-    # The client is never touched (the session is faked), so a sentinel
-    # object is enough -- no real AnthropicClient, no API key.
+def _service(
+    corpus_builder,
+    *,
+    client: FakeClient | None = None,
+    cost_service: FakeCostService | None = None,
+) -> RLMAnswerService:
+    # The real client is never networked (the session is faked); a FakeClient
+    # supplies the fork()/token_totals() surface the service now relies on.
     return RLMAnswerService(
         corpus_builder=corpus_builder,
-        client=object(),
+        client=client or FakeClient(),
         settings=get_settings(),
+        cost_service=cost_service or FakeCostService(),
     )
 
 
@@ -90,7 +135,8 @@ def _request(**kw) -> AnswerRequest:
 @pytest.mark.asyncio
 async def test_empty_corpus_returns_no_answer():
     builder = FakeCorpusBuilder(_docs({}, {}))
-    service = _service(builder)
+    cost = FakeCostService()
+    service = _service(builder, cost_service=cost)
 
     resp = await service.answer(_request(), tenant_id="t1", workspace_id="w1")
 
@@ -102,6 +148,8 @@ async def test_empty_corpus_returns_no_answer():
     # scope is threaded into the corpus build
     assert builder.calls[0]["tenant_id"] == "t1"
     assert builder.calls[0]["workspace_id"] == "w1"
+    # no LLM call happened on the empty-corpus path -> no cost event
+    assert cost.calls == []
 
 
 @pytest.mark.asyncio
@@ -254,3 +302,104 @@ async def test_no_prior_turns_leaves_question_untouched(monkeypatch):
     await service.answer(_request(question="Plain question?"), tenant_id="t1", workspace_id="w1")
 
     assert FakeSession.last_question == "Plain question?"
+
+
+@pytest.mark.asyncio
+async def test_normal_run_records_one_cost_event(monkeypatch):
+    pages = {"acme-10k": ["a", "revenue was 5M"]}
+    sources = {
+        "acme-10k": SourceMeta(
+            source_id="src-1",
+            filename="acme.pdf",
+            title="ACME 10-K",
+            kind="pdf",
+            object_store_key="k1",
+            content_sha256="sha-1",
+        )
+    }
+    builder = FakeCorpusBuilder(_docs(pages, sources))
+    client = FakeClient(
+        {
+            "input_tokens": 1200,
+            "output_tokens": 340,
+            "estimated_cost_usd": 0.0072,
+            "by_model": {"claude-sonnet-4-6": {"input": 1200, "output": 340}},
+        }
+    )
+    cost = FakeCostService()
+    service = _service(builder, client=client, cost_service=cost)
+
+    fake = FakeSession("Revenue was 5M.", [{"filing": "acme-10k", "page": 1, "content": "x"}])
+    monkeypatch.setattr(svc_mod, "RLMSession", lambda *a, **k: fake)
+
+    resp = await service.answer(_request(), tenant_id="t1", workspace_id="w1")
+
+    # the shared client is forked once per query
+    assert client.forks == 1
+    # exactly one cost event with the right attribution
+    assert len(cost.calls) == 1
+    call = cost.calls[0]
+    assert call["agent_name"] == "flycanon-rlm-answerer"
+    assert call["model"] == get_settings().rlm_root_model
+    assert call["input_tokens"] == 1200
+    assert call["output_tokens"] == 340
+    assert call["cost_usd"] == 0.0072
+    assert call["tenant_id"] == "t1"
+    assert call["workspace_id"] == "w1"
+    assert call["latency_ms"] == resp.elapsed_ms
+
+
+@pytest.mark.asyncio
+async def test_missing_scope_defaults_to_default(monkeypatch):
+    pages = {"acme-10k": ["a"]}
+    sources = {
+        "acme-10k": SourceMeta(
+            source_id="src-1",
+            filename=None,
+            title=None,
+            kind="pdf",
+            object_store_key="k1",
+            content_sha256="sha-1",
+        )
+    }
+    builder = FakeCorpusBuilder(_docs(pages, sources))
+    cost = FakeCostService()
+    service = _service(builder, cost_service=cost)
+
+    fake = FakeSession("ok", [])
+    monkeypatch.setattr(svc_mod, "RLMSession", lambda *a, **k: fake)
+
+    await service.answer(_request())
+
+    assert cost.calls[0]["tenant_id"] == "default"
+    assert cost.calls[0]["workspace_id"] == "default"
+
+
+@pytest.mark.asyncio
+async def test_cost_record_failure_does_not_break_answer(monkeypatch):
+    pages = {"acme-10k": ["a", "b"]}
+    sources = {
+        "acme-10k": SourceMeta(
+            source_id="src-1",
+            filename="acme.pdf",
+            title="ACME 10-K",
+            kind="pdf",
+            object_store_key="k1",
+            content_sha256="sha-1",
+        )
+    }
+    builder = FakeCorpusBuilder(_docs(pages, sources))
+    cost = FakeCostService(raises=True)
+    service = _service(builder, cost_service=cost)
+
+    fake = FakeSession("Revenue was 5M.", [{"filing": "acme-10k", "page": 1, "content": "x"}])
+    monkeypatch.setattr(svc_mod, "RLMSession", lambda *a, **k: fake)
+
+    # a billing-write failure must not propagate
+    resp = await service.answer(_request(), tenant_id="t1", workspace_id="w1")
+
+    assert resp.answer == "Revenue was 5M."
+    assert resp.no_answer is False
+    assert len(resp.citations) == 1
+    # the record() was attempted (and raised, swallowed best-effort)
+    assert len(cost.calls) == 1
