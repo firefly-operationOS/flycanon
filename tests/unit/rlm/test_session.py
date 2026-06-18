@@ -21,9 +21,9 @@ network, no API key.
 
 from __future__ import annotations
 
+from flycanon.core.services.query.rlm.safe_builtins import _SAFE_BUILTINS
 from flycanon.core.services.query.rlm.session import (
     _CITATION_CONTENT_CHARS,
-    _SAFE_BUILTINS,
     DocCorpus,
     RLMSession,
     _best_page,
