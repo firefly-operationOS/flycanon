@@ -15,21 +15,27 @@
 """Unit tests for the RLM corpus builder + store.
 
 The ObjectStore is an in-memory dict; the source repository is a stub returning
-canned rows. No network, no real PDF (the loader/text path covers extraction;
-the PDF branch is exercised by monkeypatching ``extract_pdf_pages``).
+canned rows. No network, no real PDF: the PDF branch is exercised through a fake
+loader registered in the registry (the real PdfLoader would need a PDF + OCR),
+so the per-page regrouping is asserted without touching PyMuPDF or Tesseract.
 """
 
 from __future__ import annotations
 
 import pytest
 
-from flycanon.core.services.query.rlm import corpus as corpus_mod
+from flycanon.core.services.ingestion.loaders import (
+    LoadedDocument,
+    LoaderRegistry,
+    Section,
+)
 from flycanon.core.services.query.rlm.corpus import (
     CanonCorpusBuilder,
     Filters,
     SourceMeta,
 )
 from flycanon.core.services.query.rlm.session import DocCorpus
+from flycanon.interfaces.enums import SourceKind
 from flycanon.models.entities.source import SourceRow
 
 
@@ -129,13 +135,37 @@ class FakepageCache:
         self.store[key] = list(pages)
 
 
-def _builder(rows, blobs, *, item_to_sources=None, cache=None):
+class FakeLoader:
+    """Returns a canned :class:`LoadedDocument`, ignoring the input bytes.
+
+    Stands in for a real loader (e.g. ``PdfLoader``) so the PDF branch is
+    exercised through the registry without a real PDF / OCR. Registered for
+    a given :class:`SourceKind`; ``load`` always yields the same document.
+    """
+
+    def __init__(self, kind: SourceKind, document: LoadedDocument):
+        self.kind = kind
+        self._document = document
+
+    def load(self, content, *, filename=None) -> LoadedDocument:
+        return self._document
+
+
+def _registry_with(loader: FakeLoader) -> LoaderRegistry:
+    """A registry whose only mapping is ``loader`` (no fallback)."""
+    registry = LoaderRegistry()
+    registry.register(loader)
+    return registry
+
+
+def _builder(rows, blobs, *, item_to_sources=None, cache=None, registry=None):
     """A CanonCorpusBuilder over fake repositories + an in-memory store."""
     return CanonCorpusBuilder(
         source_repository=FakeSourceRepository(rows),
         knowledge_repository=FakeKnowledgeRepository(item_to_sources),
         object_store=FakeObjectStore(blobs),
         cache=cache,
+        registry=registry,
     )
 
 
@@ -346,23 +376,104 @@ async def test_resolve_returns_source_pointer():
 
 
 @pytest.mark.asyncio
-async def test_pdf_branch_uses_extract_helper(monkeypatch):
-    monkeypatch.setattr(
-        corpus_mod,
-        "extract_pdf_pages",
-        lambda data: ["page one text", "page two text"],
+async def test_pdf_branch_groups_loader_sections_per_page():
+    """A 2-page PDF loader doc -> 2 page strings, in page order, via the loader."""
+    document = LoadedDocument(
+        sections=[
+            Section(path=["Page 1"], body="page one text", order=0, page=1),
+            Section(path=["Page 2"], body="page two text", order=1, page=2),
+        ],
+        page_count=2,
     )
+    registry = _registry_with(FakeLoader(SourceKind.pdf, document))
     rows = [_row("s1", kind="pdf", filename="filing.pdf", object_store_key="k1")]
-    builder = CanonCorpusBuilder(
-        source_repository=FakeSourceRepository(rows),
-        knowledge_repository=FakeKnowledgeRepository(),
-        object_store=FakeObjectStore({"k1": b"%PDF-fake"}),
-    )
+    builder = _builder(rows, {"k1": b"%PDF-fake"}, registry=registry)
     store = await builder.build(tenant_id="t1", workspace_id="w1")
+
     assert store.keys() == ["filing"]
     assert store.npages("filing") == 2
     assert store.pages("filing") == ["page one text", "page two text"]
     assert store["filing"] == "page one text\npage two text"
+
+
+@pytest.mark.asyncio
+async def test_pdf_branch_joins_multiple_sections_on_same_page():
+    """Several sections sharing a 1-based page collapse into one page string."""
+    document = LoadedDocument(
+        sections=[
+            Section(path=["Page 1"], body="first half", order=0, page=1),
+            Section(path=["Page 1"], body="second half", order=1, page=1),
+            Section(path=["Page 2"], body="page two", order=2, page=2),
+        ],
+        page_count=2,
+    )
+    registry = _registry_with(FakeLoader(SourceKind.pdf, document))
+    rows = [_row("s1", kind="pdf", filename="filing.pdf", object_store_key="k1")]
+    builder = _builder(rows, {"k1": b"%PDF-fake"}, registry=registry)
+    store = await builder.build(tenant_id="t1", workspace_id="w1")
+
+    assert store.pages("filing") == ["first half\nsecond half", "page two"]
+
+
+@pytest.mark.asyncio
+async def test_pdf_branch_skips_empty_pages():
+    """Sections with blank bodies are dropped; the page list stays the kept ones."""
+    document = LoadedDocument(
+        sections=[
+            Section(path=["Page 1"], body="kept", order=0, page=1),
+            Section(path=["Page 2"], body="   ", order=1, page=2),
+            Section(path=["Page 3"], body="also kept", order=2, page=3),
+        ],
+        page_count=3,
+    )
+    registry = _registry_with(FakeLoader(SourceKind.pdf, document))
+    rows = [_row("s1", kind="pdf", filename="filing.pdf", object_store_key="k1")]
+    builder = _builder(rows, {"k1": b"%PDF-fake"}, registry=registry)
+    store = await builder.build(tenant_id="t1", workspace_id="w1")
+
+    assert store.pages("filing") == ["kept", "also kept"]
+
+
+@pytest.mark.asyncio
+async def test_non_paginated_sections_stay_one_page_each():
+    """Sections with ``page is None`` (docx/html) keep the per-section split."""
+    document = LoadedDocument(
+        sections=[
+            Section(path=["Intro"], body="intro body", order=0, page=None),
+            Section(path=["Scope"], body="scope body", order=1, page=None),
+        ],
+    )
+    registry = _registry_with(FakeLoader(SourceKind.docx, document))
+    rows = [_row("s1", kind="docx", filename="memo.docx", object_store_key="k1")]
+    builder = _builder(rows, {"k1": b"fake"}, registry=registry)
+    store = await builder.build(tenant_id="t1", workspace_id="w1")
+
+    assert store.pages("memo") == ["intro body", "scope body"]
+
+
+@pytest.mark.asyncio
+async def test_no_sections_falls_back_to_raw_text():
+    """An empty section list falls back to ``raw_text`` as a single page."""
+    document = LoadedDocument(sections=[], raw_text="the whole thing")
+    registry = _registry_with(FakeLoader(SourceKind.docx, document))
+    rows = [_row("s1", kind="docx", filename="memo.docx", object_store_key="k1")]
+    builder = _builder(rows, {"k1": b"fake"}, registry=registry)
+    store = await builder.build(tenant_id="t1", workspace_id="w1")
+
+    assert store.pages("memo") == ["the whole thing"]
+
+
+@pytest.mark.asyncio
+async def test_source_with_no_extractable_text_is_skipped():
+    """No sections and no raw_text -> an empty page list (skipped entirely)."""
+    document = LoadedDocument(sections=[], raw_text=None)
+    registry = _registry_with(FakeLoader(SourceKind.pdf, document))
+    rows = [_row("s1", kind="pdf", filename="scanned.pdf", object_store_key="k1")]
+    builder = _builder(rows, {"k1": b"%PDF-fake"}, registry=registry)
+    store = await builder.build(tenant_id="t1", workspace_id="w1")
+
+    assert store.pages("scanned") == []
+    assert store.npages("scanned") == 0
 
 
 @pytest.mark.asyncio
