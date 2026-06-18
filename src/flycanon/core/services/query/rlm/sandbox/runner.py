@@ -88,6 +88,23 @@ class _Channel:
         return _proto.decode(self._rx.read)
 
 
+def _result_value(channel: _Channel, fn: str) -> object:
+    """Send-then-receive is done by the caller; here we read one result frame.
+
+    The parent answers every rpc with a ``result`` frame. If the parent's
+    handler raised, the frame carries an ``error`` string instead of a
+    ``value``; we re-raise it as a :class:`RuntimeError` *inside* exec so model
+    code sees a normal, catchable exception (and the block stays alive). Any
+    other op is a protocol violation surfaced the same way.
+    """
+    reply = channel.recv()
+    if reply.get("op") != "result":
+        raise RuntimeError(f"unexpected reply to rpc {fn}: {reply.get('op')!r}")
+    if "error" in reply:
+        raise RuntimeError(f"{fn} failed: {reply['error']}")
+    return reply.get("value")
+
+
 class _DocsProxy:
     """The ``docs`` stub: every access becomes a docs_* RPC to the parent.
 
@@ -101,12 +118,7 @@ class _DocsProxy:
 
     def _rpc(self, fn: str, *args):
         self._channel.send({"op": "rpc", "fn": fn, "args": list(args)})
-        reply = self._channel.recv()
-        # The parent only ever answers an rpc with a result frame; anything
-        # else is a protocol violation we surface as an error inside exec.
-        if reply.get("op") != "result":
-            raise RuntimeError(f"unexpected reply to rpc {fn}: {reply.get('op')!r}")
-        return reply.get("value")
+        return _result_value(self._channel, fn)
 
     def keys(self):
         return self._rpc("docs_keys")
@@ -133,17 +145,11 @@ def _make_namespace(channel: _Channel, text: str | None) -> dict:
 
     def llm(prompt):
         channel.send({"op": "rpc", "fn": "llm", "args": [str(prompt)]})
-        reply = channel.recv()
-        if reply.get("op") != "result":
-            raise RuntimeError(f"unexpected reply to rpc llm: {reply.get('op')!r}")
-        return reply.get("value")
+        return _result_value(channel, "llm")
 
     def rlm(question, txt):
         channel.send({"op": "rpc", "fn": "rlm", "args": [str(question), str(txt)]})
-        reply = channel.recv()
-        if reply.get("op") != "result":
-            raise RuntimeError(f"unexpected reply to rpc rlm: {reply.get('op')!r}")
-        return reply.get("value")
+        return _result_value(channel, "rlm")
 
     def final(answer, filings=None, pages=None, found=True):
         channel.send(

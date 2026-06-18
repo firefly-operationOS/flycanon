@@ -255,10 +255,20 @@ class SandboxExecutor:
         if not all(isinstance(a, str) for a in args):
             self._kill()
             return _error(f"non-string args for rpc {fn}: {args!r}")
-        value = self._handlers[fn](*args)
+        # The handler closes over real infra (doc store / model client) and may
+        # raise (missing key, transient API error). Per this method's contract
+        # such a failure is reported back *into* the child as an exception value
+        # -- it must NOT propagate here and orphan the live child.
         try:
-            self._send({"op": "result", "value": value})
-        except (OSError, _proto.ProtocolError) as exc:
+            reply = {"op": "result", "value": self._handlers[fn](*args)}
+        except Exception as exc:  # noqa: BLE001 - relay any handler failure to the child
+            reply = {"op": "result", "error": f"{type(exc).__name__}: {exc}"}
+        try:
+            self._send(reply)
+        except (OSError, _proto.ProtocolError, TypeError) as exc:
+            # OSError: socket write failed. ProtocolError: frame too large.
+            # TypeError: a handler returned a non-JSON-serialisable value, so
+            # json.dumps in encode() raised -- still our problem, not a crash.
             self._kill()
             return _error(f"sandbox result write failed: {exc}")
         return None

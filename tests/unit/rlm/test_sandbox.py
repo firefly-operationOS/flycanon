@@ -195,6 +195,49 @@ def test_text_mode_exposes_text_not_docs(make_executor):
     assert "NameError" in missing.error
 
 
+def test_raising_handler_is_reported_into_child_and_keeps_it_alive(make_executor):
+    def boom(fid: str) -> str:
+        raise KeyError(fid)
+
+    ex = make_executor(docs_getitem=boom)
+    # the handler raises -> the child sees a normal exception, surfaced as an
+    # error frame (NOT a parent crash, NOT an orphaned child)
+    result = ex.run_block("print(docs['MISSING'])")
+    assert result.kind == "error"
+    assert "docs_getitem failed" in result.error
+    assert "KeyError" in result.error
+    # the child is still alive: a follow-up block runs in the same namespace
+    assert ex._proc is not None
+    again = ex.run_block("print('still here')")
+    assert again.kind == "stdout"
+    assert "still here" in again.stdout
+
+
+def test_handler_caught_inside_child_keeps_block_alive(make_executor):
+    def boom(fid: str) -> str:
+        raise KeyError(fid)
+
+    ex = make_executor(docs_getitem=boom)
+    # model code can catch the relayed failure and carry on within the block.
+    # Exception classes are not in the safe builtins, so use a bare except.
+    result = ex.run_block("try:\n    docs['X']\nexcept:\n    print('caught')")
+    assert result.kind == "stdout"
+    assert "caught" in result.stdout
+
+
+def test_nonserializable_handler_value_does_not_crash_parent(make_executor):
+    def weird() -> object:
+        return object()  # not JSON-serialisable
+
+    ex = make_executor(docs_keys=weird)
+    result = ex.run_block("print(docs.keys())")
+    # the non-JSON value makes the parent's result-encode raise TypeError; the
+    # parent must report an error and kill the child, never propagate the crash
+    assert result.kind == "error"
+    assert "result write failed" in result.error
+    assert ex._proc is None
+
+
 # ---------------------------------------------------------------------------
 # error / security properties
 # ---------------------------------------------------------------------------
