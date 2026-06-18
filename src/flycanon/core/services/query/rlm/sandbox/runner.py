@@ -111,16 +111,16 @@ class _DocsProxy:
     def keys(self):
         return self._rpc("docs_keys")
 
-    def __getitem__(self, key: str) -> str:
+    def __getitem__(self, key: str):
         return self._rpc("docs_getitem", key)
 
-    def pages(self, key: str) -> list:
+    def pages(self, key: str):
         return self._rpc("docs_pages", key)
 
-    def npages(self, key: str) -> int:
+    def npages(self, key: str):
         return self._rpc("docs_npages", key)
 
-    def __contains__(self, key: object) -> bool:
+    def __contains__(self, key: object):
         return self._rpc("docs_contains", key)
 
 
@@ -131,14 +131,14 @@ def _make_namespace(channel: _Channel, text: str | None) -> dict:
     (root mode) or ``text`` (nested ``rlm`` mode).
     """
 
-    def llm(prompt) -> str:
+    def llm(prompt):
         channel.send({"op": "rpc", "fn": "llm", "args": [str(prompt)]})
         reply = channel.recv()
         if reply.get("op") != "result":
             raise RuntimeError(f"unexpected reply to rpc llm: {reply.get('op')!r}")
         return reply.get("value")
 
-    def rlm(question, txt) -> str:
+    def rlm(question, txt):
         channel.send({"op": "rpc", "fn": "rlm", "args": [str(question), str(txt)]})
         reply = channel.recv()
         if reply.get("op") != "result":
