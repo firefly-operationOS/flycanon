@@ -293,6 +293,27 @@ class CanonSettings(BaseSettings):
     # prompt is sent as a plain string (no cache breakpoint).
     rlm_prompt_cache: bool = Field(default=True)
 
+    # -- Corpus page cache ----------------------------------------------
+    # Shared cache layered over the lazy RLM corpus store: an in-scope
+    # filing's original is fetched from the object store + PyMuPDF-
+    # extracted at most once per process (in-memory LRU) and once per
+    # fleet (shared Redis). Keyed by the source's ``content_sha256`` so a
+    # re-ingested source (new bytes -> new sha) misses the stale entry
+    # automatically. Backend selection mirrors
+    # :func:`flycanon.core.configuration._use_redis`: ``auto`` (the
+    # default) uses Redis when ``redis_url`` is set, in-memory otherwise;
+    # ``redis`` / ``memory`` force one or the other. The Redis client is
+    # synchronous (read from the RLM engine's worker thread).
+    corpus_cache_backend: str = Field(
+        default="auto",
+        description="Corpus page-cache backend: ``auto`` | ``redis`` | ``memory``.",
+    )
+    # Per-entry TTL (seconds) for both backends.
+    corpus_cache_ttl_s: int = Field(default=3600, ge=0)
+    # LRU cap for the in-memory backend (ignored by the Redis backend,
+    # which relies on native ``EX`` expiry).
+    corpus_cache_max_entries: int = Field(default=512, ge=1)
+
     # -- Object store ---------------------------------------------------
     # Where the original document bytes an intake submitted are persisted
     # so RLM can later replay them. The port lives in
