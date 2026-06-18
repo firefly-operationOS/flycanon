@@ -19,8 +19,8 @@ Two surfaces complementary to the blocking ``/api/v1/query``:
 * ``POST /api/v1/query/stream`` -- SSE stream routed through the
   :class:`AnswerDispatcher` so it honours ``FLYCANON_ANSWER_MODE``.
   In RLM mode (the default) there is no pre-retrieval step: the
-  stream emits a single ``status`` frame (``reasoning``) then the
-  terminal ``final`` frame once the engine returns. In the legacy
+  stream emits a ``status`` (``reasoning``) frame per REPL turn then
+  the terminal ``final`` frame once the engine returns. In the legacy
   RAG mode the retrieval hits arrive first as ``hit`` frames so the
   UI can render citation chips before the answer is ready, then the
   same ``final`` frame lands. The answer body is a single ``final``
@@ -35,6 +35,7 @@ Two surfaces complementary to the blocking ``/api/v1/query``:
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import time
@@ -91,8 +92,9 @@ class QueryStreamController:
 
         Frames (RLM mode, the default):
 
-        * ``event: status`` -- a single ``reasoning`` frame; RLM has
-          no pre-retrieval step so there are no ``hit`` frames.
+        * ``event: status`` -- one ``reasoning`` frame per REPL turn
+          (carrying the turn number + the latest document accessed);
+          RLM has no pre-retrieval step so there are no ``hit`` frames.
         * ``event: final`` -- the same terminal frame shape.
 
         Scope is fixed to the (tenant, workspace) carried by the
@@ -128,24 +130,54 @@ class QueryStreamController:
                     for hit in retrieval.hits:
                         dto = _hit_dto(hit)
                         yield _sse_frame("hit", dto.model_dump(mode="json"))
-                else:
-                    # RLM (default): no pre-retrieval step. Emit a single
-                    # status frame so the UI can show progress while the
-                    # engine reasons over the whole-document corpus.
-                    yield _sse_frame(
-                        "status",
-                        {"stage": "reasoning", "message": "Reasoning over documents with RLM…"},
-                    )
 
-                # Answer in one shot via the dispatcher (RLM or RAG).
-                # Per-token streaming is a follow-up once the agentic
-                # framework's streaming surface lands; in the meantime
-                # callers can still render the answer body when it arrives.
-                response = await self._dispatcher.answer(
-                    request,
-                    tenant_id=ctx.tenant_id,
-                    workspace_id=ctx.workspace_id,
-                )
+                    # RAG answers in one shot via the dispatcher; no
+                    # per-turn progress to stream.
+                    response = await self._dispatcher.answer(
+                        request,
+                        tenant_id=ctx.tenant_id,
+                        workspace_id=ctx.workspace_id,
+                    )
+                else:
+                    # RLM (default): no pre-retrieval step. Stream a live
+                    # ``status`` frame per REPL turn so the UI shows progress
+                    # while the engine reasons over the whole-document corpus.
+                    #
+                    # The engine fires ``on_turn`` from its worker thread (the
+                    # answer runs inside ``asyncio.to_thread``), so the callback
+                    # marshals each frame onto this event loop via
+                    # ``call_soon_threadsafe`` into a queue this generator drains.
+                    loop = asyncio.get_running_loop()
+                    queue: asyncio.Queue = asyncio.Queue()
+
+                    def on_turn(turn: int, accessed: list[str]) -> None:
+                        loop.call_soon_threadsafe(
+                            queue.put_nowait,
+                            ("status", {"stage": "reasoning", "turn": turn, "accessed": accessed[-1:]}),
+                        )
+
+                    task = asyncio.create_task(
+                        self._dispatcher.answer(
+                            request,
+                            tenant_id=ctx.tenant_id,
+                            workspace_id=ctx.workspace_id,
+                            on_turn=on_turn,
+                        )
+                    )
+                    # Drain queued status frames until the answer task finishes,
+                    # then flush any frames still queued. The short timeout keeps
+                    # the loop responsive without busy-spinning.
+                    while not task.done():
+                        try:
+                            event, data = await asyncio.wait_for(queue.get(), timeout=0.1)
+                        except TimeoutError:
+                            continue
+                        yield _sse_frame(event, data)
+                    while not queue.empty():
+                        event, data = queue.get_nowait()
+                        yield _sse_frame(event, data)
+
+                    response = await task
                 elapsed = int((time.perf_counter() - started) * 1000)
                 yield _sse_frame(
                     "final",
