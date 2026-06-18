@@ -24,10 +24,13 @@ returns its page list for precise citation, and every access is recorded so the
 caller can map what the model touched back to source rows for citations.
 
 The store is deliberately synchronous: the engine runs it inside
-``asyncio.to_thread``. The asynchronous work -- listing sources, fetching
-originals from the :class:`ObjectStore`, and extracting page text -- happens up
-front in :class:`CanonCorpusBuilder`, which materialises a :class:`CanonDocStore`
-the engine then drives without further I/O.
+``asyncio.to_thread``. :class:`CanonCorpusBuilder` does only the cheap async
+work up front -- listing the in-scope sources -- and hands the engine a
+:class:`CanonDocStore` that lazily fetches each filing's original (via the
+synchronous :meth:`ObjectStore.get_sync`, safe because it runs on the engine's
+worker thread) and extracts its pages on first access, memoising the result.
+The model typically reads only one or two of the in-scope filings, so the rest
+are never fetched.
 
 ``CanonDocStore`` structurally satisfies the ``DocCorpus`` protocol defined in
 ``session.py`` (it is not imported here -- the engine duck-types ``docs``).
@@ -65,6 +68,7 @@ class SourceMeta:
     filename: str | None
     title: str | None
     kind: str
+    object_store_key: str
 
 
 def extract_pdf_pages(data: bytes) -> list[str]:
@@ -78,49 +82,62 @@ def extract_pdf_pages(data: bytes) -> list[str]:
 
 
 class CanonDocStore:
-    """In-memory, synchronous whole-document corpus for the RLM REPL.
+    """Lazy, synchronous whole-document corpus for the RLM REPL.
 
-    Holds ``{readable_key: pages}`` plus a parallel ``{readable_key:
-    SourceMeta}`` map for citation mapping. ``accessed`` records, in order,
-    the keys the model touched via ``__getitem__`` / ``pages`` -- exactly
-    like the experiment's ``DocStore`` -- so the caller can credit the
-    sources the model actually read.
+    Holds a ``{readable_key: SourceMeta}`` map describing every in-scope
+    filing -- listed cheaply by the builder, with no original fetched yet --
+    plus the :class:`ObjectStore` and loader registry needed to materialise a
+    filing on demand. ``keys()`` / ``__contains__`` / ``__iter__`` / ``__len__``
+    / ``resolve()`` answer purely from that metadata (no I/O). ``pages(key)`` /
+    ``__getitem__`` / ``npages(key)`` fetch the original via
+    :meth:`ObjectStore.get_sync` and extract its pages on first access, then
+    memoise the page list in ``_pages`` so later reads of the same key do no
+    further I/O.
+
+    ``accessed`` records, in order, the keys the model touched via
+    ``__getitem__`` / ``pages`` -- exactly like the experiment's ``DocStore`` --
+    so the caller can credit the sources the model actually read.
     """
 
     def __init__(
         self,
-        pages: dict[str, list[str]],
         sources: dict[str, SourceMeta],
+        *,
+        object_store: ObjectStore,
+        registry: LoaderRegistry,
     ) -> None:
-        self._pages = pages
         self._sources = sources
+        self._object_store = object_store
+        self._registry = registry
+        self._pages: dict[str, list[str]] = {}  # memoised per-key page lists
         self.accessed: list[str] = []  # ordered, deduped: keys the model touched
 
-    # -- dict-like surface the model uses from REPL code --
+    # -- dict-like surface the model uses from REPL code (metadata only, no I/O) --
     def keys(self):
-        return list(self._pages.keys())
+        return list(self._sources.keys())
 
     def __iter__(self):
-        return iter(self._pages)
+        return iter(self._sources)
 
     def __contains__(self, key: object) -> bool:
-        return key in self._pages
+        return key in self._sources
 
     def __len__(self) -> int:
-        return len(self._pages)
+        return len(self._sources)
 
+    # -- lazy page access: fetches + extracts on first touch, memoised --
     def __getitem__(self, key: str) -> str:
-        """Full document text (pages joined). Records the access."""
+        """Full document text (pages joined). Fetches on first access; records it."""
         self._record(key)
-        return "\n".join(self._pages[key])
+        return "\n".join(self._load(key))
 
     def pages(self, key: str) -> list[str]:
-        """Per-page text for ``key`` (for citing specific pages). Records the access."""
+        """Per-page text for ``key`` (for citing specific pages). Fetches on first access; records it."""
         self._record(key)
-        return list(self._pages[key])
+        return list(self._load(key))
 
     def npages(self, key: str) -> int:
-        return len(self._pages[key])
+        return len(self._load(key))
 
     # -- citation mapping --
     def resolve(self, key: str) -> SourceMeta | None:
@@ -128,8 +145,19 @@ class CanonDocStore:
         return self._sources.get(key)
 
     # -- internals --
+    def _load(self, key: str) -> list[str]:
+        """Page list for ``key``, fetching + extracting on first access."""
+        cached = self._pages.get(key)
+        if cached is not None:
+            return cached
+        meta = self._sources[key]  # KeyError for an unknown key, like a dict
+        data = self._object_store.get_sync(meta.object_store_key)
+        pages = _pages_for(meta, data, self._registry)
+        self._pages[key] = pages
+        return pages
+
     def _record(self, key: str) -> None:
-        if key in self._pages and key not in self.accessed:
+        if key in self._sources and key not in self.accessed:
             self.accessed.append(key)
 
 
@@ -137,11 +165,12 @@ class CanonCorpusBuilder:
     """Builds a :class:`CanonDocStore` from the in-scope workspace sources.
 
     Lists the workspace's sources (applying the ``AnswerRequest`` filters with
-    the same AND / no-op semantics as the RAG retrieval path), fetches each
-    original from the :class:`ObjectStore`, and extracts page-structured text:
-    PyMuPDF per page for PDFs; the matching loader otherwise (one section per
-    page). Sources without an ``object_store_key`` have no stored original to
-    read and are skipped with a log line.
+    the same AND / no-op semantics as the RAG retrieval path) and collects only
+    metadata -- no original is fetched or extracted here. The returned store
+    fetches each filing's original from the :class:`ObjectStore` and extracts
+    its page-structured text lazily, on first access from the REPL. Sources
+    without an ``object_store_key`` have no stored original to read and are
+    skipped with a log line.
     """
 
     def __init__(
@@ -166,7 +195,6 @@ class CanonCorpusBuilder:
     ) -> CanonDocStore:
         rows = await self._list_in_scope(tenant_id, workspace_id, filters)
 
-        pages: dict[str, list[str]] = {}
         sources: dict[str, SourceMeta] = {}
         used_keys: set[str] = set()
         for row in rows:
@@ -177,20 +205,14 @@ class CanonCorpusBuilder:
                     row.filename,
                 )
                 continue
-            data = await self._object_store.get(row.object_store_key)
-            page_list = self._pages_for(row, data)
-            if not page_list:
-                logger.info(
-                    "rlm corpus skipping source with no extractable text source_id=%s filename=%s",
-                    row.id,
-                    row.filename,
-                )
-                continue
             key = self._readable_key(row, used_keys)
             used_keys.add(key)
-            pages[key] = page_list
             sources[key] = _source_meta(row)
-        return CanonDocStore(pages, sources)
+        return CanonDocStore(
+            sources,
+            object_store=self._object_store,
+            registry=self._registry,
+        )
 
     async def _list_in_scope(
         self,
@@ -239,28 +261,6 @@ class CanonCorpusBuilder:
             if not batch or offset >= total:
                 break
         return [row for row in rows if _matches(row, f, knowledge_source_ids)]
-
-    def _pages_for(self, row: SourceRow, data: bytes) -> list[str]:
-        """Page-structured text for a source's original bytes.
-
-        PDFs go through PyMuPDF per page (mirrors the experiment). Everything
-        else goes through the matching loader: each loader section becomes a
-        page, falling back to the loaded ``raw_text`` as a single page.
-        """
-        kind = _source_kind(row.kind)
-        if kind is SourceKind.pdf:
-            return [text for text in extract_pdf_pages(data) if text and text.strip()]
-
-        loader = self._registry.get(kind)
-        if loader is None:
-            return []
-        document = loader.load(data, filename=row.filename)
-        pages = [section.body for section in document.sections if section.body and section.body.strip()]
-        if pages:
-            return pages
-        if document.raw_text and document.raw_text.strip():
-            return [document.raw_text]
-        return []
 
     def _readable_key(self, row: SourceRow, used: set[str]) -> str:
         """A routing-friendly key from the filename stem (fallbacks: title, id).
@@ -321,6 +321,30 @@ def _matches(row: SourceRow, f: Filters, knowledge_source_ids: set[str] | None) 
     return True
 
 
+def _pages_for(meta: SourceMeta, data: bytes, registry: LoaderRegistry) -> list[str]:
+    """Page-structured text for a filing's original bytes.
+
+    PDFs go through PyMuPDF per page (mirrors the experiment). Everything else
+    goes through the matching loader: each loader section becomes a page,
+    falling back to the loaded ``raw_text`` as a single page. An unrecognised
+    or empty original yields an empty page list.
+    """
+    kind = _source_kind(meta.kind)
+    if kind is SourceKind.pdf:
+        return [text for text in extract_pdf_pages(data) if text and text.strip()]
+
+    loader = registry.get(kind)
+    if loader is None:
+        return []
+    document = loader.load(data, filename=meta.filename)
+    pages = [section.body for section in document.sections if section.body and section.body.strip()]
+    if pages:
+        return pages
+    if document.raw_text and document.raw_text.strip():
+        return [document.raw_text]
+    return []
+
+
 def _source_kind(kind: str) -> SourceKind:
     """Map a row's ``kind`` string to :class:`SourceKind`, defaulting to text."""
     try:
@@ -350,4 +374,5 @@ def _source_meta(row: SourceRow) -> SourceMeta:
         filename=row.filename,
         title=str(title) if title else None,
         kind=row.kind,
+        object_store_key=row.object_store_key or "",
     )

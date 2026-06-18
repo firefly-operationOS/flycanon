@@ -95,6 +95,18 @@ class S3ObjectStore(ObjectStore):
             raise
         return await asyncio.to_thread(resp["Body"].read)
 
+    def get_sync(self, key: str) -> bytes:
+        # Blocking read for callers already on a worker thread (the RLM REPL).
+        # boto3 is synchronous, so the client call is issued directly here.
+        full = self._full_key(key)
+        try:
+            resp = self._client.get_object(Bucket=self._bucket, Key=full)
+        except ClientError as exc:
+            if _is_not_found(exc):
+                raise FileNotFoundError(key) from exc
+            raise
+        return resp["Body"].read()
+
     async def delete(self, key: str) -> None:
         full = self._full_key(key)
         await asyncio.to_thread(self._client.delete_object, Bucket=self._bucket, Key=full)

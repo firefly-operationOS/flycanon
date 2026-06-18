@@ -34,15 +34,25 @@ from flycanon.models.entities.source import SourceRow
 
 
 class FakeObjectStore:
-    """In-memory ObjectStore: ``put`` seeds, ``get`` reads, no I/O."""
+    """In-memory ObjectStore: ``put`` seeds, ``get``/``get_sync`` read, no I/O.
+
+    ``get_sync`` records every key it fetches in ``sync_gets`` so tests can
+    assert the lazy store fetches exactly the originals the model touches --
+    and nothing during ``build()``.
+    """
 
     def __init__(self, blobs: dict[str, bytes]):
         self._blobs = blobs
+        self.sync_gets: list[str] = []
 
     async def put(self, key, data, content_type=None):
         self._blobs[key] = data
 
     async def get(self, key: str) -> bytes:
+        return self._blobs[key]
+
+    def get_sync(self, key: str) -> bytes:
+        self.sync_gets.append(key)
         return self._blobs[key]
 
     async def delete(self, key):
@@ -446,3 +456,42 @@ async def test_statuses_and_source_ids_both_must_match():
         filters=Filters(statuses=["published"], source_ids=["s2", "s3"]),
     )
     assert store.keys() == ["b"]
+
+
+@pytest.mark.asyncio
+async def test_build_fetches_nothing_and_access_fetches_lazily_once_per_key():
+    """build() does zero fetches; first access fetches; re-access is memoised."""
+    rows = [
+        _row("s1", filename="a.txt", object_store_key="k1"),
+        _row("s2", filename="b.txt", object_store_key="k2"),
+    ]
+    store_blobs = FakeObjectStore({"k1": b"alpha", "k2": b"beta"})
+    builder = CanonCorpusBuilder(
+        source_repository=FakeSourceRepository(rows),
+        knowledge_repository=FakeKnowledgeRepository(),
+        object_store=store_blobs,
+    )
+    store = await builder.build(tenant_id="t1", workspace_id="w1")
+
+    # build() listed both sources but fetched no originals.
+    assert store_blobs.sync_gets == []
+    assert store.keys() == ["a", "b"]
+
+    # Metadata-only surface never fetches.
+    assert "a" in store
+    assert len(store) == 2
+    assert list(iter(store)) == ["a", "b"]
+    assert store.resolve("a").source_id == "s1"
+    assert store_blobs.sync_gets == []
+
+    # Accessing two distinct keys triggers exactly two fetches.
+    assert store["a"] == "alpha"
+    assert store.pages("b") == ["beta"]
+    assert store_blobs.sync_gets == ["k1", "k2"]
+
+    # Re-accessing the same keys triggers no additional fetches (memoised).
+    assert store["a"] == "alpha"
+    assert store.pages("a") == ["alpha"]
+    assert store.npages("b") == 1
+    assert store["b"] == "beta"
+    assert store_blobs.sync_gets == ["k1", "k2"]

@@ -61,6 +61,10 @@ class LocalFsObjectStore(ObjectStore):
         path = self._path(key)
         return await asyncio.to_thread(self._read, path, key)
 
+    def get_sync(self, key: str) -> bytes:
+        # Blocking read for callers already on a worker thread (the RLM REPL).
+        return self._read(self._path(key), key)
+
     @staticmethod
     def _read(path: Path, key: str) -> bytes:
         if not path.is_file():

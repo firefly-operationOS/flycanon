@@ -48,6 +48,16 @@ class ObjectStore(ABC):
         """Return the bytes at ``key``; raise ``FileNotFoundError`` if absent."""
 
     @abstractmethod
+    def get_sync(self, key: str) -> bytes:
+        """Blocking variant of :meth:`get` for callers already on a worker thread.
+
+        The RLM REPL runs synchronously inside ``asyncio.to_thread``, so it
+        cannot await :meth:`get`; the lazy corpus fetches originals through this
+        method instead. Same key guards and ``FileNotFoundError`` contract as
+        :meth:`get`.
+        """
+
+    @abstractmethod
     async def delete(self, key: str) -> None:
         """Remove ``key``; a no-op if it does not exist."""
 
