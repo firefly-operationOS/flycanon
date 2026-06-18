@@ -2,6 +2,22 @@
 
 This compares flycanon's two answer modes on the FinanceBench benchmark: **RLM** (the default — a CodeAct REPL that reads whole filings and computes answers in code, no embeddings) versus the legacy **hybrid vector RAG** (BM25 + dense `pgvector`, fused with RRF). Two datasets are reported: **FinanceBench 50/50** (81 questions, 184 whole 10-K filings) and **FinanceBench full** (150 questions, 368 filings). The full multi-technique catalog (including PageIndex and every embedding/QE variant) lives in the experiments repo: `mgf_playground/flycanon_experiments/experiments/README.md`.
 
+## Summary — RLM vs best RAG
+
+Head-to-head: **RLM** (the default) versus the **best vector-RAG configuration** (`azure-large-exp-sonnet` — `text-embedding-3-large` 3072-d + query expansion, the top RAG row by Answer-Correctness on both datasets). Full per-technique breakdowns are in the sections below.
+
+| Metric | 50/50 — **RLM** | 50/50 — best RAG | full — **RLM** | full — best RAG |
+|---|---|---|---|---|
+| **Answer Correctness** (RAGAS) | **0.497** | 0.434 | **0.501** | 0.422 |
+| Answer Relevancy (RAGAS) | **0.775** | 0.674 | **0.781** | 0.686 |
+| Contains Answer (custom) | **0.774** | 0.703 | **0.811** | 0.689 |
+| Faithfulness (RAGAS) | 0.202 | 0.305 | 0.190 | 0.315 |
+| Ingest time | **none (lazy)** | ~1h 16m | **none (lazy)** | ~2h 36m |
+| Latency / question | 29 s | 22 s | 34 s | 21 s |
+| Est. cost / run | ~$14 | ~$5.0 | ~$25 | ~$6.5 |
+
+RLM leads on answer quality (Answer Correctness, Relevancy, Contains-Answer) on **both** datasets with **zero embedding ingest**; the best RAG config buys a slightly lower per-query latency and cost at the price of materially worse answers and a multi-hour embedding build. RAG's higher Faithfulness is the abstention/snapshot artifact explained below (the judge scores RLM against a short citation snippet, not the whole reasoned answer). *On the shipped subprocess-sandbox stack the 50/50 RLM run scored Answer-Correctness **0.510** with 0 sandbox failures.*
+
 ## Reading the table
 
 - **Answer Correctness / Answer Relevancy**, **Faithfulness**, **Context Recall / Context Precision** — the five RAGAS metrics (0–1, single pass, `claude-sonnet-4-6` judge, RAGAS embeddings `nomic-embed-text`).
