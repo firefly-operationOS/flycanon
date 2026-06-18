@@ -106,12 +106,36 @@ class FakeKnowledgeRepository:
         return resolved
 
 
-def _builder(rows, blobs, *, item_to_sources=None):
+class FakepageCache:
+    """In-memory page cache that counts gets/sets, keyed by content_sha256.
+
+    Mirrors the :class:`CorpusPageCache` protocol so the store wires it
+    in. ``gets`` / ``sets`` record the keys touched so a test can assert
+    a hit avoids ``object_store.get_sync`` and a miss populates the cache.
+    """
+
+    def __init__(self, seed: dict[str, list[str]] | None = None):
+        self.store: dict[str, list[str]] = dict(seed or {})
+        self.gets: list[str] = []
+        self.sets: list[str] = []
+
+    def get(self, key: str) -> list[str] | None:
+        self.gets.append(key)
+        cached = self.store.get(key)
+        return list(cached) if cached is not None else None
+
+    def set(self, key: str, pages: list[str]) -> None:
+        self.sets.append(key)
+        self.store[key] = list(pages)
+
+
+def _builder(rows, blobs, *, item_to_sources=None, cache=None):
     """A CanonCorpusBuilder over fake repositories + an in-memory store."""
     return CanonCorpusBuilder(
         source_repository=FakeSourceRepository(rows),
         knowledge_repository=FakeKnowledgeRepository(item_to_sources),
         object_store=FakeObjectStore(blobs),
+        cache=cache,
     )
 
 
@@ -123,6 +147,7 @@ def _row(
     object_store_key="k",
     status="ready",
     metadata_json=None,
+    content_sha256="sha",
 ):
     return SourceRow(
         id=source_id,
@@ -132,7 +157,7 @@ def _row(
         status=status,
         filename=filename,
         object_store_key=object_store_key,
-        content_sha256="sha",
+        content_sha256=content_sha256,
         metadata_json=metadata_json or {},
     )
 
@@ -495,3 +520,118 @@ async def test_build_fetches_nothing_and_access_fetches_lazily_once_per_key():
     assert store.npages("b") == 1
     assert store["b"] == "beta"
     assert store_blobs.sync_gets == ["k1", "k2"]
+
+
+@pytest.mark.asyncio
+async def test_cache_hit_avoids_object_store_fetch():
+    """A shared-cache HIT (by content_sha256) skips get_sync entirely."""
+    rows = [_row("s1", filename="a.txt", object_store_key="k1", content_sha256="sha-a")]
+    blobs = FakeObjectStore({"k1": b"alpha"})
+    cache = FakepageCache(seed={"sha-a": ["cached page"]})
+    builder = CanonCorpusBuilder(
+        source_repository=FakeSourceRepository(rows),
+        knowledge_repository=FakeKnowledgeRepository(),
+        object_store=blobs,
+        cache=cache,
+    )
+    store = await builder.build(tenant_id="t1", workspace_id="w1")
+
+    assert store.pages("a") == ["cached page"]
+    assert store["a"] == "cached page"
+    # The cache served the pages; the object store was never hit.
+    assert blobs.sync_gets == []
+    assert cache.gets == ["sha-a"]  # checked exactly once (then _pages memoises)
+    assert cache.sets == []  # a hit never repopulates
+
+
+@pytest.mark.asyncio
+async def test_cache_miss_populates_keyed_by_content_sha256():
+    """A miss fetches + extracts, then populates the cache under the sha."""
+    rows = [_row("s1", filename="a.txt", object_store_key="k1", content_sha256="sha-a")]
+    blobs = FakeObjectStore({"k1": b"alpha"})
+    cache = FakepageCache()
+    builder = CanonCorpusBuilder(
+        source_repository=FakeSourceRepository(rows),
+        knowledge_repository=FakeKnowledgeRepository(),
+        object_store=blobs,
+        cache=cache,
+    )
+    store = await builder.build(tenant_id="t1", workspace_id="w1")
+
+    assert store.pages("a") == ["alpha"]
+    assert blobs.sync_gets == ["k1"]  # miss -> exactly one fetch
+    assert cache.gets == ["sha-a"]
+    assert cache.sets == ["sha-a"]
+    assert cache.store["sha-a"] == ["alpha"]
+
+
+@pytest.mark.asyncio
+async def test_same_content_sha256_shares_cache_entry():
+    """Two sources with identical content_sha256 share the cached pages."""
+    rows = [
+        _row("s1", filename="a.txt", object_store_key="k1", content_sha256="same"),
+        _row("s2", filename="b.txt", object_store_key="k2", content_sha256="same"),
+    ]
+    blobs = FakeObjectStore({"k1": b"alpha", "k2": b"beta"})
+    cache = FakepageCache()
+    builder = CanonCorpusBuilder(
+        source_repository=FakeSourceRepository(rows),
+        knowledge_repository=FakeKnowledgeRepository(),
+        object_store=blobs,
+        cache=cache,
+    )
+    store = await builder.build(tenant_id="t1", workspace_id="w1")
+
+    # First key fetches + populates "same".
+    assert store.pages("a") == ["alpha"]
+    assert blobs.sync_gets == ["k1"]
+    # Second key shares the entry -> no second object-store fetch; it
+    # reads back the first key's pages, not its own bytes.
+    assert store.pages("b") == ["alpha"]
+    assert blobs.sync_gets == ["k1"]
+
+
+@pytest.mark.asyncio
+async def test_changed_content_sha256_is_a_cache_miss():
+    """A differing sha misses the seeded entry and fetches fresh bytes."""
+    rows = [_row("s1", filename="a.txt", object_store_key="k1", content_sha256="new-sha")]
+    blobs = FakeObjectStore({"k1": b"alpha"})
+    cache = FakepageCache(seed={"old-sha": ["stale page"]})
+    builder = CanonCorpusBuilder(
+        source_repository=FakeSourceRepository(rows),
+        knowledge_repository=FakeKnowledgeRepository(),
+        object_store=blobs,
+        cache=cache,
+    )
+    store = await builder.build(tenant_id="t1", workspace_id="w1")
+
+    assert store.pages("a") == ["alpha"]  # not the stale entry
+    assert blobs.sync_gets == ["k1"]
+    assert cache.sets == ["new-sha"]
+
+
+@pytest.mark.asyncio
+async def test_no_cache_falls_back_to_object_store():
+    """With no cache wired, the store behaves exactly as before (lazy fetch)."""
+    rows = [_row("s1", filename="a.txt", object_store_key="k1")]
+    blobs = FakeObjectStore({"k1": b"alpha"})
+    builder = CanonCorpusBuilder(
+        source_repository=FakeSourceRepository(rows),
+        knowledge_repository=FakeKnowledgeRepository(),
+        object_store=blobs,
+    )
+    store = await builder.build(tenant_id="t1", workspace_id="w1")
+    assert store.pages("a") == ["alpha"]
+    assert blobs.sync_gets == ["k1"]
+
+
+@pytest.mark.asyncio
+async def test_source_meta_carries_content_sha256():
+    rows = [_row("s1", filename="a.txt", object_store_key="k1", content_sha256="deadbeef")]
+    builder = CanonCorpusBuilder(
+        source_repository=FakeSourceRepository(rows),
+        knowledge_repository=FakeKnowledgeRepository(),
+        object_store=FakeObjectStore({"k1": b"a"}),
+    )
+    store = await builder.build(tenant_id="t1", workspace_id="w1")
+    assert store.resolve("a").content_sha256 == "deadbeef"
