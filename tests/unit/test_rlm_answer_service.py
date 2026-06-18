@@ -16,8 +16,8 @@
 
 No network / LLM: the corpus builder is a stub returning an in-memory
 :class:`CanonDocStore`, and the RLM session is monkeypatched to a fake
-that returns a scripted ``(answer, citations)`` without an Anthropic
-call. There is no ``ANTHROPIC_API_KEY``.
+that returns a scripted ``(answer, citations, no_answer)`` without an
+Anthropic call. There is no ``ANTHROPIC_API_KEY``.
 """
 
 from __future__ import annotations
@@ -49,13 +49,14 @@ class FakeSession:
 
     last_question: str | None = None
 
-    def __init__(self, answer: str, citations: list[dict]):
+    def __init__(self, answer: str, citations: list[dict], no_answer: bool = False):
         self._answer = answer
         self._citations = citations
+        self._no_answer = no_answer
 
     def run(self, question, docs):
         FakeSession.last_question = question
-        return self._answer, self._citations
+        return self._answer, self._citations, self._no_answer
 
 
 class FakeClient:
@@ -239,13 +240,66 @@ async def test_no_answer_when_not_found_and_no_citations(monkeypatch):
     builder = FakeCorpusBuilder(_docs(pages, sources))
     service = _service(builder)
 
-    fake = FakeSession("The documents do not contain this.", [])
+    # engine flag is the default False -> the text-marker fallback decides
+    fake = FakeSession("The documents do not contain this.", [], no_answer=False)
     monkeypatch.setattr(svc_mod, "RLMSession", lambda *a, **k: fake)
 
     resp = await service.answer(_request(), tenant_id="t1", workspace_id="w1")
 
     assert resp.no_answer is True
     assert resp.citations == []
+
+
+@pytest.mark.asyncio
+async def test_engine_no_answer_flag_surfaces_even_without_markers(monkeypatch):
+    pages = {"acme-10k": ["a"]}
+    sources = {
+        "acme-10k": SourceMeta(
+            source_id="src-1",
+            filename=None,
+            title=None,
+            kind="pdf",
+            object_store_key="k1",
+            content_sha256="sha-1",
+        )
+    }
+    builder = FakeCorpusBuilder(_docs(pages, sources))
+    service = _service(builder)
+
+    # answer text has none of the not-found markers, but the engine flagged it
+    fake = FakeSession("Unable to determine the figure.", [], no_answer=True)
+    monkeypatch.setattr(svc_mod, "RLMSession", lambda *a, **k: fake)
+
+    resp = await service.answer(_request(), tenant_id="t1", workspace_id="w1")
+
+    assert resp.no_answer is True
+    assert resp.citations == []
+
+
+@pytest.mark.asyncio
+async def test_engine_found_answer_is_not_no_answer(monkeypatch):
+    pages = {"acme-10k": ["a"]}
+    sources = {
+        "acme-10k": SourceMeta(
+            source_id="src-1",
+            filename=None,
+            title=None,
+            kind="pdf",
+            object_store_key="k1",
+            content_sha256="sha-1",
+        )
+    }
+    builder = FakeCorpusBuilder(_docs(pages, sources))
+    service = _service(builder)
+
+    # engine flag False and no marker in the text -> not a no-answer, even with
+    # no citations (a best-effort plain answer)
+    fake = FakeSession("The figure is 5M.", [], no_answer=False)
+    monkeypatch.setattr(svc_mod, "RLMSession", lambda *a, **k: fake)
+
+    resp = await service.answer(_request(), tenant_id="t1", workspace_id="w1")
+
+    assert resp.no_answer is False
 
 
 @pytest.mark.asyncio
