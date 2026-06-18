@@ -165,6 +165,9 @@ class _FailingObjectStore(ObjectStore):
     async def get(self, key: str) -> bytes:  # pragma: no cover - unused
         raise FileNotFoundError(key)
 
+    def get_sync(self, key: str) -> bytes:  # pragma: no cover - unused
+        raise FileNotFoundError(key)
+
     async def delete(self, key: str) -> None:  # pragma: no cover - unused
         return None
 
