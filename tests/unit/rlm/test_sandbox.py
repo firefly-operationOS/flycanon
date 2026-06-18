@@ -234,8 +234,9 @@ def test_nonserializable_handler_value_does_not_crash_parent(make_executor):
     ex = make_executor(docs_keys=weird)
     result = ex.run_block("print(docs.keys())")
     # the non-JSON value makes the parent's result-encode raise TypeError; the
-    # parent must report an error and kill the child, never propagate the crash
-    assert result.kind == "error"
+    # parent must report a terminal outcome and kill the child, never propagate
+    # the crash (the child is dead -> terminated, not a recoverable error).
+    assert result.kind == "terminated"
     assert "result write failed" in result.error
     assert ex._proc is None
 
@@ -271,7 +272,7 @@ def test_import_is_blocked(make_executor):
 def test_timeout_kills_child(make_executor):
     ex = make_executor(timeout=1.0)
     result = ex.run_block("while True:\n    pass")
-    assert result.kind == "error"
+    assert result.kind == "terminated"
     assert "timed out" in result.error
     # after a kill the executor must refuse further work cleanly
     assert ex._proc is None
@@ -452,7 +453,7 @@ def test_parent_rejects_unknown_op(monkeypatch):
     ex = _parent_with(_proto.encode({"op": "definitely-not-a-real-op"}))
     proc = ex._proc
     result = ex.run_block("noop")
-    assert result.kind == "error"
+    assert result.kind == "terminated"
     assert "unknown child op" in result.error
     assert proc.killed is True  # the child was killed on the bad frame
 
@@ -461,7 +462,7 @@ def test_parent_rejects_unknown_rpc_fn():
     ex = _parent_with(_proto.encode({"op": "rpc", "fn": "exfiltrate", "args": ["x"]}))
     proc = ex._proc
     result = ex.run_block("noop")
-    assert result.kind == "error"
+    assert result.kind == "terminated"
     assert "unknown rpc fn" in result.error
     assert proc.killed is True
 
@@ -469,14 +470,14 @@ def test_parent_rejects_unknown_rpc_fn():
 def test_parent_rejects_bad_rpc_arity():
     ex = _parent_with(_proto.encode({"op": "rpc", "fn": "docs_getitem", "args": ["a", "b"]}))
     result = ex.run_block("noop")
-    assert result.kind == "error"
+    assert result.kind == "terminated"
     assert "bad args" in result.error
 
 
 def test_parent_rejects_non_string_rpc_args():
     ex = _parent_with(_proto.encode({"op": "rpc", "fn": "docs_getitem", "args": [123]}))
     result = ex.run_block("noop")
-    assert result.kind == "error"
+    assert result.kind == "terminated"
     assert "non-string args" in result.error
 
 
@@ -486,7 +487,7 @@ def test_parent_rejects_malformed_frame():
     ex = _parent_with(bad)
     proc = ex._proc
     result = ex.run_block("noop")
-    assert result.kind == "error"
+    assert result.kind == "terminated"
     assert "malformed child frame" in result.error
     assert proc.killed is True
 
@@ -510,7 +511,7 @@ def test_parent_times_out_on_partial_frame_child():
     result = ex.run_block("noop")
     elapsed = time.monotonic() - start
 
-    assert result.kind == "error"
+    assert result.kind == "terminated"
     assert "timed out" in result.error
     assert proc.killed is True
     assert elapsed < 5.0  # bounded by the 0.5s timeout, not blocked forever
