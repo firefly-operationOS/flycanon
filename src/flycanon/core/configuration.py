@@ -55,6 +55,7 @@ from flycanon.core.services.auth.agent_token_service import (
     _RateLimiter,
 )
 from flycanon.core.services.auth.redis_rate_limiter import RedisRateLimiter
+from flycanon.core.services.billing.cost_service import CostService
 from flycanon.core.services.consolidation import (
     Consolidator,
 )
@@ -440,11 +441,13 @@ class CanonCoreConfiguration:
         canon_corpus_builder: CanonCorpusBuilder,
         anthropic_client: AnthropicClient,
         settings: CanonSettings,
+        cost_service: CostService,
     ) -> RLMAnswerService:
         return RLMAnswerService(
             corpus_builder=canon_corpus_builder,
             client=anthropic_client,
             settings=settings,
+            cost_service=cost_service,
         )
 
     @bean

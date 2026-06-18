@@ -37,6 +37,7 @@ import logging
 import time
 
 from flycanon.config import CanonSettings
+from flycanon.core.services.billing.cost_service import CostService
 from flycanon.core.services.query.rlm.client import AnthropicClient
 from flycanon.core.services.query.rlm.corpus import CanonCorpusBuilder, CanonDocStore, Filters
 from flycanon.core.services.query.rlm.session import RLMSession
@@ -70,10 +71,12 @@ class RLMAnswerService:
         corpus_builder: CanonCorpusBuilder,
         client: AnthropicClient,
         settings: CanonSettings,
+        cost_service: CostService,
     ) -> None:
         self._corpus_builder = corpus_builder
         self._client = client
         self._settings = settings
+        self._cost_service = cost_service
 
     async def answer(
         self,
@@ -110,8 +113,12 @@ class RLMAnswerService:
                 no_answer=True,
             )
 
+        # Fork the shared client so this query gets its own token tally
+        # (while reusing the connection pool); the singleton's counters
+        # would otherwise cross-contaminate cost between concurrent queries.
+        query_client = self._client.fork()
         session = RLMSession(
-            self._client,
+            query_client,
             max_depth=self._settings.rlm_max_depth,
             max_iters=self._settings.rlm_max_iters,
             sub_budget=self._settings.rlm_sub_budget,
@@ -123,6 +130,8 @@ class RLMAnswerService:
         no_answer = not citations and _looks_not_found(answer_text)
 
         elapsed_ms = int((time.perf_counter() - start) * 1000)
+        usage = query_client.token_totals()
+        await self._record_cost(usage, elapsed_ms, tenant_id, workspace_id)
         logger.info(
             "rlm answered question=%s docs=%d citations=%d elapsed_ms=%d",
             request.question[:80],
@@ -137,6 +146,32 @@ class RLMAnswerService:
             elapsed_ms=elapsed_ms,
             no_answer=no_answer,
         )
+
+    async def _record_cost(
+        self,
+        usage: dict,
+        elapsed_ms: int,
+        tenant_id: str | None,
+        workspace_id: str | None,
+    ) -> None:
+        """Best-effort cost record for one RLM answer query.
+
+        A billing-write failure must never fail the user's answer, so the
+        record call is wrapped and only logged on error.
+        """
+        try:
+            await self._cost_service.record(
+                agent_name="flycanon-rlm-answerer",
+                model=self._settings.rlm_root_model,
+                input_tokens=usage["input_tokens"],
+                output_tokens=usage["output_tokens"],
+                cost_usd=usage["estimated_cost_usd"],
+                tenant_id=tenant_id or "default",
+                workspace_id=workspace_id or "default",
+                latency_ms=elapsed_ms,
+            )
+        except Exception:  # noqa: BLE001 -- billing must not break the answer
+            logger.warning("failed to record RLM query cost", exc_info=True)
 
 
 def _filters_from_request(request: AnswerRequest) -> Filters:

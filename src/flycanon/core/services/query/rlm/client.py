@@ -77,6 +77,18 @@ class AnthropicClient:
         self._tokens: dict[str, dict[str, int]] = {}
         self._token_lock = threading.Lock()
 
+    def fork(self) -> AnthropicClient:
+        """Return a fresh client sharing the connection pool, fresh token state.
+
+        The DI bean is a singleton, so its ``_tokens`` accumulator is
+        process-global within the instance -- reusing it across concurrent
+        queries would cross-contaminate per-query cost. A fork gives each
+        query its own token tally while sharing the underlying
+        ``httpx.Client`` (safe for concurrent use), so the existing
+        connection pool is preserved.
+        """
+        return AnthropicClient(self._settings, http_client=self._http)
+
     def _system(self, system: str):
         """Build the ``system`` field, with a cache breakpoint when enabled.
 
