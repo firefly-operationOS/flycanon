@@ -22,6 +22,7 @@ network, no API key.
 from __future__ import annotations
 
 from flycanon.core.services.query.rlm.safe_builtins import _SAFE_BUILTINS
+from flycanon.core.services.query.rlm.sandbox.executor import BlockResult, SandboxExecutor
 from flycanon.core.services.query.rlm.session import (
     _CITATION_CONTENT_CHARS,
     DocCorpus,
@@ -469,6 +470,134 @@ def test_subprocess_mode_run_over_text_uses_text_mode():
     assert cites == []
     tool_result = client.chat_calls[1]["messages"][-1]["content"][0]
     assert "True" in tool_result["content"]
+
+
+class _DeadExecutor(SandboxExecutor):
+    """A sandbox stand-in whose child is already dead: every block terminates.
+
+    Used to prove the session degrades gracefully (no exception, no 'sandbox not
+    started') when the real child dies mid-query -- the executor returns a
+    ``terminated`` BlockResult and the loop falls through to the parent-side
+    plain-text fallback.
+    """
+
+    def __init__(self):
+        # inert handlers just to satisfy the base constructor; never called.
+        noop = lambda *_a: ""  # noqa: E731
+        super().__init__(
+            docs_keys=lambda: [],
+            docs_getitem=noop,
+            docs_pages=noop,
+            docs_npages=noop,
+            docs_contains=noop,
+            llm=noop,
+            rlm=noop,
+        )
+        self.closed = False
+
+    def start(self) -> None:  # no real child to spawn
+        pass
+
+    def run_block(self, code: str) -> BlockResult:
+        return BlockResult(kind="terminated", error="sandbox child exited unexpectedly")
+
+    def close(self) -> None:
+        self.closed = True
+
+
+def _assert_tool_uses_answered(messages):
+    """Assert the transcript honours the Messages API tool_use/tool_result
+    contract: every tool_use block in an assistant turn is answered by a
+    tool_result with the matching id in the *immediately following* user
+    message. A dangling tool_use is exactly what triggers the real API's
+    HTTP 400 'Each tool_use block must have a corresponding tool_result block
+    in the next message'.
+    """
+    for i, msg in enumerate(messages):
+        if msg["role"] != "assistant":
+            continue
+        content = msg["content"]
+        if not isinstance(content, list):
+            continue
+        tool_use_ids = [b["id"] for b in content if b.get("type") == "tool_use"]
+        if not tool_use_ids:
+            continue
+        assert i + 1 < len(messages), "tool_use turn has no following message"
+        nxt = messages[i + 1]
+        assert nxt["role"] == "user", "tool_use must be answered in the next user message"
+        nxt_content = nxt["content"]
+        # A plain-text user turn (str content) carries no tool_result at all, so
+        # every tool_use is dangling -- this is precisely the malformed shape the
+        # real API 400s on.
+        assert isinstance(nxt_content, list), (
+            f"tool_use turn followed by a non-tool_result message: {nxt_content!r}"
+        )
+        result_ids = {b["tool_use_id"] for b in nxt_content if b.get("type") == "tool_result"}
+        missing = [tid for tid in tool_use_ids if tid not in result_ids]
+        assert not missing, f"dangling tool_use(s) with no tool_result: {missing}"
+
+
+def test_subprocess_mode_terminated_degrades_to_plaintext_answer(monkeypatch):
+    # The child dies mid-query (executor returns a terminated result). The session
+    # must NOT raise and must NOT call run_block again on the dead executor: it
+    # falls through to the out-of-iters fallback, which asks the PARENT's client
+    # for a plain-text answer (works with a dead sandbox).
+    docs = FakeDocs({"A": ["some page"]})
+    dead = _DeadExecutor()
+    monkeypatch.setattr(RLMSession, "_build_executor", lambda self, d, t: dead)
+
+    client = FakeClient(
+        [
+            _tool_use("print('this block dies')"),  # turn 1 -> terminated -> break
+            _text("best-effort answer from the transcript"),  # the fallback turn
+        ]
+    )
+    session = RLMSession(client, sandbox_mode="subprocess", sandbox_timeout_s=15)
+    answer, cites, no_answer = session.run("q", docs)
+
+    assert answer == "best-effort answer from the transcript"
+    assert no_answer is False  # forced best-effort answer, not a structured no-answer
+    assert cites == []
+    # the fallback prompt was sent and only ONE block was attempted (no retry on
+    # the dead executor).
+    assert "state your final answer" in client.chat_calls[-1]["messages"][-1]["content"]
+    # the executor is still closed via the session's try/finally.
+    assert dead.closed is True
+    # the transcript handed to the fallback chat_raw must be API-valid: the
+    # assistant tool_use that ran on the dead sandbox is answered by a
+    # tool_result -- no dangling tool_use that the real API would 400 on.
+    _assert_tool_uses_answered(client.chat_calls[-1]["messages"])
+
+
+def _multi_tool_use(codes: list[str]) -> dict:
+    return {
+        "content": [
+            {"type": "tool_use", "id": f"t{i}", "input": {"code": code}} for i, code in enumerate(codes)
+        ]
+    }
+
+
+def test_subprocess_mode_terminated_multi_tool_all_blocks_answered(monkeypatch):
+    # The assistant emits TWO tool_use blocks in one turn; the first kills the
+    # sandbox. Both tool_use blocks (the dead one and the never-run sibling)
+    # must still be answered by a tool_result so the fallback transcript stays
+    # API-valid -- no dangling tool_use of either kind.
+    docs = FakeDocs({"A": ["some page"]})
+    dead = _DeadExecutor()
+    monkeypatch.setattr(RLMSession, "_build_executor", lambda self, d, t: dead)
+
+    client = FakeClient(
+        [
+            _multi_tool_use(["print('first dies')", "print('never runs')"]),
+            _text("best-effort answer"),
+        ]
+    )
+    session = RLMSession(client, sandbox_mode="subprocess", sandbox_timeout_s=15)
+    answer, _cites, no_answer = session.run("q", docs)
+
+    assert answer == "best-effort answer"
+    assert no_answer is False
+    _assert_tool_uses_answered(client.chat_calls[-1]["messages"])
 
 
 def test_inprocess_mode_default_matches_existing_behaviour():

@@ -295,6 +295,7 @@ class RLMSession:
         started :class:`SandboxExecutor`; ``_run_block`` dispatches on its type.
         """
         messages: list[dict[str, Any]] = [{"role": "user", "content": first_user}]
+        dead_sandbox = False
         for _ in range(self.max_iters):
             self.turns += 1
             if self.on_turn is not None:
@@ -312,14 +313,35 @@ class RLMSession:
                 # best-effort plain-text answer: not a structured no-answer.
                 return text.strip(), self._citations(None, None, docs, question), False
             results = []
-            for tu in tool_uses:
+            for idx, tu in enumerate(tool_uses):
                 stdout, fin = self._run_block(
                     str(tu.get("input", {}).get("code", "")), runner, docs, question
                 )
                 if fin is not None:
                     return fin.answer, fin.citations, fin.no_answer
-                # stdout is only None on the _Final path, which returned above.
-                assert stdout is not None
+                # stdout is None only on the _Final path (returned above) or when
+                # the sandbox child died: in that case stop running blocks -- the
+                # executor is dead and another run_block would just return
+                # TERMINATED again -- and fall through to the plain-text fallback
+                # below, which uses the PARENT's client and works with no child.
+                if stdout is None:
+                    dead_sandbox = True
+                    # The Messages API requires EVERY tool_use in the assistant
+                    # turn to be answered by a tool_result in the next user
+                    # message. The block that just died and any later blocks in
+                    # this same turn are still unanswered -- emit an error
+                    # tool_result for each so the transcript stays well-formed
+                    # for the fallback chat_raw below.
+                    for dangling in tool_uses[idx:]:
+                        results.append(
+                            {
+                                "type": "tool_result",
+                                "tool_use_id": dangling["id"],
+                                "content": "sandbox terminated: the REPL child exited.",
+                                "is_error": True,
+                            }
+                        )
+                    break
                 results.append(
                     {
                         "type": "tool_result",
@@ -327,7 +349,12 @@ class RLMSession:
                         "content": stdout[:_MAX_STDOUT],
                     }
                 )
+            # Append the tool_result turn even when the sandbox died -- with the
+            # error results above the transcript is API-valid -- then fall
+            # through to the plain-text fallback.
             messages.append({"role": "user", "content": results})
+            if dead_sandbox:
+                break
         # ran out of turns -> ask for a direct answer from the transcript
         messages.append({"role": "user", "content": "Stop now and state your final answer as plain text."})
         text = "".join(
@@ -346,6 +373,11 @@ class RLMSession:
         child and translate its :class:`BlockResult` into the same contract.
         Citations for a child ``final`` frame are built parent-side, since the
         child only ships raw filings/pages.
+
+        Returns ``(None, None)`` when the sandbox child is dead
+        (``terminated``): the caller stops the loop and degrades to a
+        parent-side answer instead of running another block on a dead executor.
+        ``(None, fin)`` signals a ``final``; ``(stdout, None)`` a live result.
         """
         if not isinstance(runner, SandboxExecutor):
             return self._exec(code, runner)
@@ -358,7 +390,12 @@ class RLMSession:
                 no_answer=not bool(payload.get("found", True)),
             )
             return None, fin
+        if result.kind == "terminated":
+            # The child is gone (resource limit / crash / kill / timeout). Signal
+            # the loop to stop; it falls through to the plain-text fallback.
+            return None, None
         if result.kind == "error":
+            # A normal child exception (child still alive): feed the traceback back.
             return (result.error or "") + "\n", None
         return (result.stdout or "(no output)"), None
 
