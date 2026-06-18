@@ -286,6 +286,12 @@ class CanonSettings(BaseSettings):
     rlm_sub_budget: int = Field(default=12, ge=0, le=128)
     # How deep ``rlm(...)`` may nest before it degrades to a flat ``llm``.
     rlm_max_depth: int = Field(default=1, ge=0, le=8)
+    # Mark the large, static RLM system prompt with Anthropic
+    # ``cache_control: ephemeral`` so it is cached server-side and reused
+    # across the many Messages calls one CodeAct session makes, cutting
+    # input-token cost and per-call latency. When ``False`` the system
+    # prompt is sent as a plain string (no cache breakpoint).
+    rlm_prompt_cache: bool = Field(default=True)
 
     # -- Object store ---------------------------------------------------
     # Where the original document bytes an intake submitted are persisted
