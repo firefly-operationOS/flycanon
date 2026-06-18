@@ -105,6 +105,8 @@ CLAUDE.md
 claude-*.md
 .cursor/
 .aider*
+# Superpowers design specs / implementation plans are local working notes.
+docs/superpowers/
 
 # --- Docker / compose runtime data -------------------------------------------
 .docker/
