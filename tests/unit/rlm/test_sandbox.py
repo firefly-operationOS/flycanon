@@ -29,6 +29,8 @@ import io
 import os
 import resource
 import socket
+import subprocess
+import sys
 import time
 
 import pytest
@@ -538,6 +540,34 @@ def test_parent_services_valid_rpc_then_returns_stdout():
     first_len = _proto.HEADER_LEN + int.from_bytes(rest[: _proto.HEADER_LEN], "big")
     second = _proto.decode(io.BytesIO(rest[first_len:]).read)
     assert second == {"op": "result", "value": ["A"]}
+
+
+def test_child_runner_stays_import_light():
+    """Importing the runner must not drag in httpx/config/agents/services.
+
+    The child is spawned with a scrubbed env and must hold no secrets and do no
+    network. Importing it through the query package previously pulled in
+    AnswerService/SearchService (-> CanonSettings, agents, pydantic_ai, httpx);
+    import it in a clean subprocess and assert none of that heavy stack loaded.
+    """
+    probe = (
+        "import sys, importlib;"
+        "importlib.import_module('flycanon.core.services.query.rlm.sandbox.runner');"
+        "heavy = [m for m in ("
+        "'httpx', 'pydantic_ai', 'flycanon.core.agents',"
+        "'flycanon.core.services.query.answer_service',"
+        "'flycanon.core.services.query.search_service',"
+        "'flycanon.core.services.retrieval'"
+        ") if m in sys.modules];"
+        "print(','.join(heavy))"
+    )
+    out = subprocess.run(
+        [sys.executable, "-c", probe],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert out.stdout.strip() == "", f"runner pulled in heavy modules: {out.stdout!r}"
 
 
 def test_blockresult_is_frozen():
