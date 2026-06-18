@@ -72,14 +72,18 @@ _GRACE_SECONDS = 2.0  # how long to wait for a child to exit before SIGKILL.
 class BlockResult:
     """The outcome of one :meth:`SandboxExecutor.run_block` call.
 
-    Exactly one of the three shapes is populated, distinguished by ``kind``:
+    Exactly one of the four shapes is populated, distinguished by ``kind``:
 
     * ``"stdout"`` -- the block ran to completion; ``stdout`` holds its
       captured (capped) output.
     * ``"final"`` -- the block called ``final(...)``; ``final`` holds
       ``{answer, filings, pages, found}``.
-    * ``"error"`` -- the block raised, timed out, or the child misbehaved;
-      ``error`` holds a human-readable message / traceback.
+    * ``"error"`` -- the block raised but the **child is still alive**; ``error``
+      holds the traceback to feed back so the model can react and continue.
+    * ``"terminated"`` -- the child is **dead** (resource limit, crash, kill,
+      timeout, broken pipe, or a prior block already killed it); ``error`` holds
+      a human-readable reason. The session must stop running blocks and degrade
+      to a parent-side answer rather than calling ``run_block`` again.
     """
 
     kind: str
@@ -98,6 +102,10 @@ def _final(payload: dict) -> BlockResult:
 
 def _error(message: str) -> BlockResult:
     return BlockResult(kind="error", error=message)
+
+
+def _terminated(reason: str) -> BlockResult:
+    return BlockResult(kind="terminated", error=reason)
 
 
 class SandboxExecutor:
@@ -171,45 +179,63 @@ class SandboxExecutor:
 
         Sends the ``exec`` command, then services child frames until a terminal
         one (``stdout`` / ``final`` / ``error``) arrives. ``rpc`` frames are
-        validated and dispatched to the injected handlers. A per-block
-        wall-clock timeout, a malformed frame, or an unknown op/fn kills the
-        child and yields an ``error`` result.
+        validated and dispatched to the injected handlers. An *inactivity*
+        timeout (silence from the child), a malformed frame, or an unknown
+        op/fn kills the child and yields a ``terminated`` result; a child that
+        raised an exception but stays alive yields an ``error`` result.
+
+        If the child is already gone (a prior block killed it, leaving
+        ``_proc``/``_parent_sock`` as ``None``), this returns ``terminated``
+        rather than raising -- the caller must never get an unhandled
+        ``RuntimeError`` from a dead sandbox.
         """
         if self._proc is None or self._parent_sock is None:
-            raise RuntimeError("sandbox not started")
+            return _terminated("sandbox not started")
         try:
             self._send({"op": "exec", "code": code})
         except OSError as exc:
             self._kill()
-            return _error(f"sandbox write failed: {exc}")
+            return _terminated(f"sandbox write failed: {exc}")
         return self._service_loop()
 
     def _service_loop(self) -> BlockResult:
         assert self._parent_sock is not None
+        # INACTIVITY timeout, not a total-block budget. The deadline measures
+        # silence from the child: it is (re)set here at block start, after every
+        # frame we receive, and after we finish servicing an rpc (right before we
+        # go back to waiting). A child that keeps emitting frames -- rpc requests
+        # whose llm()/rlm() sub-calls take many seconds, then stdout/final --
+        # never times out no matter how long the *whole* block runs; a child that
+        # goes silent for ``self._timeout`` seconds (hung/deadlocked/runaway) is
+        # still killed. RLIMIT_CPU in the child remains the pure-CPU backstop.
         deadline = time.monotonic() + self._timeout
         while True:
             remaining = deadline - time.monotonic()
             if remaining <= 0:
                 self._kill()
-                return _error(f"sandbox timed out after {self._timeout:.1f}s")
+                return _terminated(f"sandbox timed out after {self._timeout:.1f}s")
             ready, _, _ = select.select([self._parent_sock], [], [], remaining)
             if not ready:
                 self._kill()
-                return _error(f"sandbox timed out after {self._timeout:.1f}s")
+                return _terminated(f"sandbox timed out after {self._timeout:.1f}s")
             try:
                 frame = self._recv(deadline)
             except TimeoutError:
                 # A multi-chunk frame stalled mid-read: the child announced N
                 # bytes then dribbled or stopped. The per-recv deadline tripped,
-                # so enforce the wall-clock timeout instead of blocking forever.
+                # so enforce the inactivity timeout instead of blocking forever.
                 self._kill()
-                return _error(f"sandbox timed out after {self._timeout:.1f}s")
+                return _terminated(f"sandbox timed out after {self._timeout:.1f}s")
             except EOFError:
                 self._kill()
-                return _error("sandbox child exited unexpectedly")
+                return _terminated("sandbox child exited unexpectedly")
             except _proto.ProtocolError as exc:
                 self._kill()
-                return _error(f"malformed child frame: {exc}")
+                return _terminated(f"malformed child frame: {exc}")
+            # A frame arrived: the child is making progress. Reset the inactivity
+            # window so the time we now spend servicing this frame (e.g. a slow
+            # llm() RPC) does not count against the next silence budget.
+            deadline = time.monotonic() + self._timeout
 
             op = frame.get("op")
             if op == "stdout":
@@ -224,37 +250,43 @@ class SandboxExecutor:
                     }
                 )
             if op == "error":
+                # The child's exec raised but the child is STILL ALIVE: a normal
+                # code error. Feed the traceback back; the block stays recoverable.
                 return _error(str(frame.get("traceback", "")))
             if op == "rpc":
                 result = self._dispatch_rpc(frame)
                 if result is not None:  # a fatal validation failure already killed the child.
                     return result
+                # Serviced the rpc and sent the result; restart the inactivity
+                # window before waiting for the child's next frame, so the parent's
+                # service time (the llm()/rlm() call) is never charged to the child.
+                deadline = time.monotonic() + self._timeout
                 continue
             # Unknown op from the child: do not trust it, do not crash.
             self._kill()
-            return _error(f"unknown child op: {op!r}")
+            return _terminated(f"unknown child op: {op!r}")
 
     def _dispatch_rpc(self, frame: dict) -> BlockResult | None:
         """Validate and service one ``rpc`` frame; ``None`` means continue.
 
-        Returns an ``error`` :class:`BlockResult` (after killing the child) only
-        on a fatal protocol violation -- an unknown fn, a bad arg shape, or a
-        write failure. A handler that itself raises is reported back *into* the
-        child as a normal exception value so the model code can react, keeping
-        the block alive.
+        Returns a ``terminated`` :class:`BlockResult` (after killing the child)
+        only on a fatal protocol violation -- an unknown fn, a bad arg shape, or
+        a write failure -- since the child no longer exists. A handler that
+        itself raises is reported back *into* the child as a normal exception
+        value so the model code can react, keeping the block alive.
         """
         fn = frame.get("fn")
         args = frame.get("args")
         if not isinstance(fn, str) or fn not in _RPC_ARITY:
             self._kill()
-            return _error(f"unknown rpc fn: {fn!r}")
+            return _terminated(f"unknown rpc fn: {fn!r}")
         arity = _RPC_ARITY[fn]
         if not isinstance(args, list) or len(args) != arity:
             self._kill()
-            return _error(f"bad args for rpc {fn}: {args!r}")
+            return _terminated(f"bad args for rpc {fn}: {args!r}")
         if not all(isinstance(a, str) for a in args):
             self._kill()
-            return _error(f"non-string args for rpc {fn}: {args!r}")
+            return _terminated(f"non-string args for rpc {fn}: {args!r}")
         # The handler closes over real infra (doc store / model client) and may
         # raise (missing key, transient API error). Per this method's contract
         # such a failure is reported back *into* the child as an exception value
@@ -270,7 +302,7 @@ class SandboxExecutor:
             # TypeError: a handler returned a non-JSON-serialisable value, so
             # json.dumps in encode() raised -- still our problem, not a crash.
             self._kill()
-            return _error(f"sandbox result write failed: {exc}")
+            return _terminated(f"sandbox result write failed: {exc}")
         return None
 
     def close(self) -> None:
