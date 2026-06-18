@@ -73,8 +73,22 @@ class AnthropicClient:
         self._http = http_client or httpx.Client(timeout=180.0)
         self.root_model = _strip_provider(settings.rlm_root_model)
         self.sub_model = _strip_provider(settings.rlm_sub_model)
+        self._prompt_cache = settings.rlm_prompt_cache
         self._tokens: dict[str, dict[str, int]] = {}
         self._token_lock = threading.Lock()
+
+    def _system(self, system: str):
+        """Build the ``system`` field, with a cache breakpoint when enabled.
+
+        The RLM system prompt is large and identical across every Messages
+        call one session makes. Sending it as a single text block tagged with
+        ``cache_control: ephemeral`` lets Anthropic cache it server-side and
+        bill the repeats as cache reads. When prompt caching is disabled the
+        plain string is sent (current behaviour).
+        """
+        if self._prompt_cache:
+            return [{"type": "text", "text": system, "cache_control": {"type": "ephemeral"}}]
+        return system
 
     # -- token accounting ----------------------------------------------
     def _record_usage(self, model: str, usage: dict) -> None:
@@ -154,7 +168,7 @@ class AnthropicClient:
             "model": _strip_provider(model) if model else self.root_model,
             "max_tokens": max_tokens,
             "temperature": 0.0,
-            "system": system,
+            "system": self._system(system),
             "messages": messages,
             "tools": tools,
         }
@@ -175,5 +189,5 @@ class AnthropicClient:
             "messages": [{"role": "user", "content": prompt}],
         }
         if system:
-            body["system"] = system
+            body["system"] = self._system(system)
         return self._text(body)
