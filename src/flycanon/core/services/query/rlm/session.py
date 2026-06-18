@@ -42,7 +42,7 @@ import io
 import re
 import traceback
 from collections.abc import Callable
-from contextlib import redirect_stdout
+from contextlib import redirect_stdout, suppress
 from typing import Any, Protocol, runtime_checkable
 
 from flycanon.core.services.query.rlm.client import AnthropicClient
@@ -259,10 +259,8 @@ class RLMSession:
                 # ``docs`` is the corpus on the root path (carries ``.accessed``)
                 # and ``None`` on the nested-text path. A callback failure must
                 # never break the REPL.
-                try:
+                with suppress(Exception):  # progress hook must not break the loop
                     self.on_turn(self.turns, list(docs.accessed) if docs is not None else [])
-                except Exception:  # noqa: BLE001 -- progress hook must not break the loop
-                    pass
             resp = self.client.chat_raw(messages, system, _PY_TOOL)
             content = resp.get("content", [])
             messages.append({"role": "assistant", "content": content})
