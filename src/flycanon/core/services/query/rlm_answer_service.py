@@ -132,6 +132,8 @@ class RLMAnswerService:
             max_iters=self._settings.rlm_max_iters,
             sub_budget=self._settings.rlm_sub_budget,
             on_turn=on_turn,
+            sandbox_mode=self._settings.rlm_sandbox,
+            sandbox_timeout_s=self._settings.rlm_sandbox_timeout_s,
         )
         question = _question_with_history(request.question, prior_turns)
         answer_text, cites, engine_no_answer = await asyncio.to_thread(session.run, question, docs)
