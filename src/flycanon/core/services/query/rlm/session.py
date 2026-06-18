@@ -47,6 +47,7 @@ from typing import Any, Protocol, runtime_checkable
 
 from flycanon.core.services.query.rlm.client import AnthropicClient
 from flycanon.core.services.query.rlm.safe_builtins import _SAFE_BUILTINS
+from flycanon.core.services.query.rlm.sandbox.executor import BlockResult, SandboxExecutor
 
 
 @runtime_checkable
@@ -163,12 +164,19 @@ class RLMSession:
         max_iters: int = 8,
         sub_budget: int = 12,
         on_turn: Callable[[int, list[str]], None] | None = None,
+        sandbox_mode: str = "inprocess",
+        sandbox_timeout_s: int = 30,
     ):
         self.client = client
         self.depth, self.max_depth = depth, max_depth
         self.max_iters, self.sub_budget = max_iters, sub_budget
         self.sub_calls = 0
         self.turns = 0
+        # REPL execution mode. ``inprocess`` (default) runs each turn's code
+        # in the restricted ``exec`` namespace below; ``subprocess`` runs it
+        # in the scrubbed-env sandbox child, servicing docs/llm/rlm from here.
+        self.sandbox_mode = sandbox_mode
+        self.sandbox_timeout_s = sandbox_timeout_s
         # Optional per-turn progress hook. Fired from the (synchronous) REPL
         # worker thread after each orchestrator turn so a streaming caller can
         # surface live progress; ``None`` on the non-streaming path. A callback
@@ -192,6 +200,8 @@ class RLMSession:
             self.max_depth,
             max_iters=4,
             sub_budget=max(2, self.sub_budget - self.sub_calls),
+            sandbox_mode=self.sandbox_mode,
+            sandbox_timeout_s=self.sandbox_timeout_s,
         )
         ans, _cites, _no_answer = sub.run_over_text(question, str(text))
         return ans
@@ -205,7 +215,7 @@ class RLMSession:
             "rlm": self._rlm,
             "__builtins__": _SAFE_BUILTINS,
         }
-        return self._loop(SYSTEM, f"Question: {question}\n\nSolve it.", ns, docs, question)
+        return self._loop(SYSTEM, f"Question: {question}\n\nSolve it.", ns, docs, question, text=None)
 
     def run_over_text(self, question: str, text: str) -> tuple[str, list[dict], bool]:
         ns = {
@@ -216,7 +226,7 @@ class RLMSession:
             "__builtins__": _SAFE_BUILTINS,
         }
         return self._loop(
-            _NESTED_SYSTEM, f"Question: {question}\n\nSolve it from `text`.", ns, None, question
+            _NESTED_SYSTEM, f"Question: {question}\n\nSolve it from `text`.", ns, None, question, text=text
         )
 
     def _exec(self, code: str, ns: dict):
@@ -231,7 +241,33 @@ class RLMSession:
         except Exception:  # noqa: BLE001 - feed the traceback back to the model
             return buf.getvalue() + "\n" + traceback.format_exc(limit=3), None
 
-    def _loop(self, system: str, first_user: str, ns: dict, docs, question):
+    def _build_executor(self, docs, text) -> SandboxExecutor:
+        """Build the per-query sandbox child for ``subprocess`` mode.
+
+        The capability handlers close over *this* session's corpus and model
+        client, so the untrusted child reaches the real document store and LM
+        only through these validated RPCs. ``run`` passes a corpus (docs-mode);
+        ``run_over_text`` passes ``text`` and no corpus (text-mode -- the child
+        exposes ``text`` instead of ``docs``, so the docs handlers are never
+        called and only need to satisfy the constructor's signature).
+        """
+
+        def _no_docs(*_args):  # text-mode: the child has no ``docs`` to call these.
+            raise RuntimeError("docs are not available in text mode")
+
+        return SandboxExecutor(
+            docs_keys=(lambda: list(docs.keys())) if docs is not None else _no_docs,
+            docs_getitem=(lambda fid: docs[fid]) if docs is not None else _no_docs,
+            docs_pages=(lambda fid: docs.pages(fid)) if docs is not None else _no_docs,
+            docs_npages=(lambda fid: docs.npages(fid)) if docs is not None else _no_docs,
+            docs_contains=(lambda fid: fid in docs) if docs is not None else _no_docs,
+            llm=self._llm,
+            rlm=self._rlm,
+            timeout=float(self.sandbox_timeout_s),
+            text=text,
+        )
+
+    def _loop(self, system: str, first_user: str, ns: dict, docs, question, text):
         def final(answer, filings=None, pages=None, found=True):
             raise _Final(
                 str(answer),
@@ -241,6 +277,23 @@ class RLMSession:
 
         ns["final"] = final
 
+        if self.sandbox_mode == "subprocess":
+            executor = self._build_executor(docs, text)
+            executor.start()
+            try:
+                return self._run_loop(system, first_user, docs, question, executor)
+            finally:
+                # Always reap the child -- on a normal return, an exception, or
+                # an out-of-iters exit.
+                executor.close()
+        return self._run_loop(system, first_user, docs, question, ns)
+
+    def _run_loop(self, system, first_user, docs, question, runner):
+        """The shared CodeAct orchestration loop.
+
+        ``runner`` is either the in-process exec namespace (``dict``) or a
+        started :class:`SandboxExecutor`; ``_run_block`` dispatches on its type.
+        """
         messages: list[dict[str, Any]] = [{"role": "user", "content": first_user}]
         for _ in range(self.max_iters):
             self.turns += 1
@@ -260,7 +313,9 @@ class RLMSession:
                 return text.strip(), self._citations(None, None, docs, question), False
             results = []
             for tu in tool_uses:
-                stdout, fin = self._exec(str(tu.get("input", {}).get("code", "")), ns)
+                stdout, fin = self._run_block(
+                    str(tu.get("input", {}).get("code", "")), runner, docs, question
+                )
                 if fin is not None:
                     return fin.answer, fin.citations, fin.no_answer
                 # stdout is only None on the _Final path, which returned above.
@@ -282,6 +337,30 @@ class RLMSession:
         )
         # ran out of iterations: forced best-effort answer, not a structured no-answer.
         return text.strip(), self._citations(None, None, docs, question), False
+
+    def _run_block(self, code: str, runner, docs, question):
+        """Run one code block via ``runner``; return ``(stdout, final_or_None)``.
+
+        ``runner`` is the in-process namespace (``dict``) -> delegate to
+        :meth:`_exec`, or a :class:`SandboxExecutor` -> run the block in the
+        child and translate its :class:`BlockResult` into the same contract.
+        Citations for a child ``final`` frame are built parent-side, since the
+        child only ships raw filings/pages.
+        """
+        if not isinstance(runner, SandboxExecutor):
+            return self._exec(code, runner)
+        result: BlockResult = runner.run_block(code)
+        if result.kind == "final":
+            payload = result.final or {}
+            fin = _Final(
+                str(payload.get("answer", "")),
+                self._citations(payload.get("filings"), payload.get("pages"), docs, question),
+                no_answer=not bool(payload.get("found", True)),
+            )
+            return None, fin
+        if result.kind == "error":
+            return (result.error or "") + "\n", None
+        return (result.stdout or "(no output)"), None
 
     def _citations(self, filings, pages, docs, question) -> list[dict]:
         if not filings:
