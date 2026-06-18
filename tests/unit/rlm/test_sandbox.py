@@ -29,6 +29,7 @@ import io
 import os
 import resource
 import socket
+import time
 
 import pytest
 
@@ -364,6 +365,9 @@ class _FakeSock:
     def sendall(self, data: bytes) -> None:
         self.sent.extend(data)
 
+    def settimeout(self, timeout: float | None) -> None:
+        self._a.settimeout(timeout)
+
     def recv(self, size: int) -> bytes:
         return self._a.recv(size)
 
@@ -440,6 +444,32 @@ def test_parent_rejects_malformed_frame():
     assert result.kind == "error"
     assert "malformed child frame" in result.error
     assert proc.killed is True
+
+
+def test_parent_times_out_on_partial_frame_child():
+    # The child announces a 100-byte frame then stops sending the body. select
+    # reports the socket readable (the header arrived), so the parent enters
+    # _read_exact; without a per-recv deadline it would block forever. The
+    # wall-clock timeout must still fire and kill the child.
+    header = (100).to_bytes(_proto.HEADER_LEN, "big")
+    a, b = socket.socketpair()
+    b.sendall(header)  # header only; the rest of the frame never comes
+
+    ex = SandboxExecutor(timeout=0.5, **_fake_handlers())
+    ex._proc = _FakeProc()
+    proc = ex._proc
+    # use the live socketpair directly so recv() genuinely blocks until timeout
+    ex._parent_sock = a
+
+    start = time.monotonic()
+    result = ex.run_block("noop")
+    elapsed = time.monotonic() - start
+
+    assert result.kind == "error"
+    assert "timed out" in result.error
+    assert proc.killed is True
+    assert elapsed < 5.0  # bounded by the 0.5s timeout, not blocked forever
+    b.close()
 
 
 def test_parent_services_valid_rpc_then_returns_stdout():

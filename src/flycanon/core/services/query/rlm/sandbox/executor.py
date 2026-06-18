@@ -197,7 +197,13 @@ class SandboxExecutor:
                 self._kill()
                 return _error(f"sandbox timed out after {self._timeout:.1f}s")
             try:
-                frame = self._recv()
+                frame = self._recv(deadline)
+            except TimeoutError:
+                # A multi-chunk frame stalled mid-read: the child announced N
+                # bytes then dribbled or stopped. The per-recv deadline tripped,
+                # so enforce the wall-clock timeout instead of blocking forever.
+                self._kill()
+                return _error(f"sandbox timed out after {self._timeout:.1f}s")
             except EOFError:
                 self._kill()
                 return _error("sandbox child exited unexpectedly")
@@ -277,9 +283,26 @@ class SandboxExecutor:
         assert self._parent_sock is not None
         self._parent_sock.sendall(_proto.encode(frame))
 
-    def _recv(self) -> dict:
+    def _recv(self, deadline: float) -> dict:
+        """Decode one frame, bounding every underlying ``recv`` by ``deadline``.
+
+        The child's frames are UNTRUSTED: a hostile/buggy child can announce a
+        multi-chunk frame then stall, so each ``recv`` issued by ``_proto.decode``
+        gets a fresh per-call timeout derived from the remaining wall-clock
+        budget. When it runs out, ``recv`` raises ``TimeoutError`` and the
+        service loop converts that into the documented per-block timeout.
+        """
         assert self._parent_sock is not None
-        return _proto.decode(self._parent_sock.recv)
+        sock = self._parent_sock
+
+        def read(size: int) -> bytes:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise TimeoutError("sandbox recv deadline exceeded")
+            sock.settimeout(remaining)
+            return sock.recv(size)
+
+        return _proto.decode(read)
 
     # -- teardown --
     def _kill(self) -> None:
