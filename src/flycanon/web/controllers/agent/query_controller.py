@@ -37,25 +37,21 @@ verification step before yielding to the same wire format.
 
 from __future__ import annotations
 
-import json
-import logging
-import time
+from typing import Any
 
+from pydantic import BaseModel
 from pyfly.container import rest_controller
 from pyfly.cqrs import DefaultQueryBus
 from pyfly.web import Body, Valid, post_mapping, request_mapping
 from starlette.requests import Request
-from starlette.responses import StreamingResponse
+from starlette.responses import JSONResponse, StreamingResponse
 
 from flycanon.core.services.auth.agent_token_service import AgentTokenService
+from flycanon.core.services.query.answer_dispatcher import AnswerDispatcher
 from flycanon.core.services.query.answer_service import AnswerService
 from flycanon.core.services.query.handlers import (
     AnswerKnowledgeQuery,
     SearchKnowledgeQuery,
-)
-from flycanon.core.services.query.search_service import (
-    _filters_from_request,
-    _hit_dto,
 )
 from flycanon.interfaces.dtos.query import (
     AnswerRequest,
@@ -63,6 +59,7 @@ from flycanon.interfaces.dtos.query import (
     SearchRequest,
     SearchResponse,
 )
+from flycanon.web.answer_stream import stream_answer_sse
 from flycanon.web.controllers.agent._helpers import (
     check_idempotency_replay,
     require_idempotency_key,
@@ -70,8 +67,7 @@ from flycanon.web.controllers.agent._helpers import (
     verify_agent_token,
 )
 from flycanon.web.conventions import IdempotencyStore
-
-logger = logging.getLogger(__name__)
+from flycanon.web.conventions.headers import DEPRECATION_RAG_MESSAGE, HEADER_DEPRECATION
 
 
 @rest_controller
@@ -92,11 +88,16 @@ class AgentQueryController:
         agent_token_service: AgentTokenService,
         queries: DefaultQueryBus,
         answer_service: AnswerService,
+        answer_dispatcher: AnswerDispatcher,
         idempotency_store: IdempotencyStore,
     ) -> None:
         self._agent_token_service = agent_token_service
         self._queries = queries
+        # ``_answer`` still supplies the retrieval pipeline for the RAG
+        # ``hit``-frame path; ``_dispatcher`` selects the engine and runs
+        # the answer call so the stream honours ``FLYCANON_ANSWER_MODE``.
         self._answer = answer_service
+        self._dispatcher = answer_dispatcher
         self._idempotency_store = idempotency_store
 
     @post_mapping("/query")
@@ -117,6 +118,10 @@ class AgentQueryController:
         :class:`AnswerResponse` re-hydrated from the stored JSON
         body, without re-running retrieval + the LLM call.
         """
+        # In the deprecated RAG mode the response carries an
+        # ``X-Flycanon-Deprecation`` header; RLM (the default) is silent.
+        # The header is a pure signal -- the body is byte-for-byte the
+        # same ``AnswerResponse``, so the OpenAPI schema is unchanged.
         ctx = await verify_agent_token(
             http_request,
             service=self._agent_token_service,
@@ -125,7 +130,9 @@ class AgentQueryController:
         scope = "agent.query:run"
         cached = await check_idempotency_replay(http_request, self._idempotency_store, scope)
         if cached is not None:
-            return AnswerResponse.model_validate(cached.body)
+            return _maybe_deprecation_response(
+                AnswerResponse.model_validate(cached.body), is_rag=self._dispatcher.is_rag
+            )
         response = await self._queries.query(
             AnswerKnowledgeQuery(
                 request=request,
@@ -140,7 +147,7 @@ class AgentQueryController:
             status=200,
             response=response,
         )
-        return response
+        return _maybe_deprecation_response(response, is_rag=self._dispatcher.is_rag)
 
     @post_mapping("/query/stream")
     async def stream_answer(
@@ -152,12 +159,15 @@ class AgentQueryController:
 
         Scope: ``agent.query:run``. Mandatory ``Idempotency-Key``.
         Wire format matches the user-tier
-        ``POST /api/v1/query/stream`` byte-for-byte:
+        ``POST /api/v1/query/stream`` byte-for-byte and is routed
+        through the same :class:`AnswerDispatcher`:
 
-        * ``event: hit``   -- one frame per retrieved citation.
-        * ``event: final`` -- terminal frame with the full answer.
+        * RAG mode -- ``event: hit`` per retrieved citation, then
+          ``event: final`` with the full answer.
+        * RLM mode (default) -- one ``event: status`` (``reasoning``)
+          frame per REPL turn, then ``event: final``.
 
-        The generator is a verbatim copy of the user-tier
+        The generator mirrors the user-tier
         iterator. Token verification + idempotency-header check
         happen synchronously before the streaming response is
         returned, so authentication failures surface as a normal
@@ -179,72 +189,22 @@ class AgentQueryController:
         )
         require_idempotency_key(http_request)
 
-        async def _stream():
-            started = time.perf_counter()
-            try:
-                # Reuse the answer service's retrieval -> answer
-                # pipeline. We emit the hits first so the consuming
-                # agent gets citation chips before the model finishes
-                # writing.
-                search_request = SearchRequest(
-                    query=request.question,
-                    top_k=request.top_k,
-                    source_ids=request.source_ids,
-                    knowledge_item_ids=request.knowledge_item_ids,
-                    domains=request.domains,
-                    jurisdictions=request.jurisdictions,
-                    tags=request.tags,
-                    statuses=request.statuses,
-                )
-                retrieval = await self._answer._retrieval.search(  # noqa: SLF001
-                    query=request.question,
-                    tenant_id=ctx.tenant_id,
-                    workspace_id=ctx.workspace_id,
-                    top_k=request.top_k,
-                    filters=_filters_from_request(search_request),
-                )
-
-                for hit in retrieval.hits:
-                    dto = _hit_dto(hit)
-                    yield _sse_frame("hit", dto.model_dump(mode="json"))
-
-                # Answer in one shot. Per-token streaming is a
-                # follow-up once the agentic framework's streaming
-                # surface lands; matches the user-tier behaviour.
-                response = await self._answer.answer(
-                    request,
-                    tenant_id=ctx.tenant_id,
-                    workspace_id=ctx.workspace_id,
-                )
-                elapsed = int((time.perf_counter() - started) * 1000)
-                yield _sse_frame(
-                    "final",
-                    {
-                        "answer": response.answer,
-                        "citations": [c.model_dump(mode="json") for c in response.citations],
-                        "model": response.model,
-                        "elapsed_ms": elapsed,
-                        "no_answer": response.no_answer,
-                    },
-                )
-            except Exception as exc:  # noqa: BLE001 -- terminal error frame
-                # A mid-stream failure (retrieval / answer / serialisation)
-                # used to leave the SSE socket open with no terminal frame
-                # so the client hung until idle timeout. Emit one well-
-                # formed ``error`` frame, log the cause, then close cleanly.
-                logger.exception("agent query stream failed mid-stream: %s", exc)
-                yield _sse_frame(
-                    "error",
-                    {"code": "stream_error", "message": str(exc)},
-                )
-
+        headers = {
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        }
+        # Surface the RAG deprecation to clients; RLM (the default) is silent.
+        if self._dispatcher.is_rag:
+            headers[HEADER_DEPRECATION] = DEPRECATION_RAG_MESSAGE
         return StreamingResponse(
-            _stream(),
+            stream_answer_sse(
+                dispatcher=self._dispatcher,
+                answer_service=self._answer,
+                request=request,
+                ctx=ctx,
+            ),
             media_type="text/event-stream",
-            headers={
-                "Cache-Control": "no-cache",
-                "X-Accel-Buffering": "no",
-            },
+            headers=headers,
         )
 
     @post_mapping("/search")
@@ -293,9 +253,17 @@ class AgentQueryController:
         return response
 
 
-def _sse_frame(event: str, data: dict) -> bytes:
-    """Render an SSE frame -- verbatim copy of the user-tier helper."""
-    return f"event: {event}\ndata: {json.dumps(data)}\n\n".encode()
+def _maybe_deprecation_response(response: Any, *, is_rag: bool) -> Any:
+    """Attach the RAG deprecation header without altering the body.
+
+    RLM (the default) returns the response untouched so the framework
+    serialises it as usual. In RAG mode the same body is wrapped in a
+    :class:`JSONResponse` carrying the ``X-Flycanon-Deprecation`` header.
+    """
+    if not is_rag:
+        return response
+    body = response.model_dump(mode="json") if isinstance(response, BaseModel) else response
+    return JSONResponse(body, headers={HEADER_DEPRECATION: DEPRECATION_RAG_MESSAGE})
 
 
 __all__ = ["AgentQueryController"]

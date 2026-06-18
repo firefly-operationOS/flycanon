@@ -24,6 +24,10 @@ timeout fired. Now: the failure is logged + emitted as a single
 The shape of the error frame is fixed (``{"code": "stream_error",
 "message": <stringified exc>}``) so consuming agents can branch on it
 without parsing the human-readable detail.
+
+These error paths run in RAG mode (``dispatcher.is_rag`` is ``True``),
+which is the mode that exercises the retrieval pipeline + answer call
+that can fail mid-stream.
 """
 
 from __future__ import annotations
@@ -45,6 +49,22 @@ class _StubRequest:
 
     def __init__(self, headers: dict[str, str]) -> None:
         self.headers = headers
+
+
+class _FakeDispatcher:
+    """Stand-in for :class:`AnswerDispatcher` with a fixed mode.
+
+    ``answer`` delegates to the injected RAG answer service so the RAG
+    error-path tests keep exercising the same failing ``answer`` call.
+    """
+
+    def __init__(self, *, is_rag: bool, answer_service: object | None = None) -> None:
+        self.is_rag = is_rag
+        self.mode = "rag" if is_rag else "rlm"
+        self._answer_service = answer_service
+
+    async def answer(self, request, *, tenant_id=None, workspace_id=None):
+        return await self._answer_service.answer(request, tenant_id=tenant_id, workspace_id=workspace_id)
 
 
 def _user_request() -> _StubRequest:
@@ -92,58 +112,60 @@ def _parse_sse_events(frames: list[bytes]) -> list[dict]:
 # ---------------------------------------------------------------------
 
 
-class TestUserQueryStreamErrorFrame:
-    @pytest.mark.asyncio
-    async def test_mid_stream_exception_emits_error_frame(self) -> None:
-        # The retrieval call raises mid-stream; the SSE generator must
-        # surface exactly one ``error`` frame and close cleanly.
-        answer_service = AsyncMock()
-        retrieval = AsyncMock()
-        retrieval.search = AsyncMock(side_effect=RuntimeError("retrieval boom"))
-        answer_service._retrieval = retrieval
+@pytest.mark.asyncio
+async def test_user_mid_stream_exception_emits_error_frame() -> None:
+    # The retrieval call raises mid-stream; the SSE generator must
+    # surface exactly one ``error`` frame and close cleanly.
+    answer_service = AsyncMock()
+    retrieval = AsyncMock()
+    retrieval.search = AsyncMock(side_effect=RuntimeError("retrieval boom"))
+    answer_service._retrieval = retrieval
 
-        controller = QueryStreamController(
-            queries=AsyncMock(),
-            answer_service=answer_service,
-            suggester=AsyncMock(),
-        )
+    controller = QueryStreamController(
+        queries=AsyncMock(),
+        answer_service=answer_service,
+        answer_dispatcher=_FakeDispatcher(is_rag=True, answer_service=answer_service),
+        suggester=AsyncMock(),
+    )
 
-        response = await controller.stream_answer(_user_request(), _answer_request())
-        frames = await _drain(response.body_iterator)
-        events = _parse_sse_events(frames)
+    response = await controller.stream_answer(_user_request(), _answer_request())
+    frames = await _drain(response.body_iterator)
+    events = _parse_sse_events(frames)
 
-        # Exactly one event, and it's the error frame with the canonical code.
-        assert len(events) == 1, f"expected one error frame, got {events}"
-        assert events[0]["event"] == "error"
-        assert events[0]["data"]["code"] == "stream_error"
-        assert "retrieval boom" in events[0]["data"]["message"]
+    # Exactly one event, and it's the error frame with the canonical code.
+    assert len(events) == 1, f"expected one error frame, got {events}"
+    assert events[0]["event"] == "error"
+    assert events[0]["data"]["code"] == "stream_error"
+    assert "retrieval boom" in events[0]["data"]["message"]
 
-    @pytest.mark.asyncio
-    async def test_answer_phase_failure_emits_error_frame(self) -> None:
-        # Retrieval succeeds (no hits), then the answer call raises.
-        # The "hit" phase emits nothing because hits is empty -- the
-        # error frame must still be the only emitted frame.
-        answer_service = AsyncMock()
-        retrieval = AsyncMock()
-        retrieval.hits = []
-        retrieval.search = AsyncMock(return_value=retrieval)
-        answer_service._retrieval = retrieval
-        answer_service.answer = AsyncMock(side_effect=RuntimeError("answer boom"))
 
-        controller = QueryStreamController(
-            queries=AsyncMock(),
-            answer_service=answer_service,
-            suggester=AsyncMock(),
-        )
+@pytest.mark.asyncio
+async def test_user_answer_phase_failure_emits_error_frame() -> None:
+    # Retrieval succeeds (no hits), then the answer call raises.
+    # The "hit" phase emits nothing because hits is empty -- the
+    # error frame must still be the only emitted frame.
+    answer_service = AsyncMock()
+    retrieval = AsyncMock()
+    retrieval.hits = []
+    retrieval.search = AsyncMock(return_value=retrieval)
+    answer_service._retrieval = retrieval
+    answer_service.answer = AsyncMock(side_effect=RuntimeError("answer boom"))
 
-        response = await controller.stream_answer(_user_request(), _answer_request())
-        frames = await _drain(response.body_iterator)
-        events = _parse_sse_events(frames)
+    controller = QueryStreamController(
+        queries=AsyncMock(),
+        answer_service=answer_service,
+        answer_dispatcher=_FakeDispatcher(is_rag=True, answer_service=answer_service),
+        suggester=AsyncMock(),
+    )
 
-        assert len(events) == 1
-        assert events[0]["event"] == "error"
-        assert events[0]["data"]["code"] == "stream_error"
-        assert "answer boom" in events[0]["data"]["message"]
+    response = await controller.stream_answer(_user_request(), _answer_request())
+    frames = await _drain(response.body_iterator)
+    events = _parse_sse_events(frames)
+
+    assert len(events) == 1
+    assert events[0]["event"] == "error"
+    assert events[0]["data"]["code"] == "stream_error"
+    assert "answer boom" in events[0]["data"]["message"]
 
 
 # ---------------------------------------------------------------------
@@ -182,57 +204,66 @@ class _InMemoryAgentTokenRepository:
             row["last_used_at"] = at
 
 
-class TestAgentQueryStreamErrorFrame:
-    @pytest.mark.asyncio
-    async def test_mid_stream_exception_emits_error_frame(self) -> None:
-        from flycanon.core.services.auth.agent_token_service import (
-            AgentTokenService,
-            MintRequest,
-        )
-        from flycanon.web.controllers.agent.query_controller import AgentQueryController
+async def _mint_agent_controller(answer_service, dispatcher):
+    """Build an :class:`AgentQueryController` with a minted token."""
+    from flycanon.core.services.auth.agent_token_service import (
+        AgentTokenService,
+        MintRequest,
+    )
+    from flycanon.web.controllers.agent.query_controller import AgentQueryController
+    from flycanon.web.conventions import InMemoryIdempotencyStore
 
-        repo = _InMemoryAgentTokenRepository()
-        service = AgentTokenService(repo)
-        minted = await service.mint(
-            MintRequest(
-                tenant_id="acme",
-                name="t",
-                workspace_allowlist=None,
-                scopes=["agent.query:run"],
-                rate_limit_rpm=None,
-                expires_at=None,
-            ),
-            actor="anonymous",
-        )
+    repo = _InMemoryAgentTokenRepository()
+    service = AgentTokenService(repo)
+    minted = await service.mint(
+        MintRequest(
+            tenant_id="acme",
+            name="t",
+            workspace_allowlist=None,
+            scopes=["agent.query:run"],
+            rate_limit_rpm=None,
+            expires_at=None,
+        ),
+        actor="anonymous",
+    )
+    controller = AgentQueryController(
+        agent_token_service=service,
+        queries=AsyncMock(),
+        answer_service=answer_service,
+        answer_dispatcher=dispatcher,
+        idempotency_store=InMemoryIdempotencyStore(),
+    )
+    return controller, minted.token
 
-        answer_service = AsyncMock()
-        retrieval = AsyncMock()
-        retrieval.search = AsyncMock(side_effect=RuntimeError("retrieval boom"))
-        answer_service._retrieval = retrieval
 
-        from flycanon.web.conventions import InMemoryIdempotencyStore
+def _agent_request(token: str) -> _StubRequest:
+    return _StubRequest(
+        headers={
+            "X-Tenant-Id": "acme",
+            "X-Workspace-Id": "ws-1",
+            "X-Agent-Token": token,
+            "Idempotency-Key": "K-stream-err",
+        }
+    )
 
-        controller = AgentQueryController(
-            agent_token_service=service,
-            queries=AsyncMock(),
-            answer_service=answer_service,
-            idempotency_store=InMemoryIdempotencyStore(),
-        )
 
-        agent_request = _StubRequest(
-            headers={
-                "X-Tenant-Id": "acme",
-                "X-Workspace-Id": "ws-1",
-                "X-Agent-Token": minted.token,
-                "Idempotency-Key": "K-stream-err",
-            }
-        )
+@pytest.mark.asyncio
+async def test_agent_mid_stream_exception_emits_error_frame() -> None:
+    answer_service = AsyncMock()
+    retrieval = AsyncMock()
+    retrieval.search = AsyncMock(side_effect=RuntimeError("retrieval boom"))
+    answer_service._retrieval = retrieval
 
-        response = await controller.stream_answer(agent_request, _answer_request())
-        frames = await _drain(response.body_iterator)
-        events = _parse_sse_events(frames)
+    controller, token = await _mint_agent_controller(
+        answer_service,
+        _FakeDispatcher(is_rag=True, answer_service=answer_service),
+    )
 
-        assert len(events) == 1, f"expected one error frame, got {events}"
-        assert events[0]["event"] == "error"
-        assert events[0]["data"]["code"] == "stream_error"
-        assert "retrieval boom" in events[0]["data"]["message"]
+    response = await controller.stream_answer(_agent_request(token), _answer_request())
+    frames = await _drain(response.body_iterator)
+    events = _parse_sse_events(frames)
+
+    assert len(events) == 1, f"expected one error frame, got {events}"
+    assert events[0]["event"] == "error"
+    assert events[0]["data"]["code"] == "stream_error"
+    assert "retrieval boom" in events[0]["data"]["message"]

@@ -4541,7 +4541,7 @@
           "version": {
             "description": "CalVer (``YY.MM.PP``) baked into the wheel at build time. PEP 440 normalises ``26.05.01`` -> ``26.5.1`` so the value you see here uses the stripped form.",
             "examples": [
-              "26.5.9"
+              "26.6.18"
             ],
             "title": "Version",
             "type": "string"
@@ -4925,7 +4925,7 @@
       "url": "https://github.com/firefly-operationOS/flycanon/blob/main/LICENSE"
     },
     "title": "flycanon",
-    "version": "26.5.9"
+    "version": "26.6.18"
   },
   "openapi": "3.1.0",
   "paths": {
@@ -5181,7 +5181,7 @@
     },
     "/api/v1/agent/query/stream": {
       "post": {
-        "description": "Scope: ``agent.query:run``. Mandatory ``Idempotency-Key``.\nWire format matches the user-tier\n``POST /api/v1/query/stream`` byte-for-byte:\n\n* ``event: hit``   -- one frame per retrieved citation.\n* ``event: final`` -- terminal frame with the full answer.\n\nThe generator is a verbatim copy of the user-tier\niterator. Token verification + idempotency-header check\nhappen synchronously before the streaming response is\nreturned, so authentication failures surface as a normal\n4xx response (not as an in-stream ``error`` frame).\n\nReplay dedup is **intentionally skipped** for the SSE\nendpoint -- streaming responses cannot be replayed\ndeterministically (frame ordering, hit ranking, and LLM\nnon-determinism would all need to be captured), and the\nclient is expected to handle a partial stream by reading\nthe terminal ``final`` / ``error`` frame. Only the\n``Idempotency-Key`` header *presence* is enforced; no\nstore interaction occurs.",
+        "description": "Scope: ``agent.query:run``. Mandatory ``Idempotency-Key``.\nWire format matches the user-tier\n``POST /api/v1/query/stream`` byte-for-byte and is routed\nthrough the same :class:`AnswerDispatcher`:\n\n* RAG mode -- ``event: hit`` per retrieved citation, then\n``event: final`` with the full answer.\n* RLM mode (default) -- one ``event: status`` (``reasoning``)\nframe per REPL turn, then ``event: final``.\n\nThe generator mirrors the user-tier\niterator. Token verification + idempotency-header check\nhappen synchronously before the streaming response is\nreturned, so authentication failures surface as a normal\n4xx response (not as an in-stream ``error`` frame).\n\nReplay dedup is **intentionally skipped** for the SSE\nendpoint -- streaming responses cannot be replayed\ndeterministically (frame ordering, hit ranking, and LLM\nnon-determinism would all need to be captured), and the\nclient is expected to handle a partial stream by reading\nthe terminal ``final`` / ``error`` frame. Only the\n``Idempotency-Key`` header *presence* is enforced; no\nstore interaction occurs.",
         "operationId": "stream_answer",
         "requestBody": {
           "content": {
@@ -6899,7 +6899,7 @@
     },
     "/api/v1/query/stream": {
       "post": {
-        "description": "Frames:\n\n* ``event: hit`` -- one frame per retrieved citation\n(UI can render citation badges immediately).\n* ``event: final`` -- terminal frame with the full answer\n+ the cited subset + model + elapsed_ms + no_answer flag.\n\nScope is fixed to the (tenant, workspace) carried by the\nrequest headers; the :class:`RetrievalService` fails closed\non missing values.",
+        "description": "Frames (RAG mode, ``FLYCANON_ANSWER_MODE=rag``):\n\n* ``event: hit`` -- one frame per retrieved citation\n(UI can render citation badges immediately).\n* ``event: final`` -- terminal frame with the full answer\n+ the cited subset + model + elapsed_ms + no_answer flag.\n\nFrames (RLM mode, the default):\n\n* ``event: status`` -- one ``reasoning`` frame per REPL turn\n(carrying the turn number + the latest document accessed);\nRLM has no pre-retrieval step so there are no ``hit`` frames.\n* ``event: final`` -- the same terminal frame shape.\n\nScope is fixed to the (tenant, workspace) carried by the\nrequest headers; the :class:`RetrievalService` fails closed\non missing values.",
         "operationId": "stream_answer",
         "requestBody": {
           "content": {
@@ -6926,7 +6926,7 @@
             "description": "Validation Error"
           }
         },
-        "summary": "SSE answer stream.",
+        "summary": "SSE answer stream routed through the answer dispatcher.",
         "tags": [
           "QueryStream"
         ]

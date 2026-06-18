@@ -12,11 +12,16 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Query service -- hybrid search + RAG-answer over the corpus."""
+"""Query service -- hybrid search + RAG-answer over the corpus.
+
+This package ``__init__`` is deliberately empty of eager service imports.
+``AnswerService``/``SearchService`` transitively pull in ``httpx``, the model
+client, and ``CanonSettings``; importing them here would drag that whole stack
+into anything that touches the package -- including the hardened sandbox child
+(:mod:`flycanon.core.services.query.rlm.sandbox.runner`), which is spawned with
+a scrubbed env and must stay import-light (no secrets, no network). Import
+services from their own modules instead (e.g.
+``from flycanon.core.services.query.answer_service import AnswerService``).
+"""
 
 from __future__ import annotations
-
-from flycanon.core.services.query.answer_service import AnswerOutput, AnswerService
-from flycanon.core.services.query.search_service import SearchService
-
-__all__ = ["AnswerOutput", "AnswerService", "SearchService"]

@@ -24,7 +24,7 @@ from __future__ import annotations
 
 from functools import lru_cache
 
-from pydantic import Field
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -248,6 +248,116 @@ class CanonSettings(BaseSettings):
         ),
     )
 
+    # -- RLM engine -----------------------------------------------------
+    # The Recursive Language Model query engine (``core/services/query/
+    # rlm/``) is a CodeAct REPL: a root orchestrator that writes Python
+    # against the document corpus, makes recursive sub-calls on slices,
+    # and finishes by citing the filings/pages it used. All three models
+    # are in ``<provider>:<model>`` form; the ``anthropic:`` prefix is
+    # stripped before the id is sent to the Anthropic Messages API.
+    #
+    # ``answer_mode`` (FLYCANON_ANSWER_MODE) selects which engine the
+    # non-streaming ``/api/v1/query`` answer path uses: ``rlm`` (default)
+    # routes to the Recursive Language Model answerer, ``rag`` routes to
+    # the legacy hybrid-retrieval :class:`AnswerService`. RAG is opt-in
+    # and deprecated -- the :class:`AnswerDispatcher` logs a deprecation
+    # warning whenever it is selected. The value is normalised to
+    # lowercase; any value other than ``rag`` falls back to ``rlm``.
+    answer_mode: str = Field(
+        default="rlm",
+        description="Answer engine for the non-streaming query path: ``rlm`` (default) or ``rag``.",
+    )
+    rlm_root_model: str = Field(
+        default="anthropic:claude-sonnet-4-6",
+        description="Orchestrator model that drives the CodeAct REPL loop.",
+    )
+    rlm_sub_model: str = Field(
+        default="anthropic:claude-sonnet-4-6",
+        description="Model for flat recursive sub-calls made from REPL code.",
+    )
+    rlm_answer_model: str = Field(
+        default="anthropic:claude-sonnet-4-6",
+        description="Model for the final single-shot answer synthesis.",
+    )
+    # Max orchestrator turns before the loop gives up and asks for a
+    # plain-text answer from the transcript.
+    rlm_max_iters: int = Field(default=8, ge=1, le=64)
+    # Total recursive sub-call budget across one root session.
+    rlm_sub_budget: int = Field(default=12, ge=0, le=128)
+    # How deep ``rlm(...)`` may nest before it degrades to a flat ``llm``.
+    rlm_max_depth: int = Field(default=1, ge=0, le=8)
+    # Mark the large, static RLM system prompt with Anthropic
+    # ``cache_control: ephemeral`` so it is cached server-side and reused
+    # across the many Messages calls one CodeAct session makes, cutting
+    # input-token cost and per-call latency. When ``False`` the system
+    # prompt is sent as a plain string (no cache breakpoint).
+    rlm_prompt_cache: bool = Field(default=True)
+    # Where the model-written REPL code is executed.
+    # ``subprocess`` (FLYCANON_RLM_SANDBOX, the secure default) runs each
+    # turn's code in the scrubbed-env sandbox child, servicing every
+    # docs/llm/rlm request from the parent so the child holds no secrets;
+    # ``inprocess`` is the explicit opt-out that runs the code in the
+    # engine's own restricted ``exec`` namespace (dev/trusted use only).
+    # Only the exact string ``inprocess`` opts out; any other value
+    # (including an unrecognised or empty one) normalises to ``subprocess``.
+    rlm_sandbox: str = Field(
+        default="subprocess",
+        description="RLM REPL execution mode: ``subprocess`` (default) or ``inprocess`` (opt-out).",
+    )
+    # Per-turn wall-clock timeout (seconds) for the subprocess sandbox.
+    rlm_sandbox_timeout_s: int = Field(default=30, ge=1)
+
+    # -- Corpus page cache ----------------------------------------------
+    # Shared cache layered over the lazy RLM corpus store: an in-scope
+    # filing's original is fetched from the object store + PyMuPDF-
+    # extracted at most once per process (in-memory LRU) and once per
+    # fleet (shared Redis). Keyed by the source's ``content_sha256`` so a
+    # re-ingested source (new bytes -> new sha) misses the stale entry
+    # automatically. Backend selection mirrors
+    # :func:`flycanon.core.configuration._use_redis`: ``auto`` (the
+    # default) uses Redis when ``redis_url`` is set, in-memory otherwise;
+    # ``redis`` / ``in_memory`` force one or the other. The Redis client
+    # is synchronous (read from the RLM engine's worker thread).
+    corpus_cache_backend: str = Field(
+        default="auto",
+        description="Corpus page-cache backend: ``auto`` | ``redis`` | ``in_memory``.",
+    )
+    # Per-entry TTL (seconds) for both backends.
+    corpus_cache_ttl_s: int = Field(default=3600, ge=0)
+    # LRU cap for the in-memory backend (ignored by the Redis backend,
+    # which relies on native ``EX`` expiry).
+    corpus_cache_max_entries: int = Field(default=512, ge=1)
+
+    # -- Object store ---------------------------------------------------
+    # Where the original document bytes an intake submitted are persisted
+    # so RLM can later replay them. The port lives in
+    # ``core/services/storage/``; ``localfs`` (default) writes files under
+    # a root directory for dev / test, ``s3`` (requires ``uv sync --extra
+    # s3``) writes to a bucket. AWS credentials are read from the standard
+    # environment (``AWS_ACCESS_KEY_ID`` / ``AWS_SECRET_ACCESS_KEY`` /
+    # profiles / instance roles), not from these settings. Keys follow the
+    # ``tenant/workspace/.../files/{id}.{ext}`` layout shared with flyquery.
+    object_store_backend: str = Field(
+        default="localfs",
+        description="Object-store backend: ``localfs`` (default) or ``s3``.",
+    )
+    # localfs backend (FLYCANON_OBJECT_STORE_LOCALFS_ROOT).
+    object_store_localfs_root: str = Field(default="./var/objects")
+    # s3 backend (FLYCANON_OBJECT_STORE_S3_*). Requires ``uv sync --extra s3``.
+    object_store_s3_bucket: str = Field(default="")
+    # Key prefix prepended to every object key within the bucket.
+    object_store_s3_prefix: str = Field(default="")
+    # Optional custom endpoint for MinIO / S3-compatible services; empty
+    # means the default AWS endpoint.
+    object_store_s3_endpoint_url: str = Field(default="")
+    # Optional region; empty defers to boto3's standard region resolution.
+    object_store_s3_region: str = Field(default="")
+    # Whether intake persists the original uploaded bytes to the object
+    # store and records the key on the source row (``object_store_key``).
+    # On by default so RLM has a whole-document corpus to reason over; a
+    # write failure is best-effort and never fails the ingest.
+    store_originals: bool = Field(default=True)
+
     # -- Ingestion ------------------------------------------------------
     chunk_size_tokens: int = Field(default=1200, ge=128, le=8192)
     chunk_overlap_tokens: int = Field(default=150, ge=0, le=1024)
@@ -309,6 +419,23 @@ class CanonSettings(BaseSettings):
         if not self.api_keys:
             return set()
         return {k.strip() for k in self.api_keys.split(",") if k.strip()}
+
+    @field_validator("answer_mode", mode="before")
+    @classmethod
+    def _normalise_answer_mode(cls, value: object) -> str:
+        # Normalise to lowercase and treat any unrecognised value as the
+        # ``rlm`` default -- only ``rag`` opts into the deprecated path.
+        text = str(value).strip().lower() if value is not None else ""
+        return "rag" if text == "rag" else "rlm"
+
+    @field_validator("rlm_sandbox", mode="before")
+    @classmethod
+    def _normalise_rlm_sandbox(cls, value: object) -> str:
+        # Secure by default: only the exact string ``inprocess`` opts out of
+        # the out-of-process sandbox; any other value (including an
+        # unrecognised or empty one) resolves to ``subprocess``.
+        text = str(value).strip().lower() if value is not None else ""
+        return "inprocess" if text == "inprocess" else "subprocess"
 
 
 @lru_cache(maxsize=1)

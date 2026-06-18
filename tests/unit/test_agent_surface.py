@@ -417,17 +417,36 @@ class TestAgentSourcesGet:
 # ---------------------------------------------------------------------
 
 
+class _FakeDispatcher:
+    """Dispatcher double delegating ``answer`` to the answer service.
+
+    Defaults to RAG mode (``is_rag=True``) so the streaming tests still
+    exercise the ``hit``-frame path; pass ``is_rag=False`` to model RLM.
+    """
+
+    def __init__(self, answer_service: Any, *, is_rag: bool = True) -> None:
+        self.is_rag = is_rag
+        self.mode = "rag" if is_rag else "rlm"
+        self._answer_service = answer_service
+
+    async def answer(self, request, *, tenant_id=None, workspace_id=None):
+        return await self._answer_service.answer(request, tenant_id=tenant_id, workspace_id=workspace_id)
+
+
 def _query_controller(
     agent_token_service: AgentTokenService,
     *,
     queries: Any = None,
     answer_service: Any = None,
+    answer_dispatcher: Any = None,
     idempotency_store: Any = None,
 ) -> AgentQueryController:
+    answer_service = answer_service or AsyncMock()
     return AgentQueryController(
         agent_token_service=agent_token_service,
         queries=queries or _query_bus(),
-        answer_service=answer_service or AsyncMock(),
+        answer_service=answer_service,
+        answer_dispatcher=answer_dispatcher or _FakeDispatcher(answer_service),
         idempotency_store=idempotency_store or InMemoryIdempotencyStore(),
     )
 
@@ -449,7 +468,14 @@ class TestAgentQueryAnswer:
     async def test_happy_path_dispatches_answer_query(self, agent_token_service: AgentTokenService) -> None:
         token = await _mint(agent_token_service, scopes=["agent.query:run"])
         queries = _query_bus(query_returns="answer-stub")
-        controller = _query_controller(agent_token_service, queries=queries)
+        # RLM (default) mode: the route returns the dispatch result verbatim,
+        # with no deprecation header wrapping. RAG-mode header coverage lives
+        # in the dedicated deprecation-header test module.
+        controller = _query_controller(
+            agent_token_service,
+            queries=queries,
+            answer_dispatcher=_FakeDispatcher(AsyncMock(), is_rag=False),
+        )
 
         result = await controller.answer(
             _request(token, idempotency_key="q-key-1"),

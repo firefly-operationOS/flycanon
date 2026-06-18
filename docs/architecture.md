@@ -27,8 +27,9 @@ in [`fireflyframework-agentic`](https://github.com/fireflyframework/fireflyframe
 flycanon owns its hybrid-retrieval primitives in
 `core/services/retrieval/fusion.py`.
 flycanon's job is the composition: take raw bytes in any format,
-ground them in a canonical version chain, and expose retrieval + RAG
-over the result.
+ground them in a canonical version chain, and expose retrieval +
+code-driven RLM answering (with deprecated RAG as an opt-in) over the
+result.
 
 ## Data model
 
@@ -212,6 +213,107 @@ scope layer (isolation per `(tenant_id, workspace_id)` via a canonical
 `t/<tenant>/w/<workspace>` namespace), and fusion always happens via
 Reciprocal Rank Fusion (RRF) over the two channels.
 
+## Answer engine (RLM default / RAG deprecated)
+
+The non-streaming answer path is fronted by an `AnswerDispatcher`
+(`core/services/query/answer_dispatcher.py`) that routes to one of two
+engines by `FLYCANON_ANSWER_MODE`. Both implement the same `answer()`
+contract (`AnswerRequest` in, `AnswerResponse` out), so the dispatcher
+is a thin pass-through and the wire contract is identical across modes:
+
+* **`rlm`** (default) -- the Recursive Language Model engine
+  (`core/services/query/rlm/`). It is a code-driven CodeAct REPL: a root
+  orchestrator model writes Python against the in-scope document corpus
+  -- handed to it as a `docs` variable rather than pasted into the
+  prompt -- makes recursive sub-calls on slices, and finishes by citing
+  the filings / pages it used. `CanonCorpusBuilder` lists the in-scope
+  sources cheaply up front; the `CanonDocStore` it returns fetches each
+  original from the `ObjectStore` and extracts its page-structured text
+  *lazily*, on first access from the REPL (so the rest are never
+  fetched), through a shared page cache (see below).
+  `RLMSession` then drives the REPL inside `asyncio.to_thread` against
+  the synchronous `AnthropicClient`. Because it reasons over **whole
+  documents**, not chunks, it depends on the originals being persisted.
+* **`rag`** (opt-in, **deprecated**) -- the legacy `AnswerService`:
+  hybrid retrieval (same path as `/search`) followed by one grounded
+  LLM call. The dispatcher logs a deprecation warning on every RAG-mode
+  answer and the path is slated for removal in a future release.
+
+`FLYCANON_RLM_ROOT_MODEL` / `FLYCANON_RLM_SUB_MODEL` /
+`FLYCANON_RLM_ANSWER_MODEL` (all default `anthropic:claude-sonnet-4-6`)
+select the three RLM models; `FLYCANON_RLM_MAX_ITERS` /
+`FLYCANON_RLM_SUB_BUDGET` / `FLYCANON_RLM_MAX_DEPTH` bound the loop. The
+engine calls the Anthropic Messages API directly, so an
+`ANTHROPIC_API_KEY` is required at runtime in the default mode.
+
+### RLM execution sandbox
+
+The RLM REPL **execs model-written Python** every turn. Because the
+corpus is **user-uploaded**, a malicious document can prompt-inject the
+orchestrator into emitting hostile code, so the exec runs out of process
+by default (`FLYCANON_RLM_SANDBOX=subprocess`,
+`core/services/query/rlm/sandbox/`):
+
+* **Parent / child split.** `SandboxExecutor` (the parent,
+  `sandbox/executor.py`) spawns `sandbox/runner.py` (the child) over a
+  private `socketpair` with `close_fds=True`, so the child inherits no
+  other descriptors. The child runs the model code in a restricted
+  namespace (safe-builtins whitelist + `re`, no `open` / `import`); the
+  parent owns the only document store and model client.
+* **Scrubbed environment.** The child inherits only a minimal whitelist
+  (`PATH`, `LANG`, `LC_ALL`, `PYTHONPATH`, `PYTHONHASHSEED`) -- no
+  `ANTHROPIC_API_KEY`, no cloud / DB / Redis creds, no `FLYCANON_*`
+  secrets -- so prompt-injected code has no credential to read.
+* **Resource limits.** At startup the child clamps itself with
+  `setrlimit`: `RLIMIT_CPU` (CPU-time cap), `RLIMIT_AS` (1 GiB
+  address-space cap), and `RLIMIT_FSIZE = 0` (no file writes). The parent
+  separately enforces a wall-clock timeout
+  (`FLYCANON_RLM_SANDBOX_TIMEOUT_S`, default 30 s) and SIGKILLs an
+  overrunning child.
+* **Capability RPC.** The child's `docs` / `llm` / `rlm` / `final` stubs
+  marshal each call to the parent as a length-prefixed **JSON-only** frame
+  (never `pickle` / `eval`), validated against fixed name / arity / type
+  allowlists; the parent services it against the real infra and replies. A
+  malformed frame, unknown op/fn, or timeout kills the child and returns a
+  controlled error rather than crashing the parent.
+* **Blast radius.** The child holds no secrets, no network client, and no
+  infrastructure objects, so an escape is limited to the in-scope corpus
+  the parent already exposes through those RPCs.
+
+`FLYCANON_RLM_SANDBOX=inprocess` is the explicit opt-out (dev / trusted
+use only): it runs the model code in the engine's own restricted `exec`
+namespace, in process. Only the exact value `inprocess` opts out; anything
+else normalises to `subprocess`. See the deployment guide for the residual
+network-egress risk and the `nsjail` / `seccomp` defence-in-depth
+follow-up.
+
+### Object store (RLM document originals)
+
+RLM replays the original document bytes, so intake persists each
+original to an object store (`core/services/storage/`) and records its
+key on the source row (`object_store_key`). `FLYCANON_OBJECT_STORE_BACKEND`
+selects `localfs` (default, a root directory for dev / test) or `s3`
+(requires `uv sync --extra s3`; bucket / prefix / endpoint / region via
+`FLYCANON_OBJECT_STORE_S3_*`, AWS credentials from the standard
+environment). `FLYCANON_STORE_ORIGINALS` (default `true`) gates the
+persistence; the write is best-effort and never fails the ingest, but a
+source with no stored original is skipped by the RLM corpus builder.
+
+### Corpus page cache (RLM)
+
+The fetch + PyMuPDF page extraction is the expensive part of the load
+path, so a shared synchronous page cache
+(`core/services/query/rlm/page_cache.py`) sits in front of it: each
+in-scope filing is fetched + extracted at most once per process
+(`MemoryPageCache`, a thread-safe LRU) and, with the Redis backend
+(`RedisPageCache`, a synchronous `redis.Redis` client), once per fleet.
+Entries are keyed by the source's `content_sha256`, so a re-ingested
+source (new bytes -> new sha) misses the stale entry automatically.
+`FLYCANON_CORPUS_CACHE_BACKEND` selects the backend (`auto` -> Redis
+when `FLYCANON_REDIS_URL` is set, else in-memory); the cache is a
+process singleton injected into the corpus builder, with the
+per-store memo as the innermost per-query layer.
+
 ## Layers
 
 ```
@@ -268,7 +370,9 @@ beans are declared. It registers:
   `TaxonomyService` (each takes the `EventPublisher` so events are
   published as the canonical store mutates)
 * `Consolidator` + `CandidateService`
-* `SearchService` + `AnswerService`
+* `ObjectStore` (`localfs` / `s3` via `FLYCANON_OBJECT_STORE_*`)
+* `SearchService`, `AnswerService` (RAG), `RLMAnswerService`, and the
+  `AnswerDispatcher` that routes the answer path by `FLYCANON_ANSWER_MODE`
 * `IntakeService` (the end-to-end orchestrator)
 
 `EventPublisher` is injected upstream by pyfly's

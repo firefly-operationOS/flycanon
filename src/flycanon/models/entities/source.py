@@ -14,8 +14,10 @@
 
 """``canon_sources`` -- raw inbound artefacts.
 
-The original bytes are not stored; only the metadata, the content hash
-(for idempotency + change detection), and the per-source chunk count.
+The row holds metadata, the content hash (for idempotency + change
+detection), and the per-source chunk count. The original bytes are not
+stored inline; when original-document persistence is enabled they live in
+the ObjectStore and the row keeps only the ``object_store_key`` reference.
 """
 
 from __future__ import annotations
@@ -61,6 +63,16 @@ class SourceRow(Base):
     content_type: Mapped[str | None] = mapped_column(String(128), nullable=True)
     content_sha256: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     content_bytes: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+    # ObjectStore key of the persisted original document, when
+    # original-document persistence is enabled. Nullable because legacy
+    # rows -- and rows ingested with persistence disabled -- have no
+    # stored original to point at.
+    object_store_key: Mapped[str | None] = mapped_column(
+        String(1024),
+        nullable=True,
+        doc="ObjectStore key of the persisted original document, or NULL when none.",
+    )
 
     # Output.
     n_chunks: Mapped[int] = mapped_column(Integer, nullable=False, default=0)

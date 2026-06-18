@@ -111,6 +111,114 @@ FLYCANON_QUERY_EXPANSION_ENABLED=false
 FLYCANON_QUERY_EXPANSION_N=3
 
 # ----------------------------------------------------------------------------
+# Answer mode (RLM default / RAG deprecated)
+# ----------------------------------------------------------------------------
+# Selects the engine for the non-streaming /api/v1/query answer path:
+#   rlm  -- (default) the Recursive Language Model engine. A CodeAct REPL
+#           that reasons over whole documents instead of retrieving chunks.
+#   rag  -- the legacy hybrid-retrieval answerer. Opt-in and DEPRECATED:
+#           the dispatcher logs a deprecation warning on every rag-mode
+#           answer and rag will be removed in a future release.
+# Any value other than ``rag`` is normalised to ``rlm``.
+FLYCANON_ANSWER_MODE=rlm
+
+# RLM models, all in ``<provider>:<model>`` form (the ``anthropic:``
+# prefix is stripped before the id is sent to the Anthropic Messages API,
+# which reads ANTHROPIC_API_KEY from the environment -- see below).
+#   root   -- orchestrator model that drives the CodeAct REPL loop.
+#   sub    -- model for flat recursive sub-calls made from REPL code.
+#   answer -- model for the final single-shot answer synthesis.
+FLYCANON_RLM_ROOT_MODEL=anthropic:claude-sonnet-4-6
+FLYCANON_RLM_SUB_MODEL=anthropic:claude-sonnet-4-6
+FLYCANON_RLM_ANSWER_MODEL=anthropic:claude-sonnet-4-6
+
+# RLM budgets.
+#   max_iters  -- max orchestrator turns before the loop gives up and asks
+#                 for a plain-text answer from the transcript.
+#   sub_budget -- total recursive sub-call budget across one root session.
+#   max_depth  -- how deep rlm(...) may nest before degrading to a flat llm.
+FLYCANON_RLM_MAX_ITERS=8
+FLYCANON_RLM_SUB_BUDGET=12
+FLYCANON_RLM_MAX_DEPTH=1
+
+# Mark the large, static RLM system prompt with Anthropic
+# cache_control: ephemeral so it is cached server-side and reused across the
+# many Messages calls one CodeAct session makes (cuts input-token cost +
+# per-call latency). Set false to send it as a plain string (no cache
+# breakpoint).
+FLYCANON_RLM_PROMPT_CACHE=true
+
+# RLM execution sandbox. The RLM REPL execs model-written Python, and the
+# corpus is user-uploaded, so a malicious document can prompt-inject the
+# model. ``subprocess`` (the secure default) runs each turn's code in a
+# child process with a scrubbed environment (no API keys / DB / object-store
+# creds), resource limits (CPU/mem caps, no file writes), and capability-RPC
+# back to the parent for docs/llm/rlm/final -- the child holds no secrets,
+# network, or infrastructure. ``inprocess`` is the explicit opt-out that runs
+# the code in the engine's own restricted exec namespace (dev / trusted use
+# only). Only the exact value ``inprocess`` opts out; anything else resolves
+# to ``subprocess``.
+FLYCANON_RLM_SANDBOX=subprocess
+# Per-turn wall-clock timeout (seconds) for the subprocess sandbox; the child
+# is killed and the turn fails if it is exceeded.
+FLYCANON_RLM_SANDBOX_TIMEOUT_S=30
+
+# ----------------------------------------------------------------------------
+# Object store (RLM document originals)
+# ----------------------------------------------------------------------------
+# RLM reasons over the ORIGINAL document bytes, not the chunk index, so the
+# intake must persist each original to the object store and record its key
+# on the source row. Sources without a stored original are skipped by the
+# RLM corpus builder. Keep FLYCANON_STORE_ORIGINALS=true for RLM to work.
+#
+# Backend: ``localfs`` (default; writes files under a root dir for
+# dev / test) or ``s3`` (requires ``uv sync --extra s3``). AWS credentials
+# for the s3 backend come from the standard environment
+# (AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY / profiles / instance roles),
+# not from these settings.
+FLYCANON_OBJECT_STORE_BACKEND=localfs
+
+# --- localfs backend (FLYCANON_OBJECT_STORE_BACKEND=localfs) ----------------
+FLYCANON_OBJECT_STORE_LOCALFS_ROOT=./var/objects
+
+# --- s3 backend (FLYCANON_OBJECT_STORE_BACKEND=s3) --------------------------
+# Requires ``uv sync --extra s3``.
+FLYCANON_OBJECT_STORE_S3_BUCKET=
+# Key prefix prepended to every object key within the bucket.
+FLYCANON_OBJECT_STORE_S3_PREFIX=
+# Custom endpoint for MinIO / S3-compatible services; empty = default AWS.
+FLYCANON_OBJECT_STORE_S3_ENDPOINT_URL=
+# Region; empty defers to boto3's standard region resolution.
+FLYCANON_OBJECT_STORE_S3_REGION=
+
+# Whether intake persists the original uploaded bytes to the object store
+# and records the key on the source row. On by default so RLM has a
+# whole-document corpus to reason over; a write failure is best-effort and
+# never fails the ingest.
+FLYCANON_STORE_ORIGINALS=true
+
+# ----------------------------------------------------------------------------
+# Corpus page cache (RLM)
+# ----------------------------------------------------------------------------
+# Shared cache layered over the lazy RLM corpus store: an in-scope filing's
+# original is fetched from the object store + PyMuPDF-extracted at most once
+# per process (in-memory LRU) and once per fleet (shared Redis). Keyed by the
+# source's content_sha256 so a re-ingested source (new bytes -> new sha)
+# misses the stale entry automatically.
+#
+# Backend (mirrors FLYCANON_RATE_LIMIT_BACKEND):
+#   auto   -- (default) Redis when FLYCANON_REDIS_URL is set, else in-memory.
+#   redis  -- always Redis (synchronous client; read from the RLM worker
+#             thread). Use this for multi-replica deployments so a single
+#             fetch on one replica warms the whole fleet.
+#   in_memory -- always the in-process LRU (single-replica / dev posture).
+FLYCANON_CORPUS_CACHE_BACKEND=auto
+# Per-entry TTL in seconds (both backends).
+FLYCANON_CORPUS_CACHE_TTL_S=3600
+# LRU cap for the in-memory backend (the Redis backend uses native EX expiry).
+FLYCANON_CORPUS_CACHE_MAX_ENTRIES=512
+
+# ----------------------------------------------------------------------------
 # PII guardrail
 # ----------------------------------------------------------------------------
 # The intake pipeline scans every payload (and re-ingest payload) for
@@ -209,7 +317,9 @@ FLYCANON_OCR_LANG=eng+spa
 
 # ----------------------------------------------------------------------------
 # Provider credentials -- pulled from the standard env vars. Set only
-# the ones you need.
+# the ones you need. ANTHROPIC_API_KEY is REQUIRED at runtime in the
+# default answer mode: the RLM engine calls the Anthropic Messages API
+# directly for all three RLM models above.
 # ----------------------------------------------------------------------------
 # OPENAI_API_KEY=
 # ANTHROPIC_API_KEY=

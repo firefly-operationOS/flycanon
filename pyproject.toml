@@ -2,7 +2,7 @@
 name = "flycanon"
 # CalVer YY.MM.PP -- bumped per release. Note that PEP 440 normalises
 # ``26.05.04`` -> ``26.5.4`` in the built wheel filename.
-version = "26.5.9"
+version = "26.6.18"
 description = "Operational Knowledge Repository -- versioned, provenance-tracked canonical knowledge with hybrid retrieval and RAG, exposed as a standalone HTTP microservice over fireflyframework-pyfly and -agentic. Part of Firefly OperationOS, platform-agnostic by design."
 readme = "README.md"
 requires-python = ">=3.13,<3.14"
@@ -129,6 +129,12 @@ chroma = [
 # when FLYCANON_VECTOR_STORE=qdrant.
 qdrant = [
     "fireflyframework-agentic[vectorstores-qdrant]",
+]
+
+# Optional S3 object-store backend. Activates when
+# FLYCANON_OBJECT_STORE_BACKEND=s3; the localfs default needs no extra.
+s3 = [
+    "boto3>=1.34",
 ]
 
 [build-system]

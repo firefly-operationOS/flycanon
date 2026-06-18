@@ -374,3 +374,47 @@ class KnowledgeRepository:
                 tags=tuple(tags_json or ()),
             )
         return resolved
+
+    async def resolve_source_ids_for_items(
+        self,
+        item_ids: Sequence[str],
+        *,
+        tenant_id: str,
+        workspace_id: str,
+    ) -> set[str]:
+        """Source ids cited by the **current version** of the given items.
+
+        The whole-document analogue of the retrieval path's chunk-level
+        ``knowledge_item_ids`` filter: where retrieval matches a chunk hit
+        whose chunk is cited by one of the items, this returns every
+        ``source_id`` that those items' live citations point at. One
+        round-trip -- a single SELECT joining ``canon_citations`` against
+        ``canon_knowledge_versions`` + ``canon_knowledge_items`` filtered by
+        ``version == item.current_version`` and scoped to
+        ``(tenant_id, workspace_id)``. Superseded versions are ignored so the
+        result reflects the live canonical citation set. Returns an empty set
+        when ``item_ids`` is empty or none of the items cite any source.
+        """
+        ids = list(item_ids)
+        if not ids:
+            return set()
+        async with self._session_factory() as session:
+            stmt = (
+                select(CitationRow.source_id)
+                .join(
+                    KnowledgeVersionRow,
+                    KnowledgeVersionRow.id == CitationRow.knowledge_version_id,
+                )
+                .join(
+                    KnowledgeItemRow,
+                    KnowledgeItemRow.id == KnowledgeVersionRow.knowledge_item_id,
+                )
+                .where(
+                    KnowledgeVersionRow.knowledge_item_id.in_(ids),
+                    KnowledgeVersionRow.version == KnowledgeItemRow.current_version,
+                    CitationRow.tenant_id == tenant_id,
+                    CitationRow.workspace_id == workspace_id,
+                )
+            )
+            rows = (await session.execute(stmt)).all()
+        return {source_id for (source_id,) in rows if source_id is not None}
