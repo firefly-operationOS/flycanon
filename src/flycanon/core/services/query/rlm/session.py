@@ -46,6 +46,7 @@ from contextlib import redirect_stdout, suppress
 from typing import Any, Protocol, runtime_checkable
 
 from flycanon.core.services.query.rlm.client import AnthropicClient
+from flycanon.core.services.query.rlm.safe_builtins import _SAFE_BUILTINS
 
 
 @runtime_checkable
@@ -88,21 +89,9 @@ _PY_TOOL = [
 # ---------------------------------------------------------------------------
 # restricted exec sandbox
 # ---------------------------------------------------------------------------
-_SAFE_BUILTIN_NAMES = (
-    "print", "len", "range", "str", "list", "dict", "set", "tuple",
-    "sorted", "enumerate", "min", "max", "sum", "any", "all", "zip",
-    "map", "filter", "int", "float", "bool", "abs", "round", "repr",
-    "slice", "isinstance", "reversed", "True", "False", "None",
-)  # fmt: skip
-
-
-def _build_safe_builtins() -> dict:
-    """A whitelist of harmless builtins -- no ``open``, ``import``, ``eval``."""
-    src = __builtins__ if isinstance(__builtins__, dict) else vars(__builtins__)
-    return {name: src[name] for name in _SAFE_BUILTIN_NAMES if name in src}
-
-
-_SAFE_BUILTINS = _build_safe_builtins()
+# ``_SAFE_BUILTIN_NAMES`` / ``_SAFE_BUILTINS`` live in the dependency-free
+# ``safe_builtins`` leaf module so the out-of-process sandbox child shares the
+# exact same whitelist without importing this engine's ``httpx``/config stack.
 _MAX_STDOUT = 4000  # truncate each turn's printed output fed back to the model
 # Cap on cited page text. A dense 10-K page is ~3-5k chars; this keeps the
 # whole page the model read (structure intact) rather than a tiny prefix.

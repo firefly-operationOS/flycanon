@@ -68,12 +68,13 @@ from flycanon.core.services.ingestion import (
 )
 from flycanon.core.services.ingestion.chunker import build_default_chunker
 from flycanon.core.services.ingestion.loaders import default_registry
-from flycanon.core.services.query import AnswerService, SearchService
 from flycanon.core.services.query.answer_dispatcher import AnswerDispatcher
+from flycanon.core.services.query.answer_service import AnswerService
 from flycanon.core.services.query.rlm.client import AnthropicClient
 from flycanon.core.services.query.rlm.corpus import CanonCorpusBuilder
 from flycanon.core.services.query.rlm.page_cache import CorpusPageCache, build_page_cache
 from flycanon.core.services.query.rlm_answer_service import RLMAnswerService
+from flycanon.core.services.query.search_service import SearchService
 from flycanon.core.services.retrieval import (
     CorpusContext,
     IndexService,
