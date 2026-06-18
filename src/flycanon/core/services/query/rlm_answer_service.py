@@ -47,8 +47,9 @@ logger = logging.getLogger(__name__)
 
 # The not-found sentinels the engine emits when the evidence is absent
 # (see the ``final("the documents do not contain this", ...)`` guidance in
-# the RLM system prompt). Used -- alongside an empty citation list -- to
-# decide ``no_answer``.
+# the RLM system prompt). Used -- alongside an empty citation list -- as a
+# fallback for deciding ``no_answer`` when the engine's structured
+# ``found=False`` flag is not set.
 _NOT_FOUND_MARKERS = ("do not contain", "not found", "no documents", "cannot find")
 
 # Cap on how many prior turns we fold into the question for conversational
@@ -124,10 +125,15 @@ class RLMAnswerService:
             sub_budget=self._settings.rlm_sub_budget,
         )
         question = _question_with_history(request.question, prior_turns)
-        answer_text, cites = await asyncio.to_thread(session.run, question, docs)
+        answer_text, cites, engine_no_answer = await asyncio.to_thread(
+            session.run, question, docs
+        )
 
         citations = _map_citations(cites, docs)
-        no_answer = not citations and _looks_not_found(answer_text)
+        # Trust the engine's structured no-answer flag first; keep the
+        # text-marker check as a fallback for models that answer in plain text
+        # without passing ``found=False``.
+        no_answer = engine_no_answer or (not citations and _looks_not_found(answer_text))
 
         elapsed_ms = int((time.perf_counter() - start) * 1000)
         usage = query_client.token_totals()
