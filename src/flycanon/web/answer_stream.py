@@ -171,6 +171,3 @@ async def stream_answer_sse(
             "error",
             {"code": "stream_error", "message": str(exc)},
         )
-
-
-__all__ = ["stream_answer_sse", "_sse_frame"]
