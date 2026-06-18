@@ -295,6 +295,7 @@ class RLMSession:
         started :class:`SandboxExecutor`; ``_run_block`` dispatches on its type.
         """
         messages: list[dict[str, Any]] = [{"role": "user", "content": first_user}]
+        dead_sandbox = False
         for _ in range(self.max_iters):
             self.turns += 1
             if self.on_turn is not None:
@@ -318,8 +319,14 @@ class RLMSession:
                 )
                 if fin is not None:
                     return fin.answer, fin.citations, fin.no_answer
-                # stdout is only None on the _Final path, which returned above.
-                assert stdout is not None
+                # stdout is None only on the _Final path (returned above) or when
+                # the sandbox child died: in that case stop running blocks -- the
+                # executor is dead and another run_block would just return
+                # TERMINATED again -- and fall through to the plain-text fallback
+                # below, which uses the PARENT's client and works with no child.
+                if stdout is None:
+                    dead_sandbox = True
+                    break
                 results.append(
                     {
                         "type": "tool_result",
@@ -327,6 +334,8 @@ class RLMSession:
                         "content": stdout[:_MAX_STDOUT],
                     }
                 )
+            if dead_sandbox:
+                break
             messages.append({"role": "user", "content": results})
         # ran out of turns -> ask for a direct answer from the transcript
         messages.append({"role": "user", "content": "Stop now and state your final answer as plain text."})
@@ -346,6 +355,11 @@ class RLMSession:
         child and translate its :class:`BlockResult` into the same contract.
         Citations for a child ``final`` frame are built parent-side, since the
         child only ships raw filings/pages.
+
+        Returns ``(None, None)`` when the sandbox child is dead
+        (``terminated``): the caller stops the loop and degrades to a
+        parent-side answer instead of running another block on a dead executor.
+        ``(None, fin)`` signals a ``final``; ``(stdout, None)`` a live result.
         """
         if not isinstance(runner, SandboxExecutor):
             return self._exec(code, runner)
@@ -358,7 +372,12 @@ class RLMSession:
                 no_answer=not bool(payload.get("found", True)),
             )
             return None, fin
+        if result.kind == "terminated":
+            # The child is gone (resource limit / crash / kill / timeout). Signal
+            # the loop to stop; it falls through to the plain-text fallback.
+            return None, None
         if result.kind == "error":
+            # A normal child exception (child still alive): feed the traceback back.
             return (result.error or "") + "\n", None
         return (result.stdout or "(no output)"), None
 
