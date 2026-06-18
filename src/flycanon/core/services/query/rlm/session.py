@@ -103,6 +103,9 @@ def _build_safe_builtins() -> dict:
 
 _SAFE_BUILTINS = _build_safe_builtins()
 _MAX_STDOUT = 4000  # truncate each turn's printed output fed back to the model
+# Cap on cited page text. A dense 10-K page is ~3-5k chars; this keeps the
+# whole page the model read (structure intact) rather than a tiny prefix.
+_CITATION_CONTENT_CHARS = 4000
 
 
 class _Final(Exception):
@@ -292,7 +295,10 @@ class RLMSession:
                 if page is None:
                     page = _best_page(question, pg_list)
                 page = max(0, min(int(page), len(pg_list) - 1))
-                content = re.sub(r"\s+", " ", pg_list[page]).strip()[:500]
+                # Keep the page's text structure (newlines / table layout) -- the
+                # judge needs the actual page the model read, not a flattened
+                # prefix. Financial statements align labels to numbers by row.
+                content = pg_list[page].strip()[:_CITATION_CONTENT_CHARS]
             else:
                 content = ""
             cites.append({"filing": fid, "page": page, "content": content})
