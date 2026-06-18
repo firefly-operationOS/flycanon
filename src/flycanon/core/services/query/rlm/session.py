@@ -24,7 +24,9 @@ Faithful to alexzhang13/rlm's mechanism (adapted to Anthropic + flycanon):
   sub-calls**: ``llm(prompt)`` (a flat sub-LM call on a chunk) and
   ``rlm(question, text)`` (a nested REPL over a slice, depth-limited -- at
   ``max_depth`` it degrades to ``llm``).
-* The loop stops when a code block calls ``final(answer, filings=..., pages=...)``.
+* The loop stops when a code block calls
+  ``final(answer, filings=..., pages=..., found=...)``; ``found=False`` flags a
+  structured no-answer that flows out of the loop as the third return value.
 
 ``exec`` runs model-written code, so the namespace exposes only a safe builtins
 subset (text processing, no open/import/eval) plus ``re``, ``llm``, ``rlm``,
@@ -72,7 +74,8 @@ _PY_TOOL = [
         "name": "python",
         "description": "Execute Python in the persistent REPL and return its stdout. The "
         "namespace has `docs`, `re`, `llm`, `rlm`, `final`. Call "
-        "`final(answer, filings=[...], pages=[...])` from code to finish.",
+        "`final(answer, filings=[...], pages=[...], found=True)` from code to finish; "
+        "pass `found=False` when the documents do not contain the answer.",
         "input_schema": {
             "type": "object",
             "properties": {"code": {"type": "string", "description": "Python source to execute"}},
@@ -103,8 +106,8 @@ _MAX_STDOUT = 4000  # truncate each turn's printed output fed back to the model
 
 
 class _Final(Exception):
-    def __init__(self, answer: str, citations: list[dict]):
-        self.answer, self.citations = answer, citations
+    def __init__(self, answer: str, citations: list[dict], no_answer: bool = False):
+        self.answer, self.citations, self.no_answer = answer, citations, no_answer
 
 
 _WORD = re.compile(r"[a-zA-Z][a-zA-Z']+")
@@ -146,13 +149,14 @@ Rules:
   answer, then call `final(...)`. Print intermediate findings so you can see them.
   Keep printed output small (slice/grep; don't print whole documents).
 - Always finish by calling `final(...)`. If the evidence is not present, call
-  `final("the documents do not contain this", filings=[...])`."""
+  `final('the documents do not contain this', filings=[...], found=False)`."""
 
 _NESTED_SYSTEM = """\
 You are a recursive sub-model answering a question over a text passage held in the
 variable `text` (a string). Inspect it with the `python` tool. Helpers: `llm(prompt)`,
 `re`, `print`, and `final(answer)` to finish. Its stdout returns to you. Search `text`
-for the figure, extract it, then call `final(...)`."""
+for the figure, extract it, then call `final(...)`. If the evidence is not present, call
+`final('the documents do not contain this', found=False)`."""
 
 
 class RLMSession:
@@ -190,11 +194,11 @@ class RLMSession:
             max_iters=4,
             sub_budget=max(2, self.sub_budget - self.sub_calls),
         )
-        ans, _ = sub.run_over_text(question, str(text))
+        ans, _cites, _no_answer = sub.run_over_text(question, str(text))
         return ans
 
     # -- the two entry points share one CodeAct loop --
-    def run(self, question: str, docs: DocCorpus) -> tuple[str, list[dict]]:
+    def run(self, question: str, docs: DocCorpus) -> tuple[str, list[dict], bool]:
         ns = {
             "docs": docs,
             "re": re,
@@ -204,7 +208,7 @@ class RLMSession:
         }
         return self._loop(SYSTEM, f"Question: {question}\n\nSolve it.", ns, docs, question)
 
-    def run_over_text(self, question: str, text: str) -> tuple[str, list[dict]]:
+    def run_over_text(self, question: str, text: str) -> tuple[str, list[dict], bool]:
         ns = {
             "text": text,
             "re": re,
@@ -229,8 +233,12 @@ class RLMSession:
             return buf.getvalue() + "\n" + traceback.format_exc(limit=3), None
 
     def _loop(self, system: str, first_user: str, ns: dict, docs, question):
-        def final(answer, filings=None, pages=None):
-            raise _Final(str(answer), self._citations(filings, pages, docs, question))
+        def final(answer, filings=None, pages=None, found=True):
+            raise _Final(
+                str(answer),
+                self._citations(filings, pages, docs, question),
+                no_answer=not found,
+            )
 
         ns["final"] = final
 
@@ -243,12 +251,13 @@ class RLMSession:
             tool_uses = [b for b in content if b.get("type") == "tool_use"]
             if not tool_uses:  # model answered in text without running code
                 text = "".join(b.get("text", "") for b in content if b.get("type") == "text")
-                return text.strip(), self._citations(None, None, docs, question)
+                # best-effort plain-text answer: not a structured no-answer.
+                return text.strip(), self._citations(None, None, docs, question), False
             results = []
             for tu in tool_uses:
                 stdout, fin = self._exec(str(tu.get("input", {}).get("code", "")), ns)
                 if fin is not None:
-                    return fin.answer, fin.citations
+                    return fin.answer, fin.citations, fin.no_answer
                 # stdout is only None on the _Final path, which returned above.
                 assert stdout is not None
                 results.append(
@@ -266,7 +275,8 @@ class RLMSession:
             for b in self.client.chat_raw(messages, system, _PY_TOOL).get("content", [])
             if b.get("type") == "text"
         )
-        return text.strip(), self._citations(None, None, docs, question)
+        # ran out of iterations: forced best-effort answer, not a structured no-answer.
+        return text.strip(), self._citations(None, None, docs, question), False
 
     def _citations(self, filings, pages, docs, question) -> list[dict]:
         if not filings:
