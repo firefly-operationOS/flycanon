@@ -176,4 +176,6 @@ class QueryController:
         if not self._dispatcher.is_rag:
             return response
         body = response.model_dump(mode="json") if isinstance(response, BaseModel) else response
-        return JSONResponse(body, headers={HEADER_DEPRECATION: DEPRECATION_RAG_MESSAGE})
+        # pyfly passes a starlette Response through unchanged; the route keeps its
+        # ``-> AnswerResponse`` annotation so the OpenAPI schema is unaffected.
+        return JSONResponse(body, headers={HEADER_DEPRECATION: DEPRECATION_RAG_MESSAGE})  # type: ignore[return-value]
