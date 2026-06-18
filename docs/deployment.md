@@ -134,6 +134,8 @@ value other than `rag` is normalised to `rlm`.
 | `FLYCANON_RLM_SUB_BUDGET` | Total recursive sub-call budget across one root session. | `12` |
 | `FLYCANON_RLM_MAX_DEPTH` | How deep `rlm(...)` may nest before degrading to a flat `llm`. | `1` |
 | `FLYCANON_RLM_PROMPT_CACHE` | Mark the large static RLM system prompt with Anthropic `cache_control: ephemeral` so it is cached server-side and reused across the many Messages calls one CodeAct session makes (cuts input-token cost + per-call latency). `false` sends it as a plain string. | `true` |
+| `FLYCANON_RLM_SANDBOX` | Where the model-written REPL code runs. `subprocess` (the secure default) execs it in a scrubbed-env, resource-limited child process; `inprocess` is the explicit opt-out that runs it in the engine's own restricted `exec` namespace (dev / trusted use only). Only the exact value `inprocess` opts out; anything else resolves to `subprocess`. See [RLM execution sandbox](#rlm-execution-sandbox-security). | `subprocess` |
+| `FLYCANON_RLM_SANDBOX_TIMEOUT_S` | Per-turn wall-clock timeout (seconds) for the subprocess sandbox; the child is killed and the turn fails if exceeded. | `30` |
 
 ### What RLM is
 
@@ -172,6 +174,47 @@ endpoints return an `X-Flycanon-Deprecation` response header to clients
 -- the client-facing deprecation signal alongside the server log. The
 `/api/v1/search` surface (raw hybrid
 retrieval, no LLM) is unaffected and stays.
+
+### RLM execution sandbox (security)
+
+The RLM REPL **execs model-written Python** every turn, and the corpus is
+**user-uploaded**, so a malicious document can prompt-inject the
+orchestrator model into writing hostile code. To contain that, the exec
+runs out of process by default (`FLYCANON_RLM_SANDBOX=subprocess`):
+
+- **Scrubbed environment.** The child inherits only a minimal whitelist
+  (`PATH`, `LANG`, `LC_ALL`, `PYTHONPATH`, `PYTHONHASHSEED`) -- no
+  `ANTHROPIC_API_KEY`, no `AWS_*` / `AZURE_*` cloud creds, no
+  `DATABASE_URL` / `REDIS_*`, and no `FLYCANON_*` secrets. Prompt-injected
+  code cannot read a credential because none are present.
+- **Resource limits.** At startup the child clamps itself with
+  `setrlimit`: a CPU-time cap (`RLIMIT_CPU`), a 1 GiB address-space cap
+  (`RLIMIT_AS`), and `RLIMIT_FSIZE = 0` so it cannot create or grow any
+  file. The parent additionally enforces a wall-clock timeout
+  (`FLYCANON_RLM_SANDBOX_TIMEOUT_S`, default 30 s) and SIGKILLs a child
+  that overruns.
+- **Capability RPC, no infrastructure in the child.** The child holds no
+  document store or model client. Its `docs` / `llm` / `rlm` / `final`
+  stubs marshal each call to the parent as a length-prefixed **JSON-only**
+  frame (never `pickle` / `eval`), validated against fixed allowlists; the
+  parent services it against the real infra and replies. The secrets,
+  network, and infrastructure objects live only in the parent.
+- **Blast radius.** An escape is limited to the in-scope corpus the parent
+  already exposes through those capability RPCs -- the same documents the
+  query was authorised to read.
+
+Setting `FLYCANON_RLM_SANDBOX=inprocess` disables this isolation and runs
+the model code in the engine's own process (restricted builtins only). It
+is intended for dev / trusted environments and is **not recommended in
+production**.
+
+**Residual risk / follow-up.** The child is still a normal process on the
+host network: a sandbox escape (or a bug in the restricted builtins) could
+attempt **network egress to exfiltrate the in-scope corpus**. Hard
+network/syscall blocking -- running the child under `nsjail` / `seccomp`
+inside a network namespace with no egress -- is a recommended
+defence-in-depth follow-up. It needs a `Dockerfile` change (the sandbox
+tooling and a dropped-network profile) and is not yet in place.
 
 ---
 
