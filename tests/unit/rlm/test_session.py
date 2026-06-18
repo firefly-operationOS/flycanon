@@ -327,9 +327,7 @@ def test_on_turn_fires_once_per_turn_with_increasing_numbers():
         ]
     )
     seen: list[tuple[int, list[str]]] = []
-    RLMSession(client, on_turn=lambda turn, accessed: seen.append((turn, list(accessed)))).run(
-        "q", docs
-    )
+    RLMSession(client, on_turn=lambda turn, accessed: seen.append((turn, list(accessed)))).run("q", docs)
     # one callback per orchestrator turn (3 turns -> 3 calls), increasing numbers
     assert [turn for turn, _ in seen] == [1, 2, 3]
     # the accessed keys snapshot is forwarded
