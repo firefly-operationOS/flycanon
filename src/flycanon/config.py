@@ -293,14 +293,16 @@ class CanonSettings(BaseSettings):
     # prompt is sent as a plain string (no cache breakpoint).
     rlm_prompt_cache: bool = Field(default=True)
     # Where the model-written REPL code is executed.
-    # ``inprocess`` (FLYCANON_RLM_SANDBOX) runs each turn's code in the
-    # engine's own restricted ``exec`` namespace (the current default);
-    # ``subprocess`` runs it in the scrubbed-env sandbox child instead,
-    # servicing every docs/llm/rlm request from the parent. Any value
-    # other than ``subprocess`` normalises to ``inprocess``.
+    # ``subprocess`` (FLYCANON_RLM_SANDBOX, the secure default) runs each
+    # turn's code in the scrubbed-env sandbox child, servicing every
+    # docs/llm/rlm request from the parent so the child holds no secrets;
+    # ``inprocess`` is the explicit opt-out that runs the code in the
+    # engine's own restricted ``exec`` namespace (dev/trusted use only).
+    # Only the exact string ``inprocess`` opts out; any other value
+    # (including an unrecognised or empty one) normalises to ``subprocess``.
     rlm_sandbox: str = Field(
-        default="inprocess",
-        description="RLM REPL execution mode: ``inprocess`` (default) or ``subprocess``.",
+        default="subprocess",
+        description="RLM REPL execution mode: ``subprocess`` (default) or ``inprocess`` (opt-out).",
     )
     # Per-turn wall-clock timeout (seconds) for the subprocess sandbox.
     rlm_sandbox_timeout_s: int = Field(default=30, ge=1)
@@ -429,11 +431,11 @@ class CanonSettings(BaseSettings):
     @field_validator("rlm_sandbox", mode="before")
     @classmethod
     def _normalise_rlm_sandbox(cls, value: object) -> str:
-        # Only ``subprocess`` opts into the out-of-process sandbox; any
-        # other value (including an unrecognised one) is the in-process
-        # default.
+        # Secure by default: only the exact string ``inprocess`` opts out of
+        # the out-of-process sandbox; any other value (including an
+        # unrecognised or empty one) resolves to ``subprocess``.
         text = str(value).strip().lower() if value is not None else ""
-        return "subprocess" if text == "subprocess" else "inprocess"
+        return "inprocess" if text == "inprocess" else "subprocess"
 
 
 @lru_cache(maxsize=1)
