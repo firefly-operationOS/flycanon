@@ -45,6 +45,7 @@ from dataclasses import dataclass
 import fitz  # PyMuPDF
 
 from flycanon.core.services.ingestion.loaders import LoaderRegistry, default_registry
+from flycanon.core.services.query.rlm.page_cache import CorpusPageCache
 from flycanon.core.services.storage.object_store import ObjectStore
 from flycanon.interfaces.enums import SourceKind
 from flycanon.models.entities.source import SourceRow
@@ -69,6 +70,10 @@ class SourceMeta:
     title: str | None
     kind: str
     object_store_key: str
+    # Content hash of the source's original bytes -- the shared
+    # page-cache key. Identical bytes share a cache entry; a re-ingested
+    # source (new bytes -> new sha) misses the stale entry automatically.
+    content_sha256: str
 
 
 def extract_pdf_pages(data: bytes) -> list[str]:
@@ -94,6 +99,13 @@ class CanonDocStore:
     memoise the page list in ``_pages`` so later reads of the same key do no
     further I/O.
 
+    A shared :class:`CorpusPageCache` (optional) sits in front of that
+    fetch: ``_load`` checks it -- keyed by the source's ``content_sha256``
+    -- BEFORE ``get_sync`` + extract, and populates it on a miss. The cache
+    is a process (or fleet, with Redis) singleton, so the fetch + extract
+    is shared across queries; the per-store ``_pages`` memo stays the
+    innermost per-query layer.
+
     ``accessed`` records, in order, the keys the model touched via
     ``__getitem__`` / ``pages`` -- exactly like the experiment's ``DocStore`` --
     so the caller can credit the sources the model actually read.
@@ -105,10 +117,12 @@ class CanonDocStore:
         *,
         object_store: ObjectStore,
         registry: LoaderRegistry,
+        cache: CorpusPageCache | None = None,
     ) -> None:
         self._sources = sources
         self._object_store = object_store
         self._registry = registry
+        self._cache = cache  # shared cross-query page cache, keyed by content_sha256
         self._pages: dict[str, list[str]] = {}  # memoised per-key page lists
         self.accessed: list[str] = []  # ordered, deduped: keys the model touched
 
@@ -146,13 +160,27 @@ class CanonDocStore:
 
     # -- internals --
     def _load(self, key: str) -> list[str]:
-        """Page list for ``key``, fetching + extracting on first access."""
+        """Page list for ``key``, fetching + extracting on first access.
+
+        Layered: the per-store ``_pages`` memo is the innermost
+        per-query layer; the shared :class:`CorpusPageCache` (keyed by
+        ``content_sha256``) sits in front of the object-store fetch so
+        the fetch + extract is shared across queries. On a shared-cache
+        miss we fetch + extract, then populate it.
+        """
         cached = self._pages.get(key)
         if cached is not None:
             return cached
         meta = self._sources[key]  # KeyError for an unknown key, like a dict
+        if self._cache is not None:
+            shared = self._cache.get(meta.content_sha256)
+            if shared is not None:
+                self._pages[key] = shared
+                return shared
         data = self._object_store.get_sync(meta.object_store_key)
         pages = _pages_for(meta, data, self._registry)
+        if self._cache is not None:
+            self._cache.set(meta.content_sha256, pages)
         self._pages[key] = pages
         return pages
 
@@ -168,9 +196,11 @@ class CanonCorpusBuilder:
     the same AND / no-op semantics as the RAG retrieval path) and collects only
     metadata -- no original is fetched or extracted here. The returned store
     fetches each filing's original from the :class:`ObjectStore` and extracts
-    its page-structured text lazily, on first access from the REPL. Sources
-    without an ``object_store_key`` have no stored original to read and are
-    skipped with a log line.
+    its page-structured text lazily, on first access from the REPL -- through
+    an optional shared :class:`CorpusPageCache` (keyed by ``content_sha256``)
+    so that fetch + extract is shared across queries. Sources without an
+    ``object_store_key`` have no stored original to read and are skipped with
+    a log line.
     """
 
     def __init__(
@@ -180,11 +210,13 @@ class CanonCorpusBuilder:
         knowledge_repository: KnowledgeRepository,
         object_store: ObjectStore,
         registry: LoaderRegistry | None = None,
+        cache: CorpusPageCache | None = None,
     ) -> None:
         self._sources = source_repository
         self._knowledge = knowledge_repository
         self._object_store = object_store
         self._registry = registry or default_registry()
+        self._cache = cache  # shared page cache passed through to each store
 
     async def build(
         self,
@@ -212,6 +244,7 @@ class CanonCorpusBuilder:
             sources,
             object_store=self._object_store,
             registry=self._registry,
+            cache=self._cache,
         )
 
     async def _list_in_scope(
@@ -375,4 +408,5 @@ def _source_meta(row: SourceRow) -> SourceMeta:
         title=str(title) if title else None,
         kind=row.kind,
         object_store_key=row.object_store_key or "",
+        content_sha256=row.content_sha256,
     )
