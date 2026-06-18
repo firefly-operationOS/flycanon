@@ -40,7 +40,7 @@ import io
 import re
 import traceback
 from contextlib import redirect_stdout
-from typing import Protocol, runtime_checkable
+from typing import Any, Protocol, runtime_checkable
 
 from flycanon.core.services.query.rlm.client import AnthropicClient
 
@@ -53,7 +53,7 @@ class DocCorpus(Protocol):
     engine only relies on this dict-like surface plus page accessors.
     """
 
-    def keys(self): ...
+    def keys(self) -> list[str]: ...
 
     def __getitem__(self, key: str) -> str: ...
 
@@ -234,7 +234,7 @@ class RLMSession:
 
         ns["final"] = final
 
-        messages = [{"role": "user", "content": first_user}]
+        messages: list[dict[str, Any]] = [{"role": "user", "content": first_user}]
         for _ in range(self.max_iters):
             self.turns += 1
             resp = self.client.chat_raw(messages, system, _PY_TOOL)
@@ -249,6 +249,8 @@ class RLMSession:
                 stdout, fin = self._exec(str(tu.get("input", {}).get("code", "")), ns)
                 if fin is not None:
                     return fin.answer, fin.citations
+                # stdout is only None on the _Final path, which returned above.
+                assert stdout is not None
                 results.append(
                     {
                         "type": "tool_result",
