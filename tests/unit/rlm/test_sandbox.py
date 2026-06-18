@@ -575,3 +575,62 @@ def test_blockresult_is_frozen():
     r = BlockResult(kind="stdout", stdout="x")
     with pytest.raises(dataclasses.FrozenInstanceError):
         r.kind = "error"  # type: ignore[misc]
+
+
+# ---------------------------------------------------------------------------
+# inactivity timeout (fix 1): a child making progress is never killed; a silent
+# child still is.
+# ---------------------------------------------------------------------------
+def test_slow_but_progressing_block_does_not_time_out(make_executor):
+    # The timeout is an INACTIVITY timeout, not a total-block budget. Here each
+    # llm() RPC the parent services sleeps 0.2s -- shorter than the 0.5s timeout
+    # -- but the child makes 5 of them, so the WHOLE block runs ~1.0s, well over
+    # the timeout. Because the child keeps emitting frames (and the deadline
+    # resets after each), it must NOT be killed: the block completes normally.
+    calls: list[str] = []
+
+    def slow_llm(prompt: str) -> str:
+        time.sleep(0.2)
+        calls.append(prompt)
+        return f"ok:{prompt}"
+
+    ex = make_executor(timeout=0.5, llm=slow_llm)
+    start = time.monotonic()
+    result = ex.run_block(
+        "for i in range(5):\n    print(llm(str(i)))"
+    )
+    elapsed = time.monotonic() - start
+    assert result.kind == "stdout", result.error
+    # total wall-clock comfortably exceeds the 0.5s timeout, proving the timeout
+    # measures silence, not total block time.
+    assert elapsed > 0.5
+    assert len(calls) == 5
+    assert "ok:4" in result.stdout
+    assert ex._proc is not None  # the child survived: still usable
+
+
+def test_silent_child_times_out_to_terminated(make_executor):
+    # A genuinely hung child (busy-loop, emits no frames) goes silent past the
+    # inactivity window and is killed -> terminated within ~timeout.
+    ex = make_executor(timeout=0.5)
+    start = time.monotonic()
+    result = ex.run_block("while True:\n    pass")
+    elapsed = time.monotonic() - start
+    assert result.kind == "terminated"
+    assert "timed out" in result.error
+    assert elapsed < 5.0  # bounded by the inactivity timeout, not blocked forever
+    assert ex._proc is None
+
+
+def test_child_death_mid_session_makes_next_run_block_terminated(make_executor):
+    # A prior block kills the child (here: a runaway loop trips the inactivity
+    # timeout -> _kill -> _proc=None). The NEXT run_block must return a
+    # terminated result, NOT raise RuntimeError('sandbox not started').
+    ex = make_executor(timeout=0.5)
+    first = ex.run_block("while True:\n    pass")
+    assert first.kind == "terminated"
+    assert ex._proc is None
+    # the executor is now dead; a follow-up block degrades cleanly.
+    second = ex.run_block("print('should not run')")
+    assert second.kind == "terminated"
+    assert "not started" in second.error
