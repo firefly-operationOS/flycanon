@@ -21,24 +21,24 @@ import pytest
 from flycanon.config import CanonSettings
 
 
-def test_rlm_sandbox_defaults_to_inprocess():
+def test_rlm_sandbox_defaults_to_subprocess():
     settings = CanonSettings()
-    assert settings.rlm_sandbox == "inprocess"
+    assert settings.rlm_sandbox == "subprocess"
     assert settings.rlm_sandbox_timeout_s == 30
 
 
-def test_rlm_sandbox_accepts_subprocess():
-    assert CanonSettings(rlm_sandbox="subprocess").rlm_sandbox == "subprocess"
+def test_rlm_sandbox_accepts_inprocess_optout():
+    assert CanonSettings(rlm_sandbox="inprocess").rlm_sandbox == "inprocess"
 
 
-@pytest.mark.parametrize("value", ["SUBPROCESS", " subprocess ", "Subprocess"])
+@pytest.mark.parametrize("value", ["INPROCESS", " inprocess ", "Inprocess"])
 def test_rlm_sandbox_normalises_case_and_whitespace(value):
-    assert CanonSettings(rlm_sandbox=value).rlm_sandbox == "subprocess"
-
-
-@pytest.mark.parametrize("value", ["inprocess", "nonsense", "", "thread"])
-def test_rlm_sandbox_unknown_falls_back_to_inprocess(value):
     assert CanonSettings(rlm_sandbox=value).rlm_sandbox == "inprocess"
+
+
+@pytest.mark.parametrize("value", ["subprocess", "nonsense", "", "thread"])
+def test_rlm_sandbox_unknown_falls_back_to_subprocess(value):
+    assert CanonSettings(rlm_sandbox=value).rlm_sandbox == "subprocess"
 
 
 def test_rlm_sandbox_timeout_rejects_below_one():
@@ -47,8 +47,8 @@ def test_rlm_sandbox_timeout_rejects_below_one():
 
 
 def test_rlm_sandbox_reads_from_env(monkeypatch):
-    monkeypatch.setenv("FLYCANON_RLM_SANDBOX", "subprocess")
+    monkeypatch.setenv("FLYCANON_RLM_SANDBOX", "inprocess")
     monkeypatch.setenv("FLYCANON_RLM_SANDBOX_TIMEOUT_S", "45")
     settings = CanonSettings()
-    assert settings.rlm_sandbox == "subprocess"
+    assert settings.rlm_sandbox == "inprocess"
     assert settings.rlm_sandbox_timeout_s == 45

@@ -497,7 +497,7 @@ async def test_sandbox_settings_are_threaded_into_session(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_default_sandbox_mode_is_inprocess(monkeypatch):
+async def test_default_sandbox_mode_is_subprocess(monkeypatch):
     pages = {"acme-10k": ["a"]}
     sources = {
         "acme-10k": SourceMeta(
@@ -522,6 +522,7 @@ async def test_default_sandbox_mode_is_inprocess(monkeypatch):
 
     await service.answer(_request(), tenant_id="t1", workspace_id="w1")
 
-    # default settings keep the in-process REPL.
-    assert captured["sandbox_mode"] == "inprocess"
+    # default settings run the sandboxed subprocess (RLMSession is faked, so
+    # no real child is spawned -- only the threaded mode value is asserted).
+    assert captured["sandbox_mode"] == "subprocess"
     assert captured["sandbox_timeout_s"] == 30
