@@ -41,6 +41,7 @@ from __future__ import annotations
 import io
 import re
 import traceback
+from collections.abc import Callable
 from contextlib import redirect_stdout
 from typing import Any, Protocol, runtime_checkable
 
@@ -172,12 +173,18 @@ class RLMSession:
         max_depth: int = 1,
         max_iters: int = 8,
         sub_budget: int = 12,
+        on_turn: Callable[[int, list[str]], None] | None = None,
     ):
         self.client = client
         self.depth, self.max_depth = depth, max_depth
         self.max_iters, self.sub_budget = max_iters, sub_budget
         self.sub_calls = 0
         self.turns = 0
+        # Optional per-turn progress hook. Fired from the (synchronous) REPL
+        # worker thread after each orchestrator turn so a streaming caller can
+        # surface live progress; ``None`` on the non-streaming path. A callback
+        # error must never break the REPL, so the call site guards it.
+        self.on_turn = on_turn
 
     # -- recursive helpers exposed into the sandbox --
     def _llm(self, prompt: str) -> str:
@@ -248,6 +255,14 @@ class RLMSession:
         messages: list[dict[str, Any]] = [{"role": "user", "content": first_user}]
         for _ in range(self.max_iters):
             self.turns += 1
+            if self.on_turn is not None:
+                # ``docs`` is the corpus on the root path (carries ``.accessed``)
+                # and ``None`` on the nested-text path. A callback failure must
+                # never break the REPL.
+                try:
+                    self.on_turn(self.turns, list(docs.accessed) if docs is not None else [])
+                except Exception:  # noqa: BLE001 -- progress hook must not break the loop
+                    pass
             resp = self.client.chat_raw(messages, system, _PY_TOOL)
             content = resp.get("content", [])
             messages.append({"role": "assistant", "content": content})
