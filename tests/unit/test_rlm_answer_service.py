@@ -24,7 +24,7 @@ from __future__ import annotations
 
 import pytest
 
-from flycanon.config import get_settings
+from flycanon.config import CanonSettings, get_settings
 from flycanon.core.services.ingestion.loaders import default_registry
 from flycanon.core.services.query import rlm_answer_service as svc_mod
 from flycanon.core.services.query.rlm.corpus import CanonDocStore, SourceMeta
@@ -457,3 +457,71 @@ async def test_cost_record_failure_does_not_break_answer(monkeypatch):
     assert len(resp.citations) == 1
     # the record() was attempted (and raised, swallowed best-effort)
     assert len(cost.calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_sandbox_settings_are_threaded_into_session(monkeypatch):
+    pages = {"acme-10k": ["a", "b"]}
+    sources = {
+        "acme-10k": SourceMeta(
+            source_id="src-1",
+            filename="acme.pdf",
+            title="ACME 10-K",
+            kind="pdf",
+            object_store_key="k1",
+            content_sha256="sha-1",
+        )
+    }
+    builder = FakeCorpusBuilder(_docs(pages, sources))
+    settings = CanonSettings(rlm_sandbox="subprocess", rlm_sandbox_timeout_s=45)
+    service = RLMAnswerService(
+        corpus_builder=builder,
+        client=FakeClient(),
+        settings=settings,
+        cost_service=FakeCostService(),
+    )
+
+    captured: dict = {}
+
+    def _capture(*_args, **kwargs):
+        captured.update(kwargs)
+        return FakeSession("Revenue was 5M.", [{"filing": "acme-10k", "page": 1, "content": "x"}])
+
+    monkeypatch.setattr(svc_mod, "RLMSession", _capture)
+
+    await service.answer(_request(), tenant_id="t1", workspace_id="w1")
+
+    # the config knobs reach the session that runs the REPL.
+    assert captured["sandbox_mode"] == "subprocess"
+    assert captured["sandbox_timeout_s"] == 45
+
+
+@pytest.mark.asyncio
+async def test_default_sandbox_mode_is_inprocess(monkeypatch):
+    pages = {"acme-10k": ["a"]}
+    sources = {
+        "acme-10k": SourceMeta(
+            source_id="src-1",
+            filename="acme.pdf",
+            title="ACME 10-K",
+            kind="pdf",
+            object_store_key="k1",
+            content_sha256="sha-1",
+        )
+    }
+    builder = FakeCorpusBuilder(_docs(pages, sources))
+    service = _service(builder)
+
+    captured: dict = {}
+
+    def _capture(*_args, **kwargs):
+        captured.update(kwargs)
+        return FakeSession("ok", [{"filing": "acme-10k", "page": 0, "content": "a"}])
+
+    monkeypatch.setattr(svc_mod, "RLMSession", _capture)
+
+    await service.answer(_request(), tenant_id="t1", workspace_id="w1")
+
+    # default settings keep the in-process REPL.
+    assert captured["sandbox_mode"] == "inprocess"
+    assert captured["sandbox_timeout_s"] == 30
