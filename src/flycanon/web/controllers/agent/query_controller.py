@@ -37,6 +37,7 @@ verification step before yielding to the same wire format.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import time
@@ -172,8 +173,8 @@ class AgentQueryController:
 
         * RAG mode -- ``event: hit`` per retrieved citation, then
           ``event: final`` with the full answer.
-        * RLM mode (default) -- a single ``event: status``
-          (``reasoning``) frame, then ``event: final``.
+        * RLM mode (default) -- one ``event: status`` (``reasoning``)
+          frame per REPL turn, then ``event: final``.
 
         The generator mirrors the user-tier
         iterator. Token verification + idempotency-header check
@@ -224,24 +225,54 @@ class AgentQueryController:
                     for hit in retrieval.hits:
                         dto = _hit_dto(hit)
                         yield _sse_frame("hit", dto.model_dump(mode="json"))
-                else:
-                    # RLM (default): no pre-retrieval step. Emit a single
-                    # status frame so the consuming agent can show progress
-                    # while the engine reasons over the corpus.
-                    yield _sse_frame(
-                        "status",
-                        {"stage": "reasoning", "message": "Reasoning over documents with RLM…"},
-                    )
 
-                # Answer in one shot via the dispatcher (RLM or RAG).
-                # Per-token streaming is a follow-up once the agentic
-                # framework's streaming surface lands; matches the
-                # user-tier behaviour.
-                response = await self._dispatcher.answer(
-                    request,
-                    tenant_id=ctx.tenant_id,
-                    workspace_id=ctx.workspace_id,
-                )
+                    # RAG answers in one shot via the dispatcher; no
+                    # per-turn progress to stream.
+                    response = await self._dispatcher.answer(
+                        request,
+                        tenant_id=ctx.tenant_id,
+                        workspace_id=ctx.workspace_id,
+                    )
+                else:
+                    # RLM (default): no pre-retrieval step. Stream a live
+                    # ``status`` frame per REPL turn so the consuming agent
+                    # shows progress while the engine reasons over the corpus.
+                    #
+                    # The engine fires ``on_turn`` from its worker thread (the
+                    # answer runs inside ``asyncio.to_thread``), so the callback
+                    # marshals each frame onto this event loop via
+                    # ``call_soon_threadsafe`` into a queue this generator drains.
+                    loop = asyncio.get_running_loop()
+                    queue: asyncio.Queue = asyncio.Queue()
+
+                    def on_turn(turn: int, accessed: list[str]) -> None:
+                        loop.call_soon_threadsafe(
+                            queue.put_nowait,
+                            ("status", {"stage": "reasoning", "turn": turn, "accessed": accessed[-1:]}),
+                        )
+
+                    task = asyncio.create_task(
+                        self._dispatcher.answer(
+                            request,
+                            tenant_id=ctx.tenant_id,
+                            workspace_id=ctx.workspace_id,
+                            on_turn=on_turn,
+                        )
+                    )
+                    # Drain queued status frames until the answer task finishes,
+                    # then flush any frames still queued. The short timeout keeps
+                    # the loop responsive without busy-spinning.
+                    while not task.done():
+                        try:
+                            event, data = await asyncio.wait_for(queue.get(), timeout=0.1)
+                        except TimeoutError:
+                            continue
+                        yield _sse_frame(event, data)
+                    while not queue.empty():
+                        event, data = queue.get_nowait()
+                        yield _sse_frame(event, data)
+
+                    response = await task
                 elapsed = int((time.perf_counter() - started) * 1000)
                 yield _sse_frame(
                     "final",
