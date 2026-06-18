@@ -44,6 +44,7 @@ class _FakeAnswerer:
         prior_turns=None,
         tenant_id=None,
         workspace_id=None,
+        on_turn=None,
     ) -> AnswerResponse:
         self.calls.append(
             {
@@ -51,6 +52,7 @@ class _FakeAnswerer:
                 "prior_turns": prior_turns,
                 "tenant_id": tenant_id,
                 "workspace_id": workspace_id,
+                "on_turn": on_turn,
             }
         )
         return AnswerResponse(
@@ -119,6 +121,32 @@ async def test_args_forwarded_verbatim():
     assert call["prior_turns"] is prior
     assert call["tenant_id"] == "tenant-x"
     assert call["workspace_id"] == "ws-y"
+
+
+@pytest.mark.asyncio
+async def test_on_turn_forwarded_to_rlm_only():
+    dispatcher, _rag, rlm = _dispatcher("rlm")
+
+    def hook(turn, accessed):  # pragma: no cover -- never invoked by the fake
+        pass
+
+    await dispatcher.answer(_request(), tenant_id="t1", workspace_id="w1", on_turn=hook)
+
+    # the RLM-only progress hook is threaded through to the RLM service.
+    assert rlm.calls[0]["on_turn"] is hook
+
+
+@pytest.mark.asyncio
+async def test_on_turn_not_passed_to_rag():
+    dispatcher, rag, _rlm = _dispatcher("rag")
+
+    def hook(turn, accessed):  # pragma: no cover -- never invoked
+        pass
+
+    await dispatcher.answer(_request(), tenant_id="t1", workspace_id="w1", on_turn=hook)
+
+    # RAG has no progress hook -- it must receive the default (None).
+    assert rag.calls[0]["on_turn"] is None
 
 
 def test_unknown_mode_falls_back_to_rlm():
