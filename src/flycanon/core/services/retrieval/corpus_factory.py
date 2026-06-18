@@ -133,6 +133,6 @@ def _chroma_client(settings: CanonSettings):
     """
     if not settings.chroma_host:
         return None
-    import chromadb
+    import chromadb  # type: ignore[import]  # optional 'chroma' extra; absent in the typecheck env
 
     return chromadb.HttpClient(host=settings.chroma_host, port=settings.chroma_port)

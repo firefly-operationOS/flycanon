@@ -83,7 +83,7 @@ def extract_pdf_pages(data: bytes) -> list[str]:
     module-level function so tests can monkeypatch it without a real PDF.
     """
     with fitz.open(stream=data, filetype="pdf") as doc:
-        return [page.get_text() for page in doc]
+        return [str(page.get_text()) for page in doc]
 
 
 class CanonDocStore:

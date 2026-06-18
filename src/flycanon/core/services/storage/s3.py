@@ -59,6 +59,7 @@ class S3ObjectStore(ObjectStore):
     ) -> None:
         if not _HAS_BOTO3:
             raise RuntimeError("S3ObjectStore requires the 's3' extra; run: uv sync --extra s3")
+        assert boto3 is not None  # guaranteed by the _HAS_BOTO3 guard; narrows for the type checker
         self._bucket = bucket
         self._prefix = prefix.strip("/")
         self._client = boto3.client(
@@ -122,7 +123,7 @@ class S3ObjectStore(ObjectStore):
         return True
 
 
-def _is_not_found(exc: ClientError) -> bool:
+def _is_not_found(exc: Exception) -> bool:
     """Whether a boto3 ClientError represents a missing key / 404."""
     error = getattr(exc, "response", {}).get("Error", {})
     return error.get("Code") in ("404", "NoSuchKey", "NotFound")
