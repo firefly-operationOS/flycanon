@@ -313,7 +313,7 @@ class RLMSession:
                 # best-effort plain-text answer: not a structured no-answer.
                 return text.strip(), self._citations(None, None, docs, question), False
             results = []
-            for tu in tool_uses:
+            for idx, tu in enumerate(tool_uses):
                 stdout, fin = self._run_block(
                     str(tu.get("input", {}).get("code", "")), runner, docs, question
                 )
@@ -326,6 +326,21 @@ class RLMSession:
                 # below, which uses the PARENT's client and works with no child.
                 if stdout is None:
                     dead_sandbox = True
+                    # The Messages API requires EVERY tool_use in the assistant
+                    # turn to be answered by a tool_result in the next user
+                    # message. The block that just died and any later blocks in
+                    # this same turn are still unanswered -- emit an error
+                    # tool_result for each so the transcript stays well-formed
+                    # for the fallback chat_raw below.
+                    for dangling in tool_uses[idx:]:
+                        results.append(
+                            {
+                                "type": "tool_result",
+                                "tool_use_id": dangling["id"],
+                                "content": "sandbox terminated: the REPL child exited.",
+                                "is_error": True,
+                            }
+                        )
                     break
                 results.append(
                     {
@@ -334,9 +349,12 @@ class RLMSession:
                         "content": stdout[:_MAX_STDOUT],
                     }
                 )
+            # Append the tool_result turn even when the sandbox died -- with the
+            # error results above the transcript is API-valid -- then fall
+            # through to the plain-text fallback.
+            messages.append({"role": "user", "content": results})
             if dead_sandbox:
                 break
-            messages.append({"role": "user", "content": results})
         # ran out of turns -> ask for a direct answer from the transcript
         messages.append({"role": "user", "content": "Stop now and state your final answer as plain text."})
         text = "".join(
