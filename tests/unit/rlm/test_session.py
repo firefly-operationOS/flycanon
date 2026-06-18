@@ -368,3 +368,117 @@ def test_rlm_degrades_to_llm_at_max_depth():
     assert answer == "ok"
     assert len(client.complete_calls) == 1
     assert "inner question" in client.complete_calls[0]
+
+
+# ---------------------------------------------------------------------------
+# subprocess mode -- REAL end-to-end through the sandbox child (no network).
+# The FakeClient scripts the orchestrator turns; the child execs the real code,
+# reaching this in-memory FakeDocs / FakeClient only through the executor's RPCs.
+# ---------------------------------------------------------------------------
+
+
+def test_subprocess_mode_reads_docs_and_finalises():
+    docs = FakeDocs({"ACME_2020": ["intro page", "revenue was 100 this year"]})
+    # turn 1: prove the child reaches the real corpus via RPC (keys/pages/getitem).
+    probe = (
+        "print(list(docs.keys()))\n"
+        "print(docs.npages('ACME_2020'))\n"
+        "print('ACME_2020' in docs)\n"
+        "print(docs.pages('ACME_2020')[1])\n"
+        "print('100' in docs['ACME_2020'])"
+    )
+    client = FakeClient(
+        [
+            _tool_use(probe),
+            _tool_use("final('100', filings=['ACME_2020'], pages=[1], found=True)"),
+        ]
+    )
+    session = RLMSession(client, sandbox_mode="subprocess", sandbox_timeout_s=15)
+    answer, cites, no_answer = session.run("what was revenue?", docs)
+    assert answer == "100"
+    assert no_answer is False
+    # citations are built PARENT-SIDE from the child's raw final frame.
+    assert len(cites) == 1
+    assert cites[0]["filing"] == "ACME_2020"
+    assert cites[0]["page"] == 1
+    assert "revenue was 100" in cites[0]["content"]
+    # the child's stdout (its RPC reads) was fed back as turn 2's tool_result.
+    tool_result = client.chat_calls[1]["messages"][-1]["content"][0]
+    assert tool_result["type"] == "tool_result"
+    assert "ACME_2020" in tool_result["content"]
+    assert "True" in tool_result["content"]
+
+
+def test_subprocess_mode_found_false_is_no_answer():
+    docs = FakeDocs({"A": ["nothing relevant"]})
+    code = "final('not present', filings=['A'], found=False)"
+    client = FakeClient([_tool_use(code)])
+    session = RLMSession(client, sandbox_mode="subprocess", sandbox_timeout_s=15)
+    answer, cites, no_answer = session.run("revenue?", docs)
+    assert answer == "not present"
+    assert no_answer is True
+    assert cites[0]["filing"] == "A"
+
+
+def test_subprocess_mode_error_traceback_fed_back():
+    docs = FakeDocs({"A": ["x"]})
+    # `open` is not in the child's safe builtins -> NameError -> the traceback is
+    # fed back to the model as the turn's tool_result, then the next turn finals.
+    client = FakeClient(
+        [
+            _tool_use("open('/etc/passwd')"),
+            _tool_use("final('done', filings=['A'])"),
+        ]
+    )
+    session = RLMSession(client, sandbox_mode="subprocess", sandbox_timeout_s=15)
+    answer, _cites, _no_answer = session.run("q", docs)
+    assert answer == "done"
+    tool_result = client.chat_calls[1]["messages"][-1]["content"][0]
+    assert "NameError" in tool_result["content"]
+
+
+def test_subprocess_mode_llm_rpc_reaches_parent_client():
+    docs = FakeDocs({"A": ["pageA"]})
+    client = FakeClient(
+        [
+            _tool_use("print(llm('extract the number'))"),
+            _tool_use("final('ok', filings=['A'])"),
+        ]
+    )
+    session = RLMSession(client, sandbox_mode="subprocess", sandbox_timeout_s=15)
+    answer, _cites, _no_answer = session.run("q", docs)
+    assert answer == "ok"
+    # the child's llm() RPC was serviced by the parent's real FakeClient.
+    assert client.complete_calls == ["extract the number"]
+    tool_result = client.chat_calls[1]["messages"][-1]["content"][0]
+    assert "sub-answer:" in tool_result["content"]
+
+
+def test_subprocess_mode_run_over_text_uses_text_mode():
+    # text-mode: no corpus, the child exposes `text` (not `docs`).
+    client = FakeClient(
+        [
+            _tool_use("print('net income' in text)\nprint(len(text))"),
+            _tool_use("final('found it')"),
+        ]
+    )
+    session = RLMSession(client, sandbox_mode="subprocess", sandbox_timeout_s=15)
+    answer, cites, _no_answer = session.run_over_text("q", "the net income line is here")
+    assert answer == "found it"
+    # text-mode has no corpus -> no parent-side citation content.
+    assert cites == []
+    tool_result = client.chat_calls[1]["messages"][-1]["content"][0]
+    assert "True" in tool_result["content"]
+
+
+def test_inprocess_mode_default_matches_existing_behaviour():
+    # the default mode is in-process and identical to the bare RLMSession path.
+    docs = FakeDocs({"ACME_2020": ["revenue was 100", "costs"]})
+    code = "final('100', filings=['ACME_2020'], pages=[0])"
+    client = FakeClient([_tool_use(code)])
+    session = RLMSession(client, sandbox_mode="inprocess")
+    answer, cites, no_answer = session.run("what was revenue?", docs)
+    assert answer == "100"
+    assert no_answer is False
+    assert cites[0]["filing"] == "ACME_2020"
+    assert "revenue was 100" in cites[0]["content"]
