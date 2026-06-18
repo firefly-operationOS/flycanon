@@ -141,6 +141,13 @@ FLYCANON_RLM_MAX_ITERS=8
 FLYCANON_RLM_SUB_BUDGET=12
 FLYCANON_RLM_MAX_DEPTH=1
 
+# Mark the large, static RLM system prompt with Anthropic
+# cache_control: ephemeral so it is cached server-side and reused across the
+# many Messages calls one CodeAct session makes (cuts input-token cost +
+# per-call latency). Set false to send it as a plain string (no cache
+# breakpoint).
+FLYCANON_RLM_PROMPT_CACHE=true
+
 # ----------------------------------------------------------------------------
 # Object store (RLM document originals)
 # ----------------------------------------------------------------------------
@@ -174,6 +181,27 @@ FLYCANON_OBJECT_STORE_S3_REGION=
 # whole-document corpus to reason over; a write failure is best-effort and
 # never fails the ingest.
 FLYCANON_STORE_ORIGINALS=true
+
+# ----------------------------------------------------------------------------
+# Corpus page cache (RLM)
+# ----------------------------------------------------------------------------
+# Shared cache layered over the lazy RLM corpus store: an in-scope filing's
+# original is fetched from the object store + PyMuPDF-extracted at most once
+# per process (in-memory LRU) and once per fleet (shared Redis). Keyed by the
+# source's content_sha256 so a re-ingested source (new bytes -> new sha)
+# misses the stale entry automatically.
+#
+# Backend (mirrors FLYCANON_RATE_LIMIT_BACKEND):
+#   auto   -- (default) Redis when FLYCANON_REDIS_URL is set, else in-memory.
+#   redis  -- always Redis (synchronous client; read from the RLM worker
+#             thread). Use this for multi-replica deployments so a single
+#             fetch on one replica warms the whole fleet.
+#   in_memory -- always the in-process LRU (single-replica / dev posture).
+FLYCANON_CORPUS_CACHE_BACKEND=auto
+# Per-entry TTL in seconds (both backends).
+FLYCANON_CORPUS_CACHE_TTL_S=3600
+# LRU cap for the in-memory backend (the Redis backend uses native EX expiry).
+FLYCANON_CORPUS_CACHE_MAX_ENTRIES=512
 
 # ----------------------------------------------------------------------------
 # PII guardrail

@@ -226,9 +226,11 @@ is a thin pass-through and the wire contract is identical across modes:
   orchestrator model writes Python against the in-scope document corpus
   -- handed to it as a `docs` variable rather than pasted into the
   prompt -- makes recursive sub-calls on slices, and finishes by citing
-  the filings / pages it used. `CanonCorpusBuilder` materialises that
-  corpus up front by listing the in-scope sources, fetching each
-  original from the `ObjectStore`, and extracting page-structured text;
+  the filings / pages it used. `CanonCorpusBuilder` lists the in-scope
+  sources cheaply up front; the `CanonDocStore` it returns fetches each
+  original from the `ObjectStore` and extracts its page-structured text
+  *lazily*, on first access from the REPL (so the rest are never
+  fetched), through a shared page cache (see below).
   `RLMSession` then drives the REPL inside `asyncio.to_thread` against
   the synchronous `AnthropicClient`. Because it reasons over **whole
   documents**, not chunks, it depends on the originals being persisted.
@@ -255,6 +257,21 @@ selects `localfs` (default, a root directory for dev / test) or `s3`
 environment). `FLYCANON_STORE_ORIGINALS` (default `true`) gates the
 persistence; the write is best-effort and never fails the ingest, but a
 source with no stored original is skipped by the RLM corpus builder.
+
+### Corpus page cache (RLM)
+
+The fetch + PyMuPDF page extraction is the expensive part of the load
+path, so a shared synchronous page cache
+(`core/services/query/rlm/page_cache.py`) sits in front of it: each
+in-scope filing is fetched + extracted at most once per process
+(`MemoryPageCache`, a thread-safe LRU) and, with the Redis backend
+(`RedisPageCache`, a synchronous `redis.Redis` client), once per fleet.
+Entries are keyed by the source's `content_sha256`, so a re-ingested
+source (new bytes -> new sha) misses the stale entry automatically.
+`FLYCANON_CORPUS_CACHE_BACKEND` selects the backend (`auto` -> Redis
+when `FLYCANON_REDIS_URL` is set, else in-memory); the cache is a
+process singleton injected into the corpus builder, with the
+per-store memo as the innermost per-query layer.
 
 ## Layers
 

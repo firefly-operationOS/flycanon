@@ -71,6 +71,7 @@ from flycanon.core.services.query import AnswerService, SearchService
 from flycanon.core.services.query.answer_dispatcher import AnswerDispatcher
 from flycanon.core.services.query.rlm.client import AnthropicClient
 from flycanon.core.services.query.rlm.corpus import CanonCorpusBuilder
+from flycanon.core.services.query.rlm.page_cache import CorpusPageCache, build_page_cache
 from flycanon.core.services.query.rlm_answer_service import RLMAnswerService
 from flycanon.core.services.retrieval import (
     CorpusContext,
@@ -399,18 +400,34 @@ class CanonCoreConfiguration:
     # ------------------------------------------------------------------
 
     @bean
+    def corpus_page_cache(self, settings: CanonSettings) -> CorpusPageCache:
+        """Shared page-text cache layered over the lazy RLM corpus store.
+
+        A process singleton (so the in-memory LRU persists across
+        requests) injected into :meth:`canon_corpus_builder`. Backend
+        selection mirrors :meth:`rate_limiter` / :meth:`idempotency_store`
+        via :func:`build_page_cache`: Redis when ``redis_url`` is set (or
+        ``FLYCANON_CORPUS_CACHE_BACKEND=redis``), in-memory otherwise.
+        The Redis client is synchronous because the cache is read from
+        the RLM engine's worker thread.
+        """
+        return build_page_cache(settings)
+
+    @bean
     def canon_corpus_builder(
         self,
         source_repository: SourceRepository,
         knowledge_repository: KnowledgeRepository,
         object_store: ObjectStore,
         loader_registry: LoaderRegistry,
+        corpus_page_cache: CorpusPageCache,
     ) -> CanonCorpusBuilder:
         return CanonCorpusBuilder(
             source_repository=source_repository,
             knowledge_repository=knowledge_repository,
             object_store=object_store,
             registry=loader_registry,
+            cache=corpus_page_cache,
         )
 
     @bean
