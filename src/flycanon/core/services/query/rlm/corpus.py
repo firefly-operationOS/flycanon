@@ -42,8 +42,6 @@ import logging
 from collections.abc import Sequence
 from dataclasses import dataclass
 
-import fitz  # PyMuPDF
-
 from flycanon.core.services.ingestion.loaders import LoaderRegistry, default_registry
 from flycanon.core.services.query.rlm.page_cache import CorpusPageCache
 from flycanon.core.services.storage.object_store import ObjectStore
@@ -74,16 +72,6 @@ class SourceMeta:
     # page-cache key. Identical bytes share a cache entry; a re-ingested
     # source (new bytes -> new sha) misses the stale entry automatically.
     content_sha256: str
-
-
-def extract_pdf_pages(data: bytes) -> list[str]:
-    """Per-page text of a PDF, via PyMuPDF on the original bytes.
-
-    Mirrors the experiment's ``corpus.py`` page extraction. Factored into a
-    module-level function so tests can monkeypatch it without a real PDF.
-    """
-    with fitz.open(stream=data, filetype="pdf") as doc:
-        return [str(page.get_text()) for page in doc]
 
 
 class CanonDocStore:
@@ -357,20 +345,43 @@ def _matches(row: SourceRow, f: Filters, knowledge_source_ids: set[str] | None) 
 def _pages_for(meta: SourceMeta, data: bytes, registry: LoaderRegistry) -> list[str]:
     """Page-structured text for a filing's original bytes.
 
-    PDFs go through PyMuPDF per page (mirrors the experiment). Everything else
-    goes through the matching loader: each loader section becomes a page,
-    falling back to the loaded ``raw_text`` as a single page. An unrecognised
-    or empty original yields an empty page list.
-    """
-    kind = _source_kind(meta.kind)
-    if kind is SourceKind.pdf:
-        return [text for text in extract_pdf_pages(data) if text and text.strip()]
+    Every kind goes through its loader, so the RLM corpus reuses the ingest
+    path's extraction -- in particular :class:`PdfLoader`'s Tesseract OCR
+    fallback for scanned/image-only PDF pages, which the old bespoke fitz
+    extraction missed. The loader's :class:`Section`\\ s are regrouped into
+    the per-page list the engine cites into:
 
-    loader = registry.get(kind)
+    * Paginated formats (PDF) emit one section per source page carrying a
+      1-based ``page``; those are grouped by ``page`` (in first-seen order),
+      each page's section bodies joined into one page string. PdfLoader emits
+      exactly one section per non-empty page, so for text PDFs this is the
+      same per-page text the old fitz path produced.
+    * Non-paginated formats (docx / html / text ...) have ``page is None``;
+      each such section stays its own page, preserving today's behaviour.
+
+    Empty pages are skipped. With no usable sections we fall back to the
+    loaded ``raw_text`` as a single page, else an empty list.
+    """
+    loader = registry.get(_source_kind(meta.kind))
     if loader is None:
         return []
     document = loader.load(data, filename=meta.filename)
-    pages = [section.body for section in document.sections if section.body and section.body.strip()]
+
+    pages: list[str] = []
+    by_page: dict[int, int] = {}  # 1-based page number -> index into ``pages``
+    for section in document.sections:
+        body = section.body
+        if not (body and body.strip()):
+            continue
+        if section.page is None:
+            pages.append(body)
+            continue
+        existing = by_page.get(section.page)
+        if existing is None:
+            by_page[section.page] = len(pages)
+            pages.append(body)
+        else:
+            pages[existing] = f"{pages[existing]}\n{body}"
     if pages:
         return pages
     if document.raw_text and document.raw_text.strip():
