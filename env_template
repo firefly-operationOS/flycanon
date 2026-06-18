@@ -196,7 +196,7 @@ FLYCANON_STORE_ORIGINALS=true
 #   redis  -- always Redis (synchronous client; read from the RLM worker
 #             thread). Use this for multi-replica deployments so a single
 #             fetch on one replica warms the whole fleet.
-#   memory -- always the in-process LRU (single-replica / dev posture).
+#   in_memory -- always the in-process LRU (single-replica / dev posture).
 FLYCANON_CORPUS_CACHE_BACKEND=auto
 # Per-entry TTL in seconds (both backends).
 FLYCANON_CORPUS_CACHE_TTL_S=3600

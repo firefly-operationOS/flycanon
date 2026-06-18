@@ -302,11 +302,11 @@ class CanonSettings(BaseSettings):
     # automatically. Backend selection mirrors
     # :func:`flycanon.core.configuration._use_redis`: ``auto`` (the
     # default) uses Redis when ``redis_url`` is set, in-memory otherwise;
-    # ``redis`` / ``memory`` force one or the other. The Redis client is
-    # synchronous (read from the RLM engine's worker thread).
+    # ``redis`` / ``in_memory`` force one or the other. The Redis client
+    # is synchronous (read from the RLM engine's worker thread).
     corpus_cache_backend: str = Field(
         default="auto",
-        description="Corpus page-cache backend: ``auto`` | ``redis`` | ``memory``.",
+        description="Corpus page-cache backend: ``auto`` | ``redis`` | ``in_memory``.",
     )
     # Per-entry TTL (seconds) for both backends.
     corpus_cache_ttl_s: int = Field(default=3600, ge=0)

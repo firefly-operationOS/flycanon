@@ -218,7 +218,7 @@ fleet.
 
 | Key | What it is | Default |
 |-----|------------|---------|
-| `FLYCANON_CORPUS_CACHE_BACKEND` | `auto` (Redis when `FLYCANON_REDIS_URL` set, else in-memory), `redis`, or `memory`. | `auto` |
+| `FLYCANON_CORPUS_CACHE_BACKEND` | `auto` (Redis when `FLYCANON_REDIS_URL` set, else in-memory), `redis`, or `in_memory`. | `auto` |
 | `FLYCANON_CORPUS_CACHE_TTL_S` | Per-entry TTL in seconds (both backends). | `3600` |
 | `FLYCANON_CORPUS_CACHE_MAX_ENTRIES` | LRU cap for the in-memory backend (the Redis backend relies on native `EX` expiry). | `512` |
 
