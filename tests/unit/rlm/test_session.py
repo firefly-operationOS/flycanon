@@ -309,6 +309,53 @@ def test_sub_call_budget_exhaustion():
     assert "[sub-call budget exhausted]" in tool_result["content"]
 
 
+class _AccessedDocs(FakeDocs):
+    """FakeDocs that also records ``accessed`` keys (like the real corpus)."""
+
+    def __init__(self, data: dict[str, list[str]], accessed: list[str] | None = None):
+        super().__init__(data)
+        self.accessed = accessed if accessed is not None else []
+
+
+def test_on_turn_fires_once_per_turn_with_increasing_numbers():
+    docs = _AccessedDocs({"A": ["intro", "the answer is 42"]}, accessed=["A"])
+    client = FakeClient(
+        [
+            _tool_use("print('looking')"),
+            _tool_use("print('still looking')"),
+            _tool_use("final('42', filings=['A'], pages=[1])"),
+        ]
+    )
+    seen: list[tuple[int, list[str]]] = []
+    RLMSession(client, on_turn=lambda turn, accessed: seen.append((turn, list(accessed)))).run(
+        "q", docs
+    )
+    # one callback per orchestrator turn (3 turns -> 3 calls), increasing numbers
+    assert [turn for turn, _ in seen] == [1, 2, 3]
+    # the accessed keys snapshot is forwarded
+    assert all(accessed == ["A"] for _, accessed in seen)
+
+
+def test_on_turn_none_is_a_no_op():
+    docs = _AccessedDocs({"A": ["x"]}, accessed=["A"])
+    client = FakeClient([_tool_use("final('ok', filings=['A'])")])
+    # default on_turn=None must not raise and must not affect the answer
+    answer, _cites, _no_answer = RLMSession(client).run("q", docs)
+    assert answer == "ok"
+
+
+def test_on_turn_exception_never_breaks_the_repl():
+    docs = _AccessedDocs({"A": ["the answer is here"]}, accessed=["A"])
+    client = FakeClient([_tool_use("final('done', filings=['A'])")])
+
+    def boom(turn, accessed):
+        raise RuntimeError("callback blew up")
+
+    # a raising callback is swallowed -- the REPL still produces its answer
+    answer, _cites, _no_answer = RLMSession(client, on_turn=boom).run("q", docs)
+    assert answer == "done"
+
+
 def test_rlm_degrades_to_llm_at_max_depth():
     docs = FakeDocs({"A": ["p"]})
     client = FakeClient(

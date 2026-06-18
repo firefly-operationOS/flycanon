@@ -16,9 +16,9 @@
 
 The user-tier ``POST /api/v1/query/stream`` and agent-tier
 ``POST /api/v1/agent/query/stream`` are routed through the
-:class:`AnswerDispatcher`. In RLM mode (the default) the stream emits a
-single ``status`` (``reasoning``) frame then the terminal ``final`` frame
-and **never** touches the retrieval pipeline. In the legacy RAG mode the
+:class:`AnswerDispatcher`. In RLM mode (the default) the stream emits one
+``status`` (``reasoning``) frame per REPL turn then the terminal ``final``
+frame and **never** touches the retrieval pipeline. In the legacy RAG mode the
 stream emits one ``hit`` frame per retrieved citation then the ``final``
 frame, exactly as before.
 
@@ -48,16 +48,30 @@ class _StubRequest:
 
 
 class _FakeDispatcher:
-    """Fake :class:`AnswerDispatcher` returning a canned response."""
+    """Fake :class:`AnswerDispatcher` returning a canned response.
 
-    def __init__(self, *, is_rag: bool, response: AnswerResponse) -> None:
+    In RLM mode the controller passes an ``on_turn`` progress hook; this
+    fake fires it ``turns`` times (synchronously -- the SSE generator's
+    event loop is already running) before returning, so the stream emits
+    one ``status`` frame per turn. In RAG mode the controller passes no
+    ``on_turn``; ``on_turn_received`` records what was actually handed in
+    so a test can assert RAG is never given the hook.
+    """
+
+    def __init__(self, *, is_rag: bool, response: AnswerResponse, turns: int = 3) -> None:
         self.is_rag = is_rag
         self.mode = "rag" if is_rag else "rlm"
         self._response = response
+        self._turns = turns
         self.answer_calls = 0
+        self.on_turn_received = "unset"
 
-    async def answer(self, request, *, tenant_id=None, workspace_id=None):
+    async def answer(self, request, *, tenant_id=None, workspace_id=None, on_turn=None):
         self.answer_calls += 1
+        self.on_turn_received = on_turn
+        if on_turn is not None:
+            for turn in range(1, self._turns + 1):
+                on_turn(turn, [f"doc-{turn}"])
         return self._response
 
 
@@ -136,9 +150,9 @@ def _parse_sse_events(frames: list[bytes]) -> list[dict]:
 
 
 @pytest.mark.asyncio
-async def test_user_rlm_mode_emits_status_then_final_no_hits() -> None:
+async def test_user_rlm_mode_emits_status_per_turn_then_final_no_hits() -> None:
     response_dto = _answer_response()
-    dispatcher = _FakeDispatcher(is_rag=False, response=response_dto)
+    dispatcher = _FakeDispatcher(is_rag=False, response=response_dto, turns=3)
 
     answer_service = AsyncMock()
     retrieval = _RecordingRetrieval(hits=[_hit("should never be read")])
@@ -154,17 +168,61 @@ async def test_user_rlm_mode_emits_status_then_final_no_hits() -> None:
     response = await controller.stream_answer(_user_request(), _answer_request())
     events = _parse_sse_events(await _drain(response.body_iterator))
 
-    # status -> final, no hit frames.
-    assert [e["event"] for e in events] == ["status", "final"]
-    assert events[0]["data"]["stage"] == "reasoning"
-    assert events[1]["data"]["answer"] == "The scope is acme/ws-1."
-    assert events[1]["data"]["model"] == "rlm-root"
-    assert events[1]["data"]["no_answer"] is False
-    assert len(events[1]["data"]["citations"]) == 1
+    # one status frame per REPL turn, then exactly one final, no hit frames.
+    assert [e["event"] for e in events] == ["status", "status", "status", "final"]
+    for i, status in enumerate(events[:3], start=1):
+        assert status["data"]["stage"] == "reasoning"
+        assert status["data"]["turn"] == i
+        assert status["data"]["accessed"] == [f"doc-{i}"]
+    assert events[-1]["data"]["answer"] == "The scope is acme/ws-1."
+    assert events[-1]["data"]["model"] == "rlm-root"
+    assert events[-1]["data"]["no_answer"] is False
+    assert len(events[-1]["data"]["citations"]) == 1
 
     # RLM must NOT touch the retrieval pipeline (no embeddings).
     assert retrieval.search_calls == 0
     assert dispatcher.answer_calls == 1
+    # RLM is handed a live progress hook.
+    assert callable(dispatcher.on_turn_received)
+
+
+class _FailingDispatcher:
+    """RLM dispatcher that fires a couple of turns then raises mid-answer."""
+
+    def __init__(self, *, turns: int = 2) -> None:
+        self.is_rag = False
+        self.mode = "rlm"
+        self._turns = turns
+
+    async def answer(self, request, *, tenant_id=None, workspace_id=None, on_turn=None):
+        if on_turn is not None:
+            for turn in range(1, self._turns + 1):
+                on_turn(turn, [f"doc-{turn}"])
+        raise RuntimeError("engine exploded mid-stream")
+
+
+@pytest.mark.asyncio
+async def test_user_rlm_mid_stream_failure_emits_one_error_frame_and_closes() -> None:
+    dispatcher = _FailingDispatcher(turns=2)
+    answer_service = AsyncMock()
+    answer_service._retrieval = _RecordingRetrieval(hits=[])
+
+    controller = QueryStreamController(
+        queries=AsyncMock(),
+        answer_service=answer_service,
+        answer_dispatcher=dispatcher,
+        suggester=AsyncMock(),
+    )
+
+    response = await controller.stream_answer(_user_request(), _answer_request())
+    events = _parse_sse_events(await _drain(response.body_iterator))
+
+    # progress frames may arrive first, but the stream MUST terminate with
+    # exactly one error frame (never a final, never a hang).
+    assert events[-1]["event"] == "error"
+    assert events[-1]["data"]["code"] == "stream_error"
+    assert [e["event"] for e in events].count("error") == 1
+    assert [e["event"] for e in events].count("final") == 0
 
 
 # ---------------------------------------------------------------------
@@ -195,6 +253,8 @@ async def test_user_rag_mode_emits_hit_then_final() -> None:
     assert events[-1]["data"]["answer"] == "The scope is acme/ws-1."
     assert retrieval.search_calls == 1
     assert dispatcher.answer_calls == 1
+    # RAG must NOT be passed the RLM-only progress hook.
+    assert dispatcher.on_turn_received is None
 
 
 # ---------------------------------------------------------------------
@@ -273,8 +333,8 @@ def _agent_request(token: str) -> _StubRequest:
 
 
 @pytest.mark.asyncio
-async def test_agent_rlm_mode_emits_status_then_final_no_hits() -> None:
-    dispatcher = _FakeDispatcher(is_rag=False, response=_answer_response())
+async def test_agent_rlm_mode_emits_status_per_turn_then_final_no_hits() -> None:
+    dispatcher = _FakeDispatcher(is_rag=False, response=_answer_response(), turns=2)
     answer_service = AsyncMock()
     retrieval = _RecordingRetrieval(hits=[_hit("never read")])
     answer_service._retrieval = retrieval
@@ -284,11 +344,14 @@ async def test_agent_rlm_mode_emits_status_then_final_no_hits() -> None:
     response = await controller.stream_answer(_agent_request(token), _answer_request())
     events = _parse_sse_events(await _drain(response.body_iterator))
 
-    assert [e["event"] for e in events] == ["status", "final"]
+    assert [e["event"] for e in events] == ["status", "status", "final"]
     assert events[0]["data"]["stage"] == "reasoning"
-    assert events[1]["data"]["model"] == "rlm-root"
+    assert events[0]["data"]["turn"] == 1
+    assert events[1]["data"]["turn"] == 2
+    assert events[-1]["data"]["model"] == "rlm-root"
     assert retrieval.search_calls == 0
     assert dispatcher.answer_calls == 1
+    assert callable(dispatcher.on_turn_received)
 
 
 @pytest.mark.asyncio
@@ -306,3 +369,4 @@ async def test_agent_rag_mode_emits_hit_then_final() -> None:
     assert [e["event"] for e in events] == ["hit", "final"]
     assert retrieval.search_calls == 1
     assert dispatcher.answer_calls == 1
+    assert dispatcher.on_turn_received is None
