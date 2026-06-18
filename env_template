@@ -148,6 +148,21 @@ FLYCANON_RLM_MAX_DEPTH=1
 # breakpoint).
 FLYCANON_RLM_PROMPT_CACHE=true
 
+# RLM execution sandbox. The RLM REPL execs model-written Python, and the
+# corpus is user-uploaded, so a malicious document can prompt-inject the
+# model. ``subprocess`` (the secure default) runs each turn's code in a
+# child process with a scrubbed environment (no API keys / DB / object-store
+# creds), resource limits (CPU/mem caps, no file writes), and capability-RPC
+# back to the parent for docs/llm/rlm/final -- the child holds no secrets,
+# network, or infrastructure. ``inprocess`` is the explicit opt-out that runs
+# the code in the engine's own restricted exec namespace (dev / trusted use
+# only). Only the exact value ``inprocess`` opts out; anything else resolves
+# to ``subprocess``.
+FLYCANON_RLM_SANDBOX=subprocess
+# Per-turn wall-clock timeout (seconds) for the subprocess sandbox; the child
+# is killed and the turn fails if it is exceeded.
+FLYCANON_RLM_SANDBOX_TIMEOUT_S=30
+
 # ----------------------------------------------------------------------------
 # Object store (RLM document originals)
 # ----------------------------------------------------------------------------
