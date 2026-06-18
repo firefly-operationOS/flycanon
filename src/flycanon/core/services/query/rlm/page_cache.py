@@ -181,18 +181,26 @@ class RedisPageCache:
 def build_page_cache(settings: CanonSettings) -> CorpusPageCache:
     """Select the corpus page-cache backend from settings.
 
-    Resolution mirrors :func:`flycanon.core.configuration._use_redis`:
+    Resolution is identical to
+    :func:`flycanon.core.configuration._use_redis` (the same logic the
+    rate-limit and idempotency stores use), kept inline here only to
+    avoid a circular import (``configuration`` imports this module):
 
     * ``FLYCANON_CORPUS_CACHE_BACKEND=redis`` -- always Redis.
-    * ``FLYCANON_CORPUS_CACHE_BACKEND=memory`` -- always in-memory.
-    * unset / ``auto`` (the default) -- Redis when ``redis_url`` is set,
-      in-memory otherwise.
+    * ``FLYCANON_CORPUS_CACHE_BACKEND=in_memory`` -- always in-memory.
+    * unset / ``auto`` (the default) / any unknown value -- Redis when
+      ``redis_url`` is set, in-memory otherwise.
 
     The Redis client is synchronous: the cache is read from the RLM
     engine's worker thread, so it must not be ``redis.asyncio``.
     """
-    backend = (settings.corpus_cache_backend or "auto").lower()
-    use_redis = backend == "redis" or (backend == "auto" and bool(settings.redis_url))
+    explicit = (settings.corpus_cache_backend or "auto").lower()
+    if explicit == "redis":
+        use_redis = True
+    elif explicit in {"in_memory", "memory"}:
+        use_redis = False
+    else:
+        use_redis = bool(settings.redis_url)
     if use_redis:
         return RedisPageCache(
             redis.Redis.from_url(settings.redis_url),
