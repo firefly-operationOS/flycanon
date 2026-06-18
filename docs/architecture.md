@@ -246,6 +246,47 @@ select the three RLM models; `FLYCANON_RLM_MAX_ITERS` /
 engine calls the Anthropic Messages API directly, so an
 `ANTHROPIC_API_KEY` is required at runtime in the default mode.
 
+### RLM execution sandbox
+
+The RLM REPL **execs model-written Python** every turn. Because the
+corpus is **user-uploaded**, a malicious document can prompt-inject the
+orchestrator into emitting hostile code, so the exec runs out of process
+by default (`FLYCANON_RLM_SANDBOX=subprocess`,
+`core/services/query/rlm/sandbox/`):
+
+* **Parent / child split.** `SandboxExecutor` (the parent,
+  `sandbox/executor.py`) spawns `sandbox/runner.py` (the child) over a
+  private `socketpair` with `close_fds=True`, so the child inherits no
+  other descriptors. The child runs the model code in a restricted
+  namespace (safe-builtins whitelist + `re`, no `open` / `import`); the
+  parent owns the only document store and model client.
+* **Scrubbed environment.** The child inherits only a minimal whitelist
+  (`PATH`, `LANG`, `LC_ALL`, `PYTHONPATH`, `PYTHONHASHSEED`) -- no
+  `ANTHROPIC_API_KEY`, no cloud / DB / Redis creds, no `FLYCANON_*`
+  secrets -- so prompt-injected code has no credential to read.
+* **Resource limits.** At startup the child clamps itself with
+  `setrlimit`: `RLIMIT_CPU` (CPU-time cap), `RLIMIT_AS` (1 GiB
+  address-space cap), and `RLIMIT_FSIZE = 0` (no file writes). The parent
+  separately enforces a wall-clock timeout
+  (`FLYCANON_RLM_SANDBOX_TIMEOUT_S`, default 30 s) and SIGKILLs an
+  overrunning child.
+* **Capability RPC.** The child's `docs` / `llm` / `rlm` / `final` stubs
+  marshal each call to the parent as a length-prefixed **JSON-only** frame
+  (never `pickle` / `eval`), validated against fixed name / arity / type
+  allowlists; the parent services it against the real infra and replies. A
+  malformed frame, unknown op/fn, or timeout kills the child and returns a
+  controlled error rather than crashing the parent.
+* **Blast radius.** The child holds no secrets, no network client, and no
+  infrastructure objects, so an escape is limited to the in-scope corpus
+  the parent already exposes through those RPCs.
+
+`FLYCANON_RLM_SANDBOX=inprocess` is the explicit opt-out (dev / trusted
+use only): it runs the model code in the engine's own restricted `exec`
+namespace, in process. Only the exact value `inprocess` opts out; anything
+else normalises to `subprocess`. See the deployment guide for the residual
+network-egress risk and the `nsjail` / `seccomp` defence-in-depth
+follow-up.
+
 ### Object store (RLM document originals)
 
 RLM replays the original document bytes, so intake persists each
