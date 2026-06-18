@@ -74,6 +74,23 @@ def test_missing_api_key_raises(monkeypatch):
         client.complete("hello")
 
 
+def test_fork_isolates_tokens_but_shares_pool():
+    # fork() is the concurrency-correctness primitive for per-query cost: each
+    # query gets a fresh token tally while sharing the connection pool.
+    http = _FakeHttp([])
+    parent = AnthropicClient(_settings(), http_client=http)
+    parent._record_usage("claude-sonnet-4-6", {"input_tokens": 100, "output_tokens": 50})
+
+    child = parent.fork()
+
+    assert child is not parent
+    assert child._http is parent._http  # shared httpx.Client / connection pool
+    assert child.token_totals()["input_tokens"] == 0  # fresh per-query tally
+    assert child.token_totals()["output_tokens"] == 0
+    # the parent's accounting is untouched by the fork
+    assert parent.token_totals()["input_tokens"] == 100
+
+
 def test_complete_returns_joined_text(monkeypatch):
     monkeypatch.setenv("ANTHROPIC_API_KEY", "k")
     payload = {
