@@ -67,6 +67,30 @@ async def test_localfs_get_missing_raises(tmp_path):
         await store.get("nope")
 
 
+async def test_localfs_get_sync_roundtrip(tmp_path):
+    store = LocalFsObjectStore(root=str(tmp_path))
+    await store.put("t/w/files/a.txt", b"hello")
+    assert store.get_sync("t/w/files/a.txt") == b"hello"
+
+
+async def test_localfs_get_sync_missing_raises(tmp_path):
+    store = LocalFsObjectStore(root=str(tmp_path))
+    with pytest.raises(FileNotFoundError):
+        store.get_sync("nope")
+
+
+async def test_localfs_get_sync_rejects_path_traversal(tmp_path):
+    store = LocalFsObjectStore(root=str(tmp_path))
+    with pytest.raises(ValueError):
+        store.get_sync("../escape")
+
+
+async def test_localfs_get_sync_rejects_absolute_key(tmp_path):
+    store = LocalFsObjectStore(root=str(tmp_path))
+    with pytest.raises(ValueError):
+        store.get_sync("/tmp/escape.bin")
+
+
 async def test_localfs_delete(tmp_path):
     store = LocalFsObjectStore(root=str(tmp_path))
     await store.put("k", b"x")
@@ -152,6 +176,32 @@ async def test_s3_get_roundtrip(fake_s3):
     await store.put("k", b"payload")
     assert await store.get("k") == b"payload"
     assert ("get_object", "b", "canon/k") in fake_s3.calls
+
+
+async def test_s3_get_sync_roundtrip(fake_s3):
+    store = S3ObjectStore(bucket="b", prefix="canon")
+    await store.put("k", b"payload")
+    assert store.get_sync("k") == b"payload"
+    assert ("get_object", "b", "canon/k") in fake_s3.calls
+
+
+async def test_s3_get_sync_missing_raises_filenotfound(fake_s3):
+    store = S3ObjectStore(bucket="b")
+    with pytest.raises(FileNotFoundError):
+        store.get_sync("nope")
+
+
+async def test_s3_get_sync_rejects_path_traversal(fake_s3):
+    store = S3ObjectStore(bucket="b")
+    with pytest.raises(ValueError):
+        store.get_sync("a/../b")
+
+
+async def test_s3_get_sync_rejects_absolute_key(fake_s3):
+    store = S3ObjectStore(bucket="b")
+    with pytest.raises(ValueError):
+        store.get_sync("/etc/passwd")
+    assert fake_s3.calls == []
 
 
 async def test_s3_no_prefix(fake_s3):
