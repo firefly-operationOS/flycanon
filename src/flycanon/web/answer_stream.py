@@ -29,7 +29,8 @@ Frames (RAG mode, ``FLYCANON_ANSWER_MODE=rag``):
 
 Frames (RLM mode, the default):
 
-* ``event: status`` -- a single ``reasoning`` frame; RLM has no
+* ``event: status`` -- one ``reasoning`` frame per REPL turn (carrying
+  the turn number + the latest document accessed); RLM has no
   pre-retrieval step so there are no ``hit`` frames.
 * ``event: final`` -- the same terminal frame shape.
 
@@ -40,6 +41,7 @@ closes cleanly.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import time
@@ -69,9 +71,10 @@ async def stream_answer_sse(
 
     Routes through ``dispatcher`` so the stream honours
     ``FLYCANON_ANSWER_MODE``. In RAG mode the retrieval hits arrive first
-    as ``hit`` frames; in RLM mode a single ``status`` frame precedes the
-    terminal ``final`` frame. ``answer_service`` supplies the retrieval
-    pipeline for the RAG ``hit``-frame path.
+    as ``hit`` frames; in RLM mode one ``status`` frame is streamed per
+    REPL turn. Both modes close with the terminal ``final`` frame, or a
+    single ``error`` frame on a mid-stream failure. ``answer_service``
+    supplies the retrieval pipeline for the RAG ``hit``-frame path.
     """
     started = time.perf_counter()
     try:
@@ -99,24 +102,54 @@ async def stream_answer_sse(
             for hit in retrieval.hits:
                 dto = _hit_dto(hit)
                 yield _sse_frame("hit", dto.model_dump(mode="json"))
-        else:
-            # RLM (default): no pre-retrieval step. Emit a single status
-            # frame so the consumer can show progress while the engine
-            # reasons over the whole-document corpus.
-            yield _sse_frame(
-                "status",
-                {"stage": "reasoning", "message": "Reasoning over documents with RLM…"},
-            )
 
-        # Answer in one shot via the dispatcher (RLM or RAG).
-        # Per-token streaming is a follow-up once the agentic framework's
-        # streaming surface lands; in the meantime callers can still
-        # render the answer body when it arrives.
-        response = await dispatcher.answer(
-            request,
-            tenant_id=ctx.tenant_id,
-            workspace_id=ctx.workspace_id,
-        )
+            # RAG answers in one shot via the dispatcher; no
+            # per-turn progress to stream.
+            response = await dispatcher.answer(
+                request,
+                tenant_id=ctx.tenant_id,
+                workspace_id=ctx.workspace_id,
+            )
+        else:
+            # RLM (default): no pre-retrieval step. Stream a live
+            # ``status`` frame per REPL turn so the consumer shows progress
+            # while the engine reasons over the whole-document corpus.
+            #
+            # The engine fires ``on_turn`` from its worker thread (the
+            # answer runs inside ``asyncio.to_thread``), so the callback
+            # marshals each frame onto this event loop via
+            # ``call_soon_threadsafe`` into a queue this generator drains.
+            loop = asyncio.get_running_loop()
+            queue: asyncio.Queue = asyncio.Queue()
+
+            def on_turn(turn: int, accessed: list[str]) -> None:
+                loop.call_soon_threadsafe(
+                    queue.put_nowait,
+                    ("status", {"stage": "reasoning", "turn": turn, "accessed": accessed[-1:]}),
+                )
+
+            task = asyncio.create_task(
+                dispatcher.answer(
+                    request,
+                    tenant_id=ctx.tenant_id,
+                    workspace_id=ctx.workspace_id,
+                    on_turn=on_turn,
+                )
+            )
+            # Drain queued status frames until the answer task finishes,
+            # then flush any frames still queued. The short timeout keeps
+            # the loop responsive without busy-spinning.
+            while not task.done():
+                try:
+                    event, data = await asyncio.wait_for(queue.get(), timeout=0.1)
+                except TimeoutError:
+                    continue
+                yield _sse_frame(event, data)
+            while not queue.empty():
+                event, data = queue.get_nowait()
+                yield _sse_frame(event, data)
+
+            response = await task
         elapsed = int((time.perf_counter() - started) * 1000)
         yield _sse_frame(
             "final",
