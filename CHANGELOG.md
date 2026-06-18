@@ -2,6 +2,39 @@
 
 All notable changes to **flycanon** are documented here.
 
+## [26.6.18] - 2026-06-18
+
+### Added
+
+- **RLM (Recursive Language Model) answer engine.** A code-driven CodeAct REPL
+  that reasons over whole documents instead of retrieving chunks: it routes to
+  the right source, reads it, and computes the answer in a sandboxed Python
+  loop. New `FLYCANON_RLM_*` settings tune the root/sub/answer models
+  (default `anthropic:claude-sonnet-4-6`), iteration budget, and depth.
+- **Object-store originals.** A hexagonal `ObjectStore` port (LocalFs / S3) plus
+  `FLYCANON_OBJECT_STORE_*` settings; ingest persists the original document and
+  records `canon_sources.object_store_key` when `FLYCANON_STORE_ORIGINALS` is
+  on (default), giving RLM a whole-document corpus.
+- **Scalable corpus access.** The corpus loads lazily (only the filings the
+  model actually reads are fetched) behind a tiered page cache — a thread-safe
+  in-process LRU and an optional shared Redis layer (`FLYCANON_CORPUS_CACHE_*`),
+  content-hash keyed so a re-ingest auto-invalidates.
+- **Prompt caching** for the RLM loop (`FLYCANON_RLM_PROMPT_CACHE`, default on):
+  the repeated system prompt is marked `cache_control: ephemeral`.
+
+### Changed
+
+- **RLM is now the default answer mode** (`FLYCANON_ANSWER_MODE=rlm`). It backs
+  `/api/v1/query`, the SSE `/api/v1/query/stream` (a `status` frame then the
+  `final` frame), and the agent-tier equivalents, with full filter parity.
+
+### Deprecated
+
+- **Hybrid-RAG answer mode** (`FLYCANON_ANSWER_MODE=rag`) is deprecated and
+  slated for removal in a future release. When selected it logs a deprecation
+  warning and returns an `X-Flycanon-Deprecation` response header. The raw
+  `/api/v1/search` retrieval surface is unaffected.
+
 ## [26.5.9] - 2026-05-31
 
 ### Changed
