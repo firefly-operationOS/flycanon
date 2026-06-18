@@ -133,6 +133,7 @@ value other than `rag` is normalised to `rlm`.
 | `FLYCANON_RLM_MAX_ITERS` | Max orchestrator turns before the loop gives up and asks for a plain-text answer from the transcript. | `8` |
 | `FLYCANON_RLM_SUB_BUDGET` | Total recursive sub-call budget across one root session. | `12` |
 | `FLYCANON_RLM_MAX_DEPTH` | How deep `rlm(...)` may nest before degrading to a flat `llm`. | `1` |
+| `FLYCANON_RLM_PROMPT_CACHE` | Mark the large static RLM system prompt with Anthropic `cache_control: ephemeral` so it is cached server-side and reused across the many Messages calls one CodeAct session makes (cuts input-token cost + per-call latency). `false` sends it as a plain string. | `true` |
 
 ### What RLM is
 
@@ -192,6 +193,34 @@ profiles / instance roles), not from these settings.
 | `FLYCANON_OBJECT_STORE_S3_ENDPOINT_URL` | Custom endpoint for MinIO / S3-compatible services; empty = default AWS. | _(empty)_ |
 | `FLYCANON_OBJECT_STORE_S3_REGION` | Region; empty defers to boto3's standard region resolution. | _(empty)_ |
 | `FLYCANON_STORE_ORIGINALS` | Whether intake persists original bytes and records the key on the source row. On by default so RLM has a whole-document corpus; a write failure is best-effort and never fails the ingest. | `true` |
+
+---
+
+## Corpus page cache (RLM)
+
+The RLM corpus store fetches each in-scope filing's original from the
+object store and PyMuPDF-extracts its page-structured text on first
+access -- the expensive part of an RLM query. A shared, synchronous
+page cache sits in front of that fetch so an in-scope filing is
+fetched + extracted at most **once per process** (in-memory LRU) and,
+with the Redis backend, **once per fleet**. Entries are keyed by the
+source's `content_sha256`, so a re-ingested source (new bytes -> new
+sha) misses the stale entry automatically -- there is no explicit
+invalidation.
+
+Backend selection mirrors the rate-limiter / idempotency stores:
+`auto` (the default) uses Redis when `FLYCANON_REDIS_URL` is set,
+in-memory otherwise; `redis` / `memory` force one or the other. The
+Redis client is **synchronous** (the cache is read from the RLM
+engine's worker thread). For multi-replica deployments set
+`FLYCANON_REDIS_URL` so a single fetch on one replica warms the whole
+fleet.
+
+| Key | What it is | Default |
+|-----|------------|---------|
+| `FLYCANON_CORPUS_CACHE_BACKEND` | `auto` (Redis when `FLYCANON_REDIS_URL` set, else in-memory), `redis`, or `memory`. | `auto` |
+| `FLYCANON_CORPUS_CACHE_TTL_S` | Per-entry TTL in seconds (both backends). | `3600` |
+| `FLYCANON_CORPUS_CACHE_MAX_ENTRIES` | LRU cap for the in-memory backend (the Redis backend relies on native `EX` expiry). | `512` |
 
 ---
 
