@@ -22,6 +22,7 @@ network, no API key.
 from __future__ import annotations
 
 from flycanon.core.services.query.rlm.session import (
+    _CITATION_CONTENT_CHARS,
     _SAFE_BUILTINS,
     DocCorpus,
     RLMSession,
@@ -220,6 +221,38 @@ def test_unknown_filing_has_empty_content():
     _answer, cites, _no_answer = RLMSession(client).run("q", docs)
     assert cites[0]["filing"] == "MISSING"
     assert cites[0]["content"] == ""
+
+
+def test_citation_content_preserves_newlines():
+    # a financial-statement-like page where layout (newlines) carries meaning
+    page = "Consolidated Balance Sheet\nTotal assets        1,234\nTotal liabilities     567"
+    docs = FakeDocs({"A": [page]})
+    client = FakeClient([_tool_use("final('x', filings=['A'], pages=[0])")])
+    _answer, cites, _no_answer = RLMSession(client).run("total assets", docs)
+    # structure is preserved -- newlines are NOT collapsed to spaces
+    assert "\n" in cites[0]["content"]
+    assert cites[0]["content"] == page
+
+
+def test_citation_content_capped_not_500():
+    # a page longer than the old 500-char cap but within the new cap
+    page = "\n".join(f"row {i} value {i * 7}" for i in range(80))
+    assert 500 < len(page) <= _CITATION_CONTENT_CHARS
+    docs = FakeDocs({"A": [page]})
+    client = FakeClient([_tool_use("final('x', filings=['A'], pages=[0])")])
+    _answer, cites, _no_answer = RLMSession(client).run("rows", docs)
+    # the full page survives -- more than the old 500-char prefix
+    assert len(cites[0]["content"]) > 500
+    assert cites[0]["content"] == page
+
+
+def test_citation_content_truncated_at_cap():
+    # a page exceeding the cap is truncated to exactly _CITATION_CONTENT_CHARS
+    page = "x" * (_CITATION_CONTENT_CHARS + 1000)
+    docs = FakeDocs({"A": [page]})
+    client = FakeClient([_tool_use("final('x', filings=['A'], pages=[0])")])
+    _answer, cites, _no_answer = RLMSession(client).run("q", docs)
+    assert len(cites[0]["content"]) == _CITATION_CONTENT_CHARS
 
 
 def test_text_only_answer_without_tool_use():
