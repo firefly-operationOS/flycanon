@@ -596,9 +596,7 @@ def test_slow_but_progressing_block_does_not_time_out(make_executor):
 
     ex = make_executor(timeout=0.5, llm=slow_llm)
     start = time.monotonic()
-    result = ex.run_block(
-        "for i in range(5):\n    print(llm(str(i)))"
-    )
+    result = ex.run_block("for i in range(5):\n    print(llm(str(i)))")
     elapsed = time.monotonic() - start
     assert result.kind == "stdout", result.error
     # total wall-clock comfortably exceeds the 0.5s timeout, proving the timeout
