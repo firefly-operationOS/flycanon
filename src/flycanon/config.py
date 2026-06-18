@@ -292,6 +292,18 @@ class CanonSettings(BaseSettings):
     # input-token cost and per-call latency. When ``False`` the system
     # prompt is sent as a plain string (no cache breakpoint).
     rlm_prompt_cache: bool = Field(default=True)
+    # Where the model-written REPL code is executed.
+    # ``inprocess`` (FLYCANON_RLM_SANDBOX) runs each turn's code in the
+    # engine's own restricted ``exec`` namespace (the current default);
+    # ``subprocess`` runs it in the scrubbed-env sandbox child instead,
+    # servicing every docs/llm/rlm request from the parent. Any value
+    # other than ``subprocess`` normalises to ``inprocess``.
+    rlm_sandbox: str = Field(
+        default="inprocess",
+        description="RLM REPL execution mode: ``inprocess`` (default) or ``subprocess``.",
+    )
+    # Per-turn wall-clock timeout (seconds) for the subprocess sandbox.
+    rlm_sandbox_timeout_s: int = Field(default=30, ge=1)
 
     # -- Corpus page cache ----------------------------------------------
     # Shared cache layered over the lazy RLM corpus store: an in-scope
@@ -413,6 +425,15 @@ class CanonSettings(BaseSettings):
         # ``rlm`` default -- only ``rag`` opts into the deprecated path.
         text = str(value).strip().lower() if value is not None else ""
         return "rag" if text == "rag" else "rlm"
+
+    @field_validator("rlm_sandbox", mode="before")
+    @classmethod
+    def _normalise_rlm_sandbox(cls, value: object) -> str:
+        # Only ``subprocess`` opts into the out-of-process sandbox; any
+        # other value (including an unrecognised one) is the in-process
+        # default.
+        text = str(value).strip().lower() if value is not None else ""
+        return "subprocess" if text == "subprocess" else "inprocess"
 
 
 @lru_cache(maxsize=1)
