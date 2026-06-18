@@ -35,11 +35,6 @@ Two surfaces complementary to the blocking ``/api/v1/query``:
 
 from __future__ import annotations
 
-import asyncio
-import json
-import logging
-import time
-
 from pyfly.container import rest_controller
 from pyfly.cqrs import DefaultQueryBus
 from pyfly.web import Body, Valid, post_mapping, request_mapping
@@ -49,13 +44,11 @@ from starlette.responses import StreamingResponse
 from flycanon.core.services.conversations import QuestionSuggester
 from flycanon.core.services.query.answer_dispatcher import AnswerDispatcher
 from flycanon.core.services.query.answer_service import AnswerService
-from flycanon.core.services.query.search_service import _filters_from_request, _hit_dto
 from flycanon.interfaces.dtos.conversation import SuggestRequest, SuggestResponse
-from flycanon.interfaces.dtos.query import AnswerRequest, SearchRequest
+from flycanon.interfaces.dtos.query import AnswerRequest
+from flycanon.web.answer_stream import stream_answer_sse
 from flycanon.web.conventions import TenantContext, tenant_context_from_request
 from flycanon.web.conventions.headers import DEPRECATION_RAG_MESSAGE, HEADER_DEPRECATION
-
-logger = logging.getLogger(__name__)
 
 
 @rest_controller
@@ -103,103 +96,6 @@ class QueryStreamController:
         """
         ctx: TenantContext = tenant_context_from_request(http_request)
 
-        async def _stream():
-            started = time.perf_counter()
-            try:
-                if self._dispatcher.is_rag:
-                    # Legacy RAG path: emit the retrieval hits first so the
-                    # UI gets citation chips before the model finishes
-                    # writing.
-                    search_request = SearchRequest(
-                        query=request.question,
-                        top_k=request.top_k,
-                        source_ids=request.source_ids,
-                        knowledge_item_ids=request.knowledge_item_ids,
-                        domains=request.domains,
-                        jurisdictions=request.jurisdictions,
-                        tags=request.tags,
-                        statuses=request.statuses,
-                    )
-                    retrieval = await self._answer._retrieval.search(  # noqa: SLF001
-                        query=request.question,
-                        tenant_id=ctx.tenant_id,
-                        workspace_id=ctx.workspace_id,
-                        top_k=request.top_k,
-                        filters=_filters_from_request(search_request),
-                    )
-                    for hit in retrieval.hits:
-                        dto = _hit_dto(hit)
-                        yield _sse_frame("hit", dto.model_dump(mode="json"))
-
-                    # RAG answers in one shot via the dispatcher; no
-                    # per-turn progress to stream.
-                    response = await self._dispatcher.answer(
-                        request,
-                        tenant_id=ctx.tenant_id,
-                        workspace_id=ctx.workspace_id,
-                    )
-                else:
-                    # RLM (default): no pre-retrieval step. Stream a live
-                    # ``status`` frame per REPL turn so the UI shows progress
-                    # while the engine reasons over the whole-document corpus.
-                    #
-                    # The engine fires ``on_turn`` from its worker thread (the
-                    # answer runs inside ``asyncio.to_thread``), so the callback
-                    # marshals each frame onto this event loop via
-                    # ``call_soon_threadsafe`` into a queue this generator drains.
-                    loop = asyncio.get_running_loop()
-                    queue: asyncio.Queue = asyncio.Queue()
-
-                    def on_turn(turn: int, accessed: list[str]) -> None:
-                        loop.call_soon_threadsafe(
-                            queue.put_nowait,
-                            ("status", {"stage": "reasoning", "turn": turn, "accessed": accessed[-1:]}),
-                        )
-
-                    task = asyncio.create_task(
-                        self._dispatcher.answer(
-                            request,
-                            tenant_id=ctx.tenant_id,
-                            workspace_id=ctx.workspace_id,
-                            on_turn=on_turn,
-                        )
-                    )
-                    # Drain queued status frames until the answer task finishes,
-                    # then flush any frames still queued. The short timeout keeps
-                    # the loop responsive without busy-spinning.
-                    while not task.done():
-                        try:
-                            event, data = await asyncio.wait_for(queue.get(), timeout=0.1)
-                        except TimeoutError:
-                            continue
-                        yield _sse_frame(event, data)
-                    while not queue.empty():
-                        event, data = queue.get_nowait()
-                        yield _sse_frame(event, data)
-
-                    response = await task
-                elapsed = int((time.perf_counter() - started) * 1000)
-                yield _sse_frame(
-                    "final",
-                    {
-                        "answer": response.answer,
-                        "citations": [c.model_dump(mode="json") for c in response.citations],
-                        "model": response.model,
-                        "elapsed_ms": elapsed,
-                        "no_answer": response.no_answer,
-                    },
-                )
-            except Exception as exc:  # noqa: BLE001 -- terminal error frame
-                # A mid-stream failure (retrieval / answer / serialisation)
-                # used to leave the SSE socket open with no terminal frame
-                # so the client hung until idle timeout. Emit one well-
-                # formed ``error`` frame, log the cause, then close cleanly.
-                logger.exception("query stream failed mid-stream: %s", exc)
-                yield _sse_frame(
-                    "error",
-                    {"code": "stream_error", "message": str(exc)},
-                )
-
         headers = {
             "Cache-Control": "no-cache",
             "X-Accel-Buffering": "no",
@@ -208,7 +104,12 @@ class QueryStreamController:
         if self._dispatcher.is_rag:
             headers[HEADER_DEPRECATION] = DEPRECATION_RAG_MESSAGE
         return StreamingResponse(
-            _stream(),
+            stream_answer_sse(
+                dispatcher=self._dispatcher,
+                answer_service=self._answer,
+                request=request,
+                ctx=ctx,
+            ),
             media_type="text/event-stream",
             headers=headers,
         )
@@ -230,7 +131,3 @@ class QueryStreamController:
             n=request.n,
         )
         return SuggestResponse(suggestions=suggestions)
-
-
-def _sse_frame(event: str, data: dict) -> bytes:
-    return f"event: {event}\ndata: {json.dumps(data)}\n\n".encode()
