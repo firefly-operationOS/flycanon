@@ -125,9 +125,7 @@ class RLMAnswerService:
             sub_budget=self._settings.rlm_sub_budget,
         )
         question = _question_with_history(request.question, prior_turns)
-        answer_text, cites, engine_no_answer = await asyncio.to_thread(
-            session.run, question, docs
-        )
+        answer_text, cites, engine_no_answer = await asyncio.to_thread(session.run, question, docs)
 
         citations = _map_citations(cites, docs)
         # Trust the engine's structured no-answer flag first; keep the
