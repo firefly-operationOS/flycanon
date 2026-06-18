@@ -22,6 +22,7 @@ network, no API key.
 from __future__ import annotations
 
 from flycanon.core.services.query.rlm.safe_builtins import _SAFE_BUILTINS
+from flycanon.core.services.query.rlm.sandbox.executor import BlockResult, SandboxExecutor
 from flycanon.core.services.query.rlm.session import (
     _CITATION_CONTENT_CHARS,
     DocCorpus,
@@ -469,6 +470,67 @@ def test_subprocess_mode_run_over_text_uses_text_mode():
     assert cites == []
     tool_result = client.chat_calls[1]["messages"][-1]["content"][0]
     assert "True" in tool_result["content"]
+
+
+class _DeadExecutor(SandboxExecutor):
+    """A sandbox stand-in whose child is already dead: every block terminates.
+
+    Used to prove the session degrades gracefully (no exception, no 'sandbox not
+    started') when the real child dies mid-query -- the executor returns a
+    ``terminated`` BlockResult and the loop falls through to the parent-side
+    plain-text fallback.
+    """
+
+    def __init__(self):
+        # inert handlers just to satisfy the base constructor; never called.
+        noop = lambda *_a: ""  # noqa: E731
+        super().__init__(
+            docs_keys=lambda: [],
+            docs_getitem=noop,
+            docs_pages=noop,
+            docs_npages=noop,
+            docs_contains=noop,
+            llm=noop,
+            rlm=noop,
+        )
+        self.closed = False
+
+    def start(self) -> None:  # no real child to spawn
+        pass
+
+    def run_block(self, code: str) -> BlockResult:
+        return BlockResult(kind="terminated", error="sandbox child exited unexpectedly")
+
+    def close(self) -> None:
+        self.closed = True
+
+
+def test_subprocess_mode_terminated_degrades_to_plaintext_answer(monkeypatch):
+    # The child dies mid-query (executor returns a terminated result). The session
+    # must NOT raise and must NOT call run_block again on the dead executor: it
+    # falls through to the out-of-iters fallback, which asks the PARENT's client
+    # for a plain-text answer (works with a dead sandbox).
+    docs = FakeDocs({"A": ["some page"]})
+    dead = _DeadExecutor()
+    monkeypatch.setattr(RLMSession, "_build_executor", lambda self, d, t: dead)
+
+    client = FakeClient(
+        [
+            _tool_use("print('this block dies')"),  # turn 1 -> terminated -> break
+            _text("best-effort answer from the transcript"),  # the fallback turn
+        ]
+    )
+    session = RLMSession(client, sandbox_mode="subprocess", sandbox_timeout_s=15)
+    answer, cites, no_answer = session.run("q", docs)
+
+    assert answer == "best-effort answer from the transcript"
+    assert no_answer is False  # forced best-effort answer, not a structured no-answer
+    assert cites == []
+    # the fallback prompt was sent and only ONE block was attempted (no retry on
+    # the dead executor).
+    assert "state your final answer" in client.chat_calls[-1]["messages"][-1]["content"]
+    # the executor is still closed via the session's try/finally.
+    assert dead.closed is True
 
 
 def test_inprocess_mode_default_matches_existing_behaviour():
