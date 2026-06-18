@@ -97,7 +97,57 @@ def test_chat_raw_returns_full_response(monkeypatch):
     assert resp["stop_reason"] == "tool_use"
     body = http.calls[0]["json"]
     assert body["tools"] == [{"name": "python"}]
-    assert body["system"] == "sys"
+    # prompt caching is on by default, so the system prompt is a cached text block
+    assert body["system"] == [{"type": "text", "text": "sys", "cache_control": {"type": "ephemeral"}}]
+
+
+def test_prompt_cache_wraps_system_in_chat_raw(monkeypatch):
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "k")
+    payload = {"content": [{"type": "tool_use", "id": "t1", "input": {}}], "stop_reason": "tool_use"}
+    http = _FakeHttp([_FakeResponse(200, payload)])
+    client = AnthropicClient(_settings(), http_client=http)  # default: prompt cache on
+    client.chat_raw([{"role": "user", "content": "hi"}], "big system", [{"name": "python"}])
+    assert http.calls[0]["json"]["system"] == [
+        {"type": "text", "text": "big system", "cache_control": {"type": "ephemeral"}}
+    ]
+
+
+def test_prompt_cache_disabled_keeps_plain_system_in_chat_raw(monkeypatch):
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "k")
+    payload = {"content": [{"type": "tool_use", "id": "t1", "input": {}}], "stop_reason": "tool_use"}
+    http = _FakeHttp([_FakeResponse(200, payload)])
+    client = AnthropicClient(CanonSettings(rlm_prompt_cache=False), http_client=http)
+    client.chat_raw([{"role": "user", "content": "hi"}], "big system", [{"name": "python"}])
+    assert http.calls[0]["json"]["system"] == "big system"
+
+
+def test_prompt_cache_wraps_system_in_complete(monkeypatch):
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "k")
+    payload = {"content": [{"type": "text", "text": "ok"}], "usage": {}}
+    http = _FakeHttp([_FakeResponse(200, payload)])
+    client = AnthropicClient(_settings(), http_client=http)  # default: prompt cache on
+    client.complete("q", system="big system")
+    assert http.calls[0]["json"]["system"] == [
+        {"type": "text", "text": "big system", "cache_control": {"type": "ephemeral"}}
+    ]
+
+
+def test_prompt_cache_disabled_keeps_plain_system_in_complete(monkeypatch):
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "k")
+    payload = {"content": [{"type": "text", "text": "ok"}], "usage": {}}
+    http = _FakeHttp([_FakeResponse(200, payload)])
+    client = AnthropicClient(CanonSettings(rlm_prompt_cache=False), http_client=http)
+    client.complete("q", system="big system")
+    assert http.calls[0]["json"]["system"] == "big system"
+
+
+def test_complete_without_system_omits_field(monkeypatch):
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "k")
+    payload = {"content": [{"type": "text", "text": "ok"}], "usage": {}}
+    http = _FakeHttp([_FakeResponse(200, payload)])
+    client = AnthropicClient(_settings(), http_client=http)
+    client.complete("q")
+    assert "system" not in http.calls[0]["json"]
 
 
 def test_model_override_is_stripped(monkeypatch):
