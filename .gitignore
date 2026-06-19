@@ -118,3 +118,6 @@ postgres_data/
 *.bak
 *.orig
 site/
+
+# Git worktrees
+.worktrees/
