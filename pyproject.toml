@@ -17,7 +17,7 @@ dependencies = [
     # Firefly Framework runtime (DI, CQRS, EDA, web, observability, resilience,
     # actuator, data-relational, security). Pulled in with the extras we use
     # so a fresh ``uv sync`` is enough to boot the full stack.
-    "pyfly[fastapi,observability,security,data-relational,postgresql,eda,redis,client,scheduling,cli]>=26.5.4",
+    "pyfly[fastapi,observability,security,data-relational,postgresql,eda,redis,client,scheduling,cli]>=26.6.113",
 
     # GenAI metaframework -- FireflyAgent over pydantic-ai, the binary
     # normalisation stack (``[binary]`` -> ``content.binary``) and the
@@ -158,7 +158,7 @@ override-dependencies = [
 # clones / CI resolve them without any sibling path. agentic v26.05.32 adds the
 # pgvector adapter + tenant-scoped vector-store layer flycanon's multi-backend
 # retrieval depends on.
-pyfly = { git = "https://github.com/fireflyframework/fireflyframework-pyfly.git", tag = "v26.05.05" }
+pyfly = { git = "https://github.com/fireflyframework/fireflyframework-pyfly.git", tag = "v26.06.113" }
 fireflyframework-agentic = { git = "https://github.com/fireflyframework/fireflyframework-agentic.git", tag = "v26.05.32" }
 
 [tool.hatch.build.targets.wheel]
