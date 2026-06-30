@@ -141,6 +141,13 @@ FLYCANON_RLM_MAX_ITERS=8
 FLYCANON_RLM_SUB_BUDGET=12
 FLYCANON_RLM_MAX_DEPTH=1
 
+# Self-consistency guard. RLM is non-deterministic run-to-run on hard
+# multi-fact questions; >1 runs the engine N times in parallel on the
+# non-streaming /api/v1/query path and an LLM selector picks the most-grounded
+# answer, clawing back the variance (RLM's best-of ceiling) at N times the
+# compute. 1 (default) = single run, no self-consistency.
+FLYCANON_RLM_SELF_CONSISTENCY=1
+
 # Mark the large, static RLM system prompt with Anthropic
 # cache_control: ephemeral so it is cached server-side and reused across the
 # many Messages calls one CodeAct session makes (cuts input-token cost +
