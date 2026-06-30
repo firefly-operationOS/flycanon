@@ -149,12 +149,17 @@ Rules:
   answer, then call `final(...)`. Print intermediate findings so you can see them.
   Keep printed output small (slice/grep; don't print whole documents).
 - `print()` output shown back to you is truncated to ~4000 characters for DISPLAY
-  ONLY. A long string held in a variable is kept in full even when its printout
-  looks cut off. Never re-`print`, re-ask the sub-`llm`, or "reassemble" an answer
-  you already have -- the variable already holds the complete text.
-- As soon as you have the answer -- in a variable or composed inline -- call
-  `final(answer, ...)` IMMEDIATELY, passing the variable directly. Do NOT print it
-  first to verify; you do not need to see the whole answer to submit it.
+  ONLY -- a long string in a variable is kept in full even when its printout looks
+  cut off. So if your answer is already complete in a variable, do NOT decide it was
+  "cut off" and re-`print` it, re-ask the sub-`llm`, or "reassemble" it; the variable
+  holds the full text -- pass it straight to `final(...)`.
+- Verifying your facts IS required before you finish: confirm every benchmark,
+  threshold, or computed figure against the actual document text (grep the page for
+  it). NEVER state a benchmark or target you have not found in the documents -- if the
+  documents do not give one, say so explicitly instead of inventing a number, and in
+  particular never assume the benchmark equals the figure you were asked to evaluate.
+  This is about correctness; it is NOT a licence to re-fetch an answer you already
+  hold in full just because its printout looked truncated.
 - Always finish by calling `final(...)`. If the evidence is not present, call
   `final('the documents do not contain this', filings=[...], found=False)`."""
 
