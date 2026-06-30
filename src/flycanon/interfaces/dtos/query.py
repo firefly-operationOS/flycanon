@@ -291,6 +291,17 @@ class AnswerRequest(_Filters):
         ),
         examples=["anthropic:claude-sonnet-4-6", "openai:gpt-4o"],
     )
+    extended_reasoning: bool = Field(
+        default=False,
+        description=(
+            "RLM only: when true, the CodeAct engine runs at TWICE the "
+            "configured iteration budget (``FLYCANON_RLM_MAX_ITERS`` * 2) for "
+            "this request -- a per-request lever for harder multi-fact "
+            "questions that need more turns to gather and verify evidence, "
+            "without raising the global default for all traffic. Ignored by "
+            "the RAG engine, which is single-shot."
+        ),
+    )
 
 
 class AnswerResponse(BaseModel):

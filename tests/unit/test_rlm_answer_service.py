@@ -586,3 +586,58 @@ async def test_default_sandbox_mode_is_subprocess(monkeypatch):
     # no real child is spawned -- only the threaded mode value is asserted).
     assert captured["sandbox_mode"] == "subprocess"
     assert captured["sandbox_timeout_s"] == 30
+
+
+@pytest.mark.asyncio
+async def test_extended_reasoning_doubles_max_iters(monkeypatch):
+    # The per-request extended_reasoning flag gives a hard question twice the
+    # configured iteration budget (rlm_max_iters * 2) without a global bump.
+    pages = {"acme-10k": ["a"]}
+    sources = {
+        "acme-10k": SourceMeta(
+            source_id="src-1", filename="acme.pdf", title="ACME 10-K", kind="pdf",
+            object_store_key="k1", content_sha256="sha-1",
+        )
+    }
+    builder = FakeCorpusBuilder(_docs(pages, sources))
+    settings = CanonSettings(rlm_max_iters=8)
+    service = RLMAnswerService(
+        corpus_builder=builder, client=FakeClient(), settings=settings, cost_service=FakeCostService(),
+    )
+    captured: dict = {}
+
+    def _capture(*_args, **kwargs):
+        captured.update(kwargs)
+        return FakeSession("ok", [{"filing": "acme-10k", "page": 0, "content": "a"}])
+
+    monkeypatch.setattr(svc_mod, "RLMSession", _capture)
+
+    await service.answer(_request(extended_reasoning=True), tenant_id="t1", workspace_id="w1")
+    assert captured["max_iters"] == 16  # 8 * 2
+
+
+@pytest.mark.asyncio
+async def test_default_request_uses_configured_max_iters(monkeypatch):
+    # Without the flag, the engine runs at the configured budget (no doubling).
+    pages = {"acme-10k": ["a"]}
+    sources = {
+        "acme-10k": SourceMeta(
+            source_id="src-1", filename="acme.pdf", title="ACME 10-K", kind="pdf",
+            object_store_key="k1", content_sha256="sha-1",
+        )
+    }
+    builder = FakeCorpusBuilder(_docs(pages, sources))
+    settings = CanonSettings(rlm_max_iters=8)
+    service = RLMAnswerService(
+        corpus_builder=builder, client=FakeClient(), settings=settings, cost_service=FakeCostService(),
+    )
+    captured: dict = {}
+
+    def _capture(*_args, **kwargs):
+        captured.update(kwargs)
+        return FakeSession("ok", [{"filing": "acme-10k", "page": 0, "content": "a"}])
+
+    monkeypatch.setattr(svc_mod, "RLMSession", _capture)
+
+    await service.answer(_request(), tenant_id="t1", workspace_id="w1")
+    assert captured["max_iters"] == 8

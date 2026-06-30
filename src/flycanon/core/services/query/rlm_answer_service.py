@@ -135,10 +135,15 @@ class RLMAnswerService:
         # (while reusing the connection pool); the singleton's counters
         # would otherwise cross-contaminate cost between concurrent queries.
         query_client = self._client.fork()
+        # Per-request lever: a hard multi-fact question can opt into twice the
+        # configured iteration budget (rlm_max_iters * 2) without a global bump.
+        max_iters = self._settings.rlm_max_iters
+        if request.extended_reasoning:
+            max_iters *= 2
         session = RLMSession(
             query_client,
             max_depth=self._settings.rlm_max_depth,
-            max_iters=self._settings.rlm_max_iters,
+            max_iters=max_iters,
             sub_budget=self._settings.rlm_sub_budget,
             on_turn=on_turn,
             sandbox_mode=self._settings.rlm_sandbox,
