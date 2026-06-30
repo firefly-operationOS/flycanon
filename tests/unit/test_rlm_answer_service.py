@@ -83,6 +83,10 @@ class FakeClient:
     def token_totals(self) -> dict:
         return self._usage
 
+    def complete(self, prompt, system="", model=None, max_tokens=1000) -> str:
+        # default selector reply; the self-consistency test subclasses to pick by content
+        return "1"
+
 
 class FakeCostService:
     """Records every :meth:`record` call; can be made to raise on demand."""
@@ -300,6 +304,66 @@ async def test_engine_found_answer_is_not_no_answer(monkeypatch):
     resp = await service.answer(_request(), tenant_id="t1", workspace_id="w1")
 
     assert resp.no_answer is False
+
+
+@pytest.mark.asyncio
+async def test_blank_answer_is_flagged_no_answer(monkeypatch):
+    # The CodeAct loop can exhaust ``rlm_max_iters`` without ever calling
+    # ``final()``; the engine then returns an empty string with the default
+    # ``found`` flag (no_answer=False). That degenerate non-answer must NOT
+    # surface as a valid answer -- callers cannot otherwise detect the failure.
+    pages = {"acme-10k": ["a"]}
+    sources = {
+        "acme-10k": SourceMeta(
+            source_id="src-1",
+            filename=None,
+            title=None,
+            kind="pdf",
+            object_store_key="k1",
+            content_sha256="sha-1",
+        )
+    }
+    builder = FakeCorpusBuilder(_docs(pages, sources))
+    service = _service(builder)
+
+    fake = FakeSession("", [], no_answer=False)
+    monkeypatch.setattr(svc_mod, "RLMSession", lambda *a, **k: fake)
+
+    resp = await service.answer(_request(), tenant_id="t1", workspace_id="w1")
+
+    assert resp.no_answer is True
+    # a non-answer carries an explanatory note, never an empty string
+    assert resp.answer.strip() != ""
+    assert resp.citations == []
+
+
+@pytest.mark.asyncio
+async def test_whitespace_only_answer_is_flagged_no_answer(monkeypatch):
+    # Same degenerate case, but the engine emitted only whitespace.
+    pages = {"acme-10k": ["a"]}
+    sources = {
+        "acme-10k": SourceMeta(
+            source_id="src-1",
+            filename=None,
+            title=None,
+            kind="pdf",
+            object_store_key="k1",
+            content_sha256="sha-1",
+        )
+    }
+    builder = FakeCorpusBuilder(_docs(pages, sources))
+    service = _service(builder)
+
+    fake = FakeSession("   \n\t  ", [{"filing": "acme-10k", "page": 0, "content": "a"}], no_answer=False)
+    monkeypatch.setattr(svc_mod, "RLMSession", lambda *a, **k: fake)
+
+    resp = await service.answer(_request(), tenant_id="t1", workspace_id="w1")
+
+    assert resp.no_answer is True
+    assert resp.answer.strip() != ""
+    # citations are dropped for a non-answer -- they cannot support an answer
+    # that was never produced
+    assert resp.citations == []
 
 
 @pytest.mark.asyncio
@@ -526,3 +590,152 @@ async def test_default_sandbox_mode_is_subprocess(monkeypatch):
     # no real child is spawned -- only the threaded mode value is asserted).
     assert captured["sandbox_mode"] == "subprocess"
     assert captured["sandbox_timeout_s"] == 30
+
+
+@pytest.mark.asyncio
+async def test_extended_reasoning_doubles_max_iters(monkeypatch):
+    # The per-request extended_reasoning flag gives a hard question twice the
+    # configured iteration budget (rlm_max_iters * 2) without a global bump.
+    pages = {"acme-10k": ["a"]}
+    sources = {
+        "acme-10k": SourceMeta(
+            source_id="src-1",
+            filename="acme.pdf",
+            title="ACME 10-K",
+            kind="pdf",
+            object_store_key="k1",
+            content_sha256="sha-1",
+        )
+    }
+    builder = FakeCorpusBuilder(_docs(pages, sources))
+    settings = CanonSettings(rlm_max_iters=8)
+    service = RLMAnswerService(
+        corpus_builder=builder,
+        client=FakeClient(),
+        settings=settings,
+        cost_service=FakeCostService(),
+    )
+    captured: dict = {}
+
+    def _capture(*_args, **kwargs):
+        captured.update(kwargs)
+        return FakeSession("ok", [{"filing": "acme-10k", "page": 0, "content": "a"}])
+
+    monkeypatch.setattr(svc_mod, "RLMSession", _capture)
+
+    await service.answer(_request(extended_reasoning=True), tenant_id="t1", workspace_id="w1")
+    assert captured["max_iters"] == 16  # 8 * 2
+
+
+@pytest.mark.asyncio
+async def test_default_request_uses_configured_max_iters(monkeypatch):
+    # Without the flag, the engine runs at the configured budget (no doubling).
+    pages = {"acme-10k": ["a"]}
+    sources = {
+        "acme-10k": SourceMeta(
+            source_id="src-1",
+            filename="acme.pdf",
+            title="ACME 10-K",
+            kind="pdf",
+            object_store_key="k1",
+            content_sha256="sha-1",
+        )
+    }
+    builder = FakeCorpusBuilder(_docs(pages, sources))
+    settings = CanonSettings(rlm_max_iters=8)
+    service = RLMAnswerService(
+        corpus_builder=builder,
+        client=FakeClient(),
+        settings=settings,
+        cost_service=FakeCostService(),
+    )
+    captured: dict = {}
+
+    def _capture(*_args, **kwargs):
+        captured.update(kwargs)
+        return FakeSession("ok", [{"filing": "acme-10k", "page": 0, "content": "a"}])
+
+    monkeypatch.setattr(svc_mod, "RLMSession", _capture)
+
+    await service.answer(_request(), tenant_id="t1", workspace_id="w1")
+    assert captured["max_iters"] == 8
+
+
+@pytest.mark.asyncio
+async def test_self_consistency_default_is_single_run(monkeypatch):
+    # rlm_self_consistency defaults to 1 -> exactly one RLM run, no selector.
+    pages = {"acme-10k": ["a"]}
+    sources = {
+        "acme-10k": SourceMeta(
+            source_id="src-1",
+            filename="acme.pdf",
+            title="ACME 10-K",
+            kind="pdf",
+            object_store_key="k1",
+            content_sha256="sha-1",
+        )
+    }
+    builder = FakeCorpusBuilder(_docs(pages, sources))
+    service = _service(builder)  # default settings -> rlm_self_consistency=1
+    created: list = []
+
+    def _factory(*_a, **_k):
+        created.append(1)
+        return FakeSession("only run", [{"filing": "acme-10k", "page": 0, "content": "a"}])
+
+    monkeypatch.setattr(svc_mod, "RLMSession", _factory)
+
+    resp = await service.answer(_request(), tenant_id="t1", workspace_id="w1")
+
+    assert len(created) == 1
+    assert resp.answer == "only run"
+
+
+@pytest.mark.asyncio
+async def test_self_consistency_runs_n_and_selects_best(monkeypatch):
+    # rlm_self_consistency=3 -> run RLM 3x in parallel, selector picks the best answer.
+    pages = {"acme-10k": ["a"]}
+    sources = {
+        "acme-10k": SourceMeta(
+            source_id="src-1",
+            filename="acme.pdf",
+            title="ACME 10-K",
+            kind="pdf",
+            object_store_key="k1",
+            content_sha256="sha-1",
+        )
+    }
+    builder = FakeCorpusBuilder(_docs(pages, sources))
+
+    class _SelectorClient(FakeClient):
+        # pick the numbered candidate whose text contains 'BEST' (content-based, so the
+        # parallel run order does not matter)
+        def complete(self, prompt, system="", model=None, max_tokens=1000) -> str:
+            import re
+
+            for m in re.finditer(r"\[(\d+)\]\n(.*?)(?=\n\n\[|\Z)", prompt, re.S):
+                if "BEST" in m.group(2):
+                    return m.group(1)
+            return "1"
+
+    settings = CanonSettings(rlm_self_consistency=3)
+    service = RLMAnswerService(
+        corpus_builder=builder,
+        client=_SelectorClient(),
+        settings=settings,
+        cost_service=FakeCostService(),
+    )
+    answers = iter(["candidate uno", "candidate dos BEST", "candidate tres"])
+    created: list = []
+
+    def _factory(*_a, **_k):
+        created.append(1)
+        return FakeSession(next(answers), [])
+
+    monkeypatch.setattr(svc_mod, "RLMSession", _factory)
+
+    resp = await service.answer(_request(), tenant_id="t1", workspace_id="w1")
+
+    assert len(created) == 3  # ran the engine three times
+    assert resp.answer == "candidate dos BEST"  # selector chose the best of the three
+    assert resp.no_answer is False

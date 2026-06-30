@@ -2,7 +2,7 @@
 name = "flycanon"
 # CalVer YY.MM.PP -- bumped per release. Note that PEP 440 normalises
 # ``26.05.04`` -> ``26.5.4`` in the built wheel filename.
-version = "26.6.18"
+version = "26.6.19"
 description = "Operational Knowledge Repository -- versioned, provenance-tracked canonical knowledge with hybrid retrieval and RAG, exposed as a standalone HTTP microservice over fireflyframework-pyfly and -agentic. Part of Firefly OperationOS, platform-agnostic by design."
 readme = "README.md"
 requires-python = ">=3.13,<3.14"
@@ -105,6 +105,10 @@ dev = [
     "httpx>=0.28",
     "reportlab>=4.2",
     "python-docx>=1.1",
+    # The S3 object-store backend is an optional runtime extra, but its unit
+    # tests and the pyright type-check of ``storage/s3.py`` run unconditionally
+    # in CI, so boto3 must be present in the dev toolchain.
+    "boto3>=1.34",
 ]
 
 # Optional layout-aware OCR via IBM Docling. Activates when

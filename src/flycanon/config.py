@@ -282,6 +282,11 @@ class CanonSettings(BaseSettings):
     # Max orchestrator turns before the loop gives up and asks for a
     # plain-text answer from the transcript.
     rlm_max_iters: int = Field(default=8, ge=1, le=64)
+    # Self-consistency guard. >1 runs the RLM engine N times in parallel on the
+    # non-streaming answer path and selects the most-grounded answer, clawing
+    # back the run-to-run variance (RLM's best-of ceiling) at N times the
+    # compute. Default 1 = single run (no self-consistency).
+    rlm_self_consistency: int = Field(default=1, ge=1, le=8)
     # Total recursive sub-call budget across one root session.
     rlm_sub_budget: int = Field(default=12, ge=0, le=128)
     # How deep ``rlm(...)`` may nest before it degrades to a flat ``llm``.

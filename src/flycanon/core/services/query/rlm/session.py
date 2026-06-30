@@ -39,6 +39,7 @@ The engine is **corpus-agnostic**: ``docs`` is duck-typed via the
 from __future__ import annotations
 
 import io
+import logging
 import re
 import traceback
 from collections.abc import Callable
@@ -94,6 +95,11 @@ _PY_TOOL = [
 # ``safe_builtins`` leaf module so the out-of-process sandbox child shares the
 # exact same whitelist without importing this engine's ``httpx``/config stack.
 _MAX_STDOUT = 4000  # truncate each turn's printed output fed back to the model
+
+# How much model-written code / REPL stdout to keep on each DEBUG trace line.
+_TRACE_CHARS = 1500
+
+logger = logging.getLogger(__name__)
 # Cap on cited page text. A dense 10-K page is ~3-5k chars; this keeps the
 # whole page the model read (structure intact) rather than a tiny prefix.
 _CITATION_CONTENT_CHARS = 4000
@@ -142,6 +148,18 @@ Rules:
   question), read the relevant pages (search the text for the figure), extract the
   answer, then call `final(...)`. Print intermediate findings so you can see them.
   Keep printed output small (slice/grep; don't print whole documents).
+- `print()` output shown back to you is truncated to ~4000 characters for DISPLAY
+  ONLY -- a long string in a variable is kept in full even when its printout looks
+  cut off. So if your answer is already complete in a variable, do NOT decide it was
+  "cut off" and re-`print` it, re-ask the sub-`llm`, or "reassemble" it; the variable
+  holds the full text -- pass it straight to `final(...)`.
+- Verifying your facts IS required before you finish: confirm every benchmark,
+  threshold, or computed figure against the actual document text (grep the page for
+  it). NEVER state a benchmark or target you have not found in the documents -- if the
+  documents do not give one, say so explicitly instead of inventing a number, and in
+  particular never assume the benchmark equals the figure you were asked to evaluate.
+  This is about correctness; it is NOT a licence to re-fetch an answer you already
+  hold in full just because its printout looked truncated.
 - Always finish by calling `final(...)`. If the evidence is not present, call
   `final('the documents do not contain this', filings=[...], found=False)`."""
 
@@ -298,6 +316,7 @@ class RLMSession:
         dead_sandbox = False
         for _ in range(self.max_iters):
             self.turns += 1
+            logger.debug("rlm turn %d/%d starting", self.turns, self.max_iters)
             if self.on_turn is not None:
                 # ``docs`` is the corpus on the root path (carries ``.accessed``)
                 # and ``None`` on the nested-text path. A callback failure must
@@ -307,17 +326,32 @@ class RLMSession:
             resp = self.client.chat_raw(messages, system, _PY_TOOL)
             content = resp.get("content", [])
             messages.append({"role": "assistant", "content": content})
+            if logger.isEnabledFor(logging.DEBUG):
+                reasoning = "".join(b.get("text", "") for b in content if b.get("type") == "text").strip()
+                if reasoning:
+                    logger.debug("rlm turn %d reasoning: %s", self.turns, reasoning[:_TRACE_CHARS])
             tool_uses = [b for b in content if b.get("type") == "tool_use"]
             if not tool_uses:  # model answered in text without running code
                 text = "".join(b.get("text", "") for b in content if b.get("type") == "text")
+                logger.debug(
+                    "rlm turn %d answered in plain text without running code (len=%d)",
+                    self.turns,
+                    len(text.strip()),
+                )
                 # best-effort plain-text answer: not a structured no-answer.
                 return text.strip(), self._citations(None, None, docs, question), False
             results = []
             for idx, tu in enumerate(tool_uses):
-                stdout, fin = self._run_block(
-                    str(tu.get("input", {}).get("code", "")), runner, docs, question
-                )
+                code = str(tu.get("input", {}).get("code", ""))
+                logger.debug("rlm turn %d code[%d]: %s", self.turns, idx, code[:_TRACE_CHARS])
+                stdout, fin = self._run_block(code, runner, docs, question)
                 if fin is not None:
+                    logger.debug(
+                        "rlm turn %d called final() (found=%s, answer_len=%d)",
+                        self.turns,
+                        not fin.no_answer,
+                        len(fin.answer),
+                    )
                     return fin.answer, fin.citations, fin.no_answer
                 # stdout is None only on the _Final path (returned above) or when
                 # the sandbox child died: in that case stop running blocks -- the
@@ -342,6 +376,7 @@ class RLMSession:
                             }
                         )
                     break
+                logger.debug("rlm turn %d stdout: %s", self.turns, stdout[:_TRACE_CHARS])
                 results.append(
                     {
                         "type": "tool_result",
@@ -355,13 +390,35 @@ class RLMSession:
             messages.append({"role": "user", "content": results})
             if dead_sandbox:
                 break
-        # ran out of turns -> ask for a direct answer from the transcript
-        messages.append({"role": "user", "content": "Stop now and state your final answer as plain text."})
+        # ran out of turns -> ask for a direct answer from the transcript. This
+        # is the divergence path behind the empty-answer failure mode: the
+        # orchestrator never committed to ``final()`` within the budget. Surface
+        # it at WARNING so it is visible in logs without DEBUG turn tracing.
+        logger.warning(
+            "rlm exhausted %d iterations without calling final(); forcing a tool-less final answer",
+            self.max_iters,
+        )
+        messages.append(
+            {
+                "role": "user",
+                "content": (
+                    "You have run out of analysis turns. Using everything you have read and "
+                    "computed above, write your COMPLETE final answer to the question now, as "
+                    "plain text. Do not run any more code."
+                ),
+            }
+        )
+        # Re-ask with NO tools so the model cannot keep running code and MUST emit
+        # its answer as text; a larger token budget lets a long synthesised answer
+        # through in one shot. This is the safety net behind the empty-answer mode:
+        # even when the loop never called final(), the transcript already holds the
+        # evidence, so a tool-less turn reliably produces a substantive answer.
         text = "".join(
             b.get("text", "")
-            for b in self.client.chat_raw(messages, system, _PY_TOOL).get("content", [])
+            for b in self.client.chat_raw(messages, system, [], max_tokens=4096).get("content", [])
             if b.get("type") == "text"
         )
+        logger.debug("rlm forced-final plain-text answer (len=%d)", len(text.strip()))
         # ran out of iterations: forced best-effort answer, not a structured no-answer.
         return text.strip(), self._citations(None, None, docs, question), False
 

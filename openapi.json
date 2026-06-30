@@ -363,6 +363,12 @@
             ],
             "title": "Domains"
           },
+          "extended_reasoning": {
+            "default": false,
+            "description": "RLM only: when true, the CodeAct engine runs at TWICE the configured iteration budget (``FLYCANON_RLM_MAX_ITERS`` * 2) for this request -- a per-request lever for harder multi-fact questions that need more turns to gather and verify evidence, without raising the global default for all traffic. Ignored by the RAG engine, which is single-shot.",
+            "title": "Extended Reasoning",
+            "type": "boolean"
+          },
           "instructions": {
             "anyOf": [
               {
@@ -4541,7 +4547,7 @@
           "version": {
             "description": "CalVer (``YY.MM.PP``) baked into the wheel at build time. PEP 440 normalises ``26.05.01`` -> ``26.5.1`` so the value you see here uses the stripped form.",
             "examples": [
-              "26.6.18"
+              "26.6.19"
             ],
             "title": "Version",
             "type": "string"
@@ -4925,7 +4931,7 @@
       "url": "https://github.com/firefly-operationOS/flycanon/blob/main/LICENSE"
     },
     "title": "flycanon",
-    "version": "26.6.18"
+    "version": "26.6.19"
   },
   "openapi": "3.1.0",
   "paths": {
