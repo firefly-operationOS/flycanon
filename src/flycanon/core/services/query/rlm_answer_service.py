@@ -59,8 +59,7 @@ _NOT_FOUND_MARKERS = ("do not contain", "not found", "no documents", "cannot fin
 # plain-text fallback came back empty. Paired with ``no_answer=True`` so the
 # caller treats it as an explanatory note rather than a substantive answer.
 _NO_ANSWER_NOTE = (
-    "The engine could not produce a grounded answer to that question from the "
-    "available documents."
+    "The engine could not produce a grounded answer to that question from the available documents."
 )
 
 # Cap on how many prior turns we fold into the question for conversational
@@ -164,9 +163,7 @@ class RLMAnswerService:
         # Trust the engine's structured no-answer flag first; keep the
         # text-marker check as a fallback for models that answer in plain text
         # without passing ``found=False``.
-        no_answer = (
-            engine_no_answer or blank_answer or (not citations and _looks_not_found(answer_text))
-        )
+        no_answer = engine_no_answer or blank_answer or (not citations and _looks_not_found(answer_text))
         if blank_answer:
             logger.warning(
                 "rlm produced no usable answer text for question=%s (docs=%d); returning no_answer",
@@ -217,9 +214,7 @@ class RLMAnswerService:
         answer, cites, no_answer = session.run(question, docs)
         return answer, cites, no_answer, client.token_totals()
 
-    def _select_consistent(
-        self, question: str, runs: list
-    ) -> tuple[str, list[dict], bool, dict]:
+    def _select_consistent(self, question: str, runs: list) -> tuple[str, list[dict], bool, dict]:
         """Select the most-grounded answer across self-consistency runs.
 
         ``runs`` is the ``asyncio.gather(..., return_exceptions=True)`` result:

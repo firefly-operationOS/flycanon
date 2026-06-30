@@ -599,14 +599,21 @@ async def test_extended_reasoning_doubles_max_iters(monkeypatch):
     pages = {"acme-10k": ["a"]}
     sources = {
         "acme-10k": SourceMeta(
-            source_id="src-1", filename="acme.pdf", title="ACME 10-K", kind="pdf",
-            object_store_key="k1", content_sha256="sha-1",
+            source_id="src-1",
+            filename="acme.pdf",
+            title="ACME 10-K",
+            kind="pdf",
+            object_store_key="k1",
+            content_sha256="sha-1",
         )
     }
     builder = FakeCorpusBuilder(_docs(pages, sources))
     settings = CanonSettings(rlm_max_iters=8)
     service = RLMAnswerService(
-        corpus_builder=builder, client=FakeClient(), settings=settings, cost_service=FakeCostService(),
+        corpus_builder=builder,
+        client=FakeClient(),
+        settings=settings,
+        cost_service=FakeCostService(),
     )
     captured: dict = {}
 
@@ -626,14 +633,21 @@ async def test_default_request_uses_configured_max_iters(monkeypatch):
     pages = {"acme-10k": ["a"]}
     sources = {
         "acme-10k": SourceMeta(
-            source_id="src-1", filename="acme.pdf", title="ACME 10-K", kind="pdf",
-            object_store_key="k1", content_sha256="sha-1",
+            source_id="src-1",
+            filename="acme.pdf",
+            title="ACME 10-K",
+            kind="pdf",
+            object_store_key="k1",
+            content_sha256="sha-1",
         )
     }
     builder = FakeCorpusBuilder(_docs(pages, sources))
     settings = CanonSettings(rlm_max_iters=8)
     service = RLMAnswerService(
-        corpus_builder=builder, client=FakeClient(), settings=settings, cost_service=FakeCostService(),
+        corpus_builder=builder,
+        client=FakeClient(),
+        settings=settings,
+        cost_service=FakeCostService(),
     )
     captured: dict = {}
 
@@ -652,8 +666,14 @@ async def test_self_consistency_default_is_single_run(monkeypatch):
     # rlm_self_consistency defaults to 1 -> exactly one RLM run, no selector.
     pages = {"acme-10k": ["a"]}
     sources = {
-        "acme-10k": SourceMeta(source_id="src-1", filename="acme.pdf", title="ACME 10-K", kind="pdf",
-                               object_store_key="k1", content_sha256="sha-1")
+        "acme-10k": SourceMeta(
+            source_id="src-1",
+            filename="acme.pdf",
+            title="ACME 10-K",
+            kind="pdf",
+            object_store_key="k1",
+            content_sha256="sha-1",
+        )
     }
     builder = FakeCorpusBuilder(_docs(pages, sources))
     service = _service(builder)  # default settings -> rlm_self_consistency=1
@@ -676,8 +696,14 @@ async def test_self_consistency_runs_n_and_selects_best(monkeypatch):
     # rlm_self_consistency=3 -> run RLM 3x in parallel, selector picks the best answer.
     pages = {"acme-10k": ["a"]}
     sources = {
-        "acme-10k": SourceMeta(source_id="src-1", filename="acme.pdf", title="ACME 10-K", kind="pdf",
-                               object_store_key="k1", content_sha256="sha-1")
+        "acme-10k": SourceMeta(
+            source_id="src-1",
+            filename="acme.pdf",
+            title="ACME 10-K",
+            kind="pdf",
+            object_store_key="k1",
+            content_sha256="sha-1",
+        )
     }
     builder = FakeCorpusBuilder(_docs(pages, sources))
 
@@ -694,7 +720,10 @@ async def test_self_consistency_runs_n_and_selects_best(monkeypatch):
 
     settings = CanonSettings(rlm_self_consistency=3)
     service = RLMAnswerService(
-        corpus_builder=builder, client=_SelectorClient(), settings=settings, cost_service=FakeCostService(),
+        corpus_builder=builder,
+        client=_SelectorClient(),
+        settings=settings,
+        cost_service=FakeCostService(),
     )
     answers = iter(["candidate uno", "candidate dos BEST", "candidate tres"])
     created: list = []
