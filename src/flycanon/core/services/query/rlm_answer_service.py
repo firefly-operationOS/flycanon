@@ -34,6 +34,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 import time
 from collections.abc import Callable
 
@@ -131,26 +132,27 @@ class RLMAnswerService:
                 no_answer=True,
             )
 
-        # Fork the shared client so this query gets its own token tally
-        # (while reusing the connection pool); the singleton's counters
-        # would otherwise cross-contaminate cost between concurrent queries.
-        query_client = self._client.fork()
         # Per-request lever: a hard multi-fact question can opt into twice the
         # configured iteration budget (rlm_max_iters * 2) without a global bump.
         max_iters = self._settings.rlm_max_iters
         if request.extended_reasoning:
             max_iters *= 2
-        session = RLMSession(
-            query_client,
-            max_depth=self._settings.rlm_max_depth,
-            max_iters=max_iters,
-            sub_budget=self._settings.rlm_sub_budget,
-            on_turn=on_turn,
-            sandbox_mode=self._settings.rlm_sandbox,
-            sandbox_timeout_s=self._settings.rlm_sandbox_timeout_s,
-        )
         question = _question_with_history(request.question, prior_turns)
-        answer_text, cites, engine_no_answer = await asyncio.to_thread(session.run, question, docs)
+        # Self-consistency guard (FLYCANON_RLM_SELF_CONSISTENCY): >1 runs the engine
+        # N times in parallel and selects the most-grounded answer, clawing back the
+        # run-to-run variance. Only on the non-streaming path (on_turn is None);
+        # streaming keeps a single run so the live turns map to one trajectory.
+        n = max(1, self._settings.rlm_self_consistency)
+        if n > 1 and on_turn is None:
+            runs = await asyncio.gather(
+                *(asyncio.to_thread(self._run_once, docs, question, max_iters, None) for _ in range(n)),
+                return_exceptions=True,
+            )
+            answer_text, cites, engine_no_answer, usage = self._select_consistent(question, runs)
+        else:
+            answer_text, cites, engine_no_answer, usage = await asyncio.to_thread(
+                self._run_once, docs, question, max_iters, on_turn
+            )
 
         citations = _map_citations(cites, docs)
         # A blank answer is a degenerate non-answer: the CodeAct loop ran out of
@@ -175,7 +177,6 @@ class RLMAnswerService:
             citations = []
 
         elapsed_ms = int((time.perf_counter() - start) * 1000)
-        usage = query_client.token_totals()
         await self._record_cost(usage, elapsed_ms, tenant_id, workspace_id)
         logger.info(
             "rlm answered question=%s docs=%d citations=%d elapsed_ms=%d",
@@ -191,6 +192,84 @@ class RLMAnswerService:
             elapsed_ms=elapsed_ms,
             no_answer=no_answer,
         )
+
+    def _run_once(
+        self,
+        docs: CanonDocStore,
+        question: str,
+        max_iters: int,
+        on_turn: Callable[[int, list[str]], None] | None,
+    ) -> tuple[str, list[dict], bool, dict]:
+        """One RLM run on a freshly forked client; returns ``(answer, cites,
+        no_answer, usage)``. Runs synchronously (the caller wraps it in a
+        thread) so several runs can proceed in parallel for self-consistency.
+        """
+        client = self._client.fork()
+        session = RLMSession(
+            client,
+            max_depth=self._settings.rlm_max_depth,
+            max_iters=max_iters,
+            sub_budget=self._settings.rlm_sub_budget,
+            on_turn=on_turn,
+            sandbox_mode=self._settings.rlm_sandbox,
+            sandbox_timeout_s=self._settings.rlm_sandbox_timeout_s,
+        )
+        answer, cites, no_answer = session.run(question, docs)
+        return answer, cites, no_answer, client.token_totals()
+
+    def _select_consistent(
+        self, question: str, runs: list
+    ) -> tuple[str, list[dict], bool, dict]:
+        """Select the most-grounded answer across self-consistency runs.
+
+        ``runs`` is the ``asyncio.gather(..., return_exceptions=True)`` result:
+        a mix of ``(answer, cites, no_answer, usage)`` tuples and Exceptions.
+        Failed runs are dropped; a real (non-blank, answered) candidate is
+        preferred; ties are broken by an LLM selector. Token usage of every
+        run plus the selector call is merged so cost reflects the full spend.
+        """
+        ok = [r for r in runs if isinstance(r, tuple)]
+        if not ok:
+            return _NO_ANSWER_NOTE, [], True, _merge_usage([])
+        usage = _merge_usage([r[3] for r in ok])
+        viable = [(a, c, na) for (a, c, na, _u) in ok if (a or "").strip() and not na]
+        pool = viable or [(a, c, na) for (a, c, na, _u) in ok]
+        if len(pool) == 1:
+            answer, cites, no_answer = pool[0]
+            return answer, cites, no_answer, usage
+        idx, sel_usage = self._selector_pick(question, [a for (a, _c, _na) in pool])
+        answer, cites, no_answer = pool[idx]
+        logger.info(
+            "rlm self-consistency: %d/%d runs viable, selected candidate %d",
+            len(pool),
+            len(runs),
+            idx + 1,
+        )
+        return answer, cites, no_answer, _merge_usage([usage, sel_usage])
+
+    def _selector_pick(self, question: str, answers: list[str]) -> tuple[int, dict]:
+        """Ask the model to pick the most-grounded/consistent candidate.
+
+        Returns ``(index, usage)``; falls back to index 0 (and empty usage) if
+        the selector errors or returns an unparseable / out-of-range reply.
+        """
+        client = self._client.fork()
+        listing = "\n\n".join(f"[{i + 1}]\n{(a or '')[:6000]}" for i, a in enumerate(answers))
+        prompt = (
+            f"Question:\n{question}\n\n{len(answers)} independent answers were produced for this "
+            "question by the same engine. Select the SINGLE best one -- the most grounded in the "
+            "source documents, the most complete, and the most consistent with what the majority "
+            "of the answers agree on. Reply with ONLY the candidate number.\n\n" + listing
+        )
+        try:
+            reply = client.complete(prompt)
+        except Exception:  # noqa: BLE001 -- selection must never break the answer
+            return 0, client.token_totals()
+        match = re.search(r"\d+", reply or "")
+        idx = (int(match.group()) - 1) if match else 0
+        if idx < 0 or idx >= len(answers):
+            idx = 0
+        return idx, client.token_totals()
 
     async def _record_cost(
         self,
@@ -301,3 +380,19 @@ def _looks_not_found(answer: str) -> bool:
     """Whether the answer text matches an engine not-found sentinel."""
     lowered = answer.lower()
     return any(marker in lowered for marker in _NOT_FOUND_MARKERS)
+
+
+def _merge_usage(usages: list[dict]) -> dict:
+    """Sum token-usage dicts across self-consistency runs + the selector call."""
+    merged: dict = {"input_tokens": 0, "output_tokens": 0, "estimated_cost_usd": 0.0, "by_model": {}}
+    for usage in usages:
+        if not isinstance(usage, dict):
+            continue
+        merged["input_tokens"] += usage.get("input_tokens", 0)
+        merged["output_tokens"] += usage.get("output_tokens", 0)
+        merged["estimated_cost_usd"] += usage.get("estimated_cost_usd", 0.0)
+        for name, tally in (usage.get("by_model") or {}).items():
+            entry = merged["by_model"].setdefault(name, {"input": 0, "output": 0})
+            entry["input"] += tally.get("input", 0)
+            entry["output"] += tally.get("output", 0)
+    return merged

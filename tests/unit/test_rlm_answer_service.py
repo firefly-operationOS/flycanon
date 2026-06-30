@@ -83,6 +83,10 @@ class FakeClient:
     def token_totals(self) -> dict:
         return self._usage
 
+    def complete(self, prompt, system="", model=None, max_tokens=1000) -> str:
+        # default selector reply; the self-consistency test subclasses to pick by content
+        return "1"
+
 
 class FakeCostService:
     """Records every :meth:`record` call; can be made to raise on demand."""
@@ -641,3 +645,68 @@ async def test_default_request_uses_configured_max_iters(monkeypatch):
 
     await service.answer(_request(), tenant_id="t1", workspace_id="w1")
     assert captured["max_iters"] == 8
+
+
+@pytest.mark.asyncio
+async def test_self_consistency_default_is_single_run(monkeypatch):
+    # rlm_self_consistency defaults to 1 -> exactly one RLM run, no selector.
+    pages = {"acme-10k": ["a"]}
+    sources = {
+        "acme-10k": SourceMeta(source_id="src-1", filename="acme.pdf", title="ACME 10-K", kind="pdf",
+                               object_store_key="k1", content_sha256="sha-1")
+    }
+    builder = FakeCorpusBuilder(_docs(pages, sources))
+    service = _service(builder)  # default settings -> rlm_self_consistency=1
+    created: list = []
+
+    def _factory(*_a, **_k):
+        created.append(1)
+        return FakeSession("only run", [{"filing": "acme-10k", "page": 0, "content": "a"}])
+
+    monkeypatch.setattr(svc_mod, "RLMSession", _factory)
+
+    resp = await service.answer(_request(), tenant_id="t1", workspace_id="w1")
+
+    assert len(created) == 1
+    assert resp.answer == "only run"
+
+
+@pytest.mark.asyncio
+async def test_self_consistency_runs_n_and_selects_best(monkeypatch):
+    # rlm_self_consistency=3 -> run RLM 3x in parallel, selector picks the best answer.
+    pages = {"acme-10k": ["a"]}
+    sources = {
+        "acme-10k": SourceMeta(source_id="src-1", filename="acme.pdf", title="ACME 10-K", kind="pdf",
+                               object_store_key="k1", content_sha256="sha-1")
+    }
+    builder = FakeCorpusBuilder(_docs(pages, sources))
+
+    class _SelectorClient(FakeClient):
+        # pick the numbered candidate whose text contains 'BEST' (content-based, so the
+        # parallel run order does not matter)
+        def complete(self, prompt, system="", model=None, max_tokens=1000) -> str:
+            import re
+
+            for m in re.finditer(r"\[(\d+)\]\n(.*?)(?=\n\n\[|\Z)", prompt, re.S):
+                if "BEST" in m.group(2):
+                    return m.group(1)
+            return "1"
+
+    settings = CanonSettings(rlm_self_consistency=3)
+    service = RLMAnswerService(
+        corpus_builder=builder, client=_SelectorClient(), settings=settings, cost_service=FakeCostService(),
+    )
+    answers = iter(["candidate uno", "candidate dos BEST", "candidate tres"])
+    created: list = []
+
+    def _factory(*_a, **_k):
+        created.append(1)
+        return FakeSession(next(answers), [])
+
+    monkeypatch.setattr(svc_mod, "RLMSession", _factory)
+
+    resp = await service.answer(_request(), tenant_id="t1", workspace_id="w1")
+
+    assert len(created) == 3  # ran the engine three times
+    assert resp.answer == "candidate dos BEST"  # selector chose the best of the three
+    assert resp.no_answer is False
