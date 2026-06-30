@@ -63,7 +63,9 @@ class FakeClient:
 
     def chat_raw(self, messages, system, tools, model=None, max_tokens=1500):
         # snapshot the message list -- the loop mutates it in place across turns
-        self.chat_calls.append({"messages": list(messages), "system": system})
+        self.chat_calls.append(
+            {"messages": list(messages), "system": system, "tools": tools, "max_tokens": max_tokens}
+        )
         return self._responses.pop(0)
 
     def complete(self, prompt, system="", model=None, max_tokens=1000):
@@ -132,6 +134,28 @@ def test_out_of_iters_is_not_no_answer():
     client = FakeClient(loops + [_text("forced final")])
     _answer, _cites, no_answer = RLMSession(client, max_iters=2).run("q", docs)
     assert no_answer is False
+
+
+def test_out_of_iters_fallback_is_tool_less():
+    # When the loop exhausts max_iters without ever calling final(), the forced
+    # final turn must be made with NO tools so the model has to emit its answer
+    # as text instead of running yet more code -- the fix for the empty-answer
+    # divergence (the model otherwise keeps coding and the text join is empty).
+    docs = FakeDocs({"A": ["p"]})
+    loops = [_tool_use("print('still working')", f"t{i}") for i in range(2)]
+    client = FakeClient(loops + [_text("here is my final answer")])
+
+    answer, _cites, no_answer = RLMSession(client, max_iters=2).run("q", docs)
+
+    assert answer == "here is my final answer"
+    assert no_answer is False
+    # two in-loop turns + one forced-final turn
+    assert len(client.chat_calls) == 3
+    # the in-loop turns carry the python tool; the forced-final turn carries none
+    assert client.chat_calls[0]["tools"] != []
+    assert client.chat_calls[-1]["tools"] == []
+    # and a larger token budget so a long synthesised answer fits in one shot
+    assert client.chat_calls[-1]["max_tokens"] >= 4096
 
 
 def test_multi_turn_then_final():
@@ -273,9 +297,9 @@ def test_out_of_iters_asks_for_plain_answer():
     assert answer == "forced final"
     # 2 loop turns + 1 forced-answer call
     assert len(client.chat_calls) == 3
-    assert client.chat_calls[-1]["messages"][-1]["content"] == (
-        "Stop now and state your final answer as plain text."
-    )
+    assert "write your COMPLETE final answer" in client.chat_calls[-1]["messages"][-1]["content"]
+    # the forced-final turn is tool-less so the model must answer in text
+    assert client.chat_calls[-1]["tools"] == []
 
 
 def test_llm_helper_callable_from_sandbox():
@@ -560,7 +584,7 @@ def test_subprocess_mode_terminated_degrades_to_plaintext_answer(monkeypatch):
     assert cites == []
     # the fallback prompt was sent and only ONE block was attempted (no retry on
     # the dead executor).
-    assert "state your final answer" in client.chat_calls[-1]["messages"][-1]["content"]
+    assert "write your COMPLETE final answer" in client.chat_calls[-1]["messages"][-1]["content"]
     # the executor is still closed via the session's try/finally.
     assert dead.closed is True
     # the transcript handed to the fallback chat_raw must be API-valid: the

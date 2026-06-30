@@ -148,6 +148,13 @@ Rules:
   question), read the relevant pages (search the text for the figure), extract the
   answer, then call `final(...)`. Print intermediate findings so you can see them.
   Keep printed output small (slice/grep; don't print whole documents).
+- `print()` output shown back to you is truncated to ~4000 characters for DISPLAY
+  ONLY. A long string held in a variable is kept in full even when its printout
+  looks cut off. Never re-`print`, re-ask the sub-`llm`, or "reassemble" an answer
+  you already have -- the variable already holds the complete text.
+- As soon as you have the answer -- in a variable or composed inline -- call
+  `final(answer, ...)` IMMEDIATELY, passing the variable directly. Do NOT print it
+  first to verify; you do not need to see the whole answer to submit it.
 - Always finish by calling `final(...)`. If the evidence is not present, call
   `final('the documents do not contain this', filings=[...], found=False)`."""
 
@@ -383,13 +390,27 @@ class RLMSession:
         # orchestrator never committed to ``final()`` within the budget. Surface
         # it at WARNING so it is visible in logs without DEBUG turn tracing.
         logger.warning(
-            "rlm exhausted %d iterations without calling final(); forcing a plain-text answer",
+            "rlm exhausted %d iterations without calling final(); forcing a tool-less final answer",
             self.max_iters,
         )
-        messages.append({"role": "user", "content": "Stop now and state your final answer as plain text."})
+        messages.append(
+            {
+                "role": "user",
+                "content": (
+                    "You have run out of analysis turns. Using everything you have read and "
+                    "computed above, write your COMPLETE final answer to the question now, as "
+                    "plain text. Do not run any more code."
+                ),
+            }
+        )
+        # Re-ask with NO tools so the model cannot keep running code and MUST emit
+        # its answer as text; a larger token budget lets a long synthesised answer
+        # through in one shot. This is the safety net behind the empty-answer mode:
+        # even when the loop never called final(), the transcript already holds the
+        # evidence, so a tool-less turn reliably produces a substantive answer.
         text = "".join(
             b.get("text", "")
-            for b in self.client.chat_raw(messages, system, _PY_TOOL).get("content", [])
+            for b in self.client.chat_raw(messages, system, [], max_tokens=4096).get("content", [])
             if b.get("type") == "text"
         )
         logger.debug("rlm forced-final plain-text answer (len=%d)", len(text.strip()))
