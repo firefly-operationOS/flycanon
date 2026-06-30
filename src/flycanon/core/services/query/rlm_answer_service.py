@@ -161,6 +161,11 @@ class RLMAnswerService:
             engine_no_answer or blank_answer or (not citations and _looks_not_found(answer_text))
         )
         if blank_answer:
+            logger.warning(
+                "rlm produced no usable answer text for question=%s (docs=%d); returning no_answer",
+                request.question[:80],
+                len(docs),
+            )
             answer_text = _NO_ANSWER_NOTE
             citations = []
 
