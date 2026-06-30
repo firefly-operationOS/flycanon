@@ -303,6 +303,66 @@ async def test_engine_found_answer_is_not_no_answer(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_blank_answer_is_flagged_no_answer(monkeypatch):
+    # The CodeAct loop can exhaust ``rlm_max_iters`` without ever calling
+    # ``final()``; the engine then returns an empty string with the default
+    # ``found`` flag (no_answer=False). That degenerate non-answer must NOT
+    # surface as a valid answer -- callers cannot otherwise detect the failure.
+    pages = {"acme-10k": ["a"]}
+    sources = {
+        "acme-10k": SourceMeta(
+            source_id="src-1",
+            filename=None,
+            title=None,
+            kind="pdf",
+            object_store_key="k1",
+            content_sha256="sha-1",
+        )
+    }
+    builder = FakeCorpusBuilder(_docs(pages, sources))
+    service = _service(builder)
+
+    fake = FakeSession("", [], no_answer=False)
+    monkeypatch.setattr(svc_mod, "RLMSession", lambda *a, **k: fake)
+
+    resp = await service.answer(_request(), tenant_id="t1", workspace_id="w1")
+
+    assert resp.no_answer is True
+    # a non-answer carries an explanatory note, never an empty string
+    assert resp.answer.strip() != ""
+    assert resp.citations == []
+
+
+@pytest.mark.asyncio
+async def test_whitespace_only_answer_is_flagged_no_answer(monkeypatch):
+    # Same degenerate case, but the engine emitted only whitespace.
+    pages = {"acme-10k": ["a"]}
+    sources = {
+        "acme-10k": SourceMeta(
+            source_id="src-1",
+            filename=None,
+            title=None,
+            kind="pdf",
+            object_store_key="k1",
+            content_sha256="sha-1",
+        )
+    }
+    builder = FakeCorpusBuilder(_docs(pages, sources))
+    service = _service(builder)
+
+    fake = FakeSession("   \n\t  ", [{"filing": "acme-10k", "page": 0, "content": "a"}], no_answer=False)
+    monkeypatch.setattr(svc_mod, "RLMSession", lambda *a, **k: fake)
+
+    resp = await service.answer(_request(), tenant_id="t1", workspace_id="w1")
+
+    assert resp.no_answer is True
+    assert resp.answer.strip() != ""
+    # citations are dropped for a non-answer -- they cannot support an answer
+    # that was never produced
+    assert resp.citations == []
+
+
+@pytest.mark.asyncio
 async def test_prior_turns_prepended_to_question(monkeypatch):
     pages = {"acme-10k": ["a"]}
     sources = {

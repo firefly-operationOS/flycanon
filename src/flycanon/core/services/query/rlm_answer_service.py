@@ -53,6 +53,15 @@ logger = logging.getLogger(__name__)
 # ``found=False`` flag is not set.
 _NOT_FOUND_MARKERS = ("do not contain", "not found", "no documents", "cannot find")
 
+# Returned when the engine yields no usable answer text -- e.g. the CodeAct
+# loop exhausted ``rlm_max_iters`` without ever calling ``final()`` and the
+# plain-text fallback came back empty. Paired with ``no_answer=True`` so the
+# caller treats it as an explanatory note rather than a substantive answer.
+_NO_ANSWER_NOTE = (
+    "The engine could not produce a grounded answer to that question from the "
+    "available documents."
+)
+
 # Cap on how many prior turns we fold into the question for conversational
 # parity, and how much of each we keep -- bounded so a long history can't
 # blow up the orchestrator's first prompt.
@@ -139,10 +148,21 @@ class RLMAnswerService:
         answer_text, cites, engine_no_answer = await asyncio.to_thread(session.run, question, docs)
 
         citations = _map_citations(cites, docs)
+        # A blank answer is a degenerate non-answer: the CodeAct loop ran out of
+        # iterations without calling ``final()``, so the engine handed back an
+        # empty string with ``found`` defaulted to True. Surface it as a
+        # detectable no-answer with an explanatory note instead of an empty body
+        # the caller cannot distinguish from a real answer.
+        blank_answer = not answer_text.strip()
         # Trust the engine's structured no-answer flag first; keep the
         # text-marker check as a fallback for models that answer in plain text
         # without passing ``found=False``.
-        no_answer = engine_no_answer or (not citations and _looks_not_found(answer_text))
+        no_answer = (
+            engine_no_answer or blank_answer or (not citations and _looks_not_found(answer_text))
+        )
+        if blank_answer:
+            answer_text = _NO_ANSWER_NOTE
+            citations = []
 
         elapsed_ms = int((time.perf_counter() - start) * 1000)
         usage = query_client.token_totals()
