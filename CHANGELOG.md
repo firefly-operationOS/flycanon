@@ -2,6 +2,36 @@
 
 All notable changes to **flycanon** are documented here.
 
+## [26.6.19] - 2026-06-30
+
+### Fixed
+
+- **RLM empty-answer bug.** When the CodeAct loop exhausted its iteration
+  budget without calling `final()`, the engine returned an empty string flagged
+  as a valid answer (`no_answer=false`) that callers could not detect. A blank
+  result is now surfaced as `no_answer=true` with an explanatory note, and the
+  out-of-iterations fallback re-asks the model with no tools so a diverged run
+  must emit text instead of nothing.
+
+### Added
+
+- **Per-request `extended_reasoning`** (`AnswerRequest.extended_reasoning`,
+  default `false`) — runs the RLM engine at twice the configured
+  `FLYCANON_RLM_MAX_ITERS` for a single hard request, without a global default
+  bump. RAG ignores it.
+- **Self-consistency guard** (`FLYCANON_RLM_SELF_CONSISTENCY`, default `1` =
+  off). When `>1`, the non-streaming answer path runs the engine N times in
+  parallel and an LLM selector returns the most-grounded answer; token usage of
+  all runs plus the selector is merged.
+- **CodeAct turn logging + convergence warnings** — a per-turn DEBUG trace and
+  a WARNING when the loop exhausts its budget without converging.
+
+### Changed
+
+- **Scoped RLM system prompt** — requires verifying every benchmark, threshold,
+  and figure against the source documents and forbids stating a value not found
+  in them.
+
 ## [26.6.18] - 2026-06-18
 
 ### Added
