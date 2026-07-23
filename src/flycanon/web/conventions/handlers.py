@@ -42,7 +42,6 @@ from pyfly.kernel import (
     ResourceNotFoundException,
 )
 
-from flycanon.core.services.sources.errors import SourceNotFound as ServiceSourceNotFound
 from flycanon.web.conventions.context import current_tenant_context
 from flycanon.web.conventions.errors import ProblemDetail
 from flycanon.web.conventions.exceptions import (
@@ -50,7 +49,6 @@ from flycanon.web.conventions.exceptions import (
     FireflyHTTPException,
     InvalidRequest,
     ResourceNotFound,
-    SourceNotFound,
 )
 
 _MEDIA_TYPE = "application/problem+json"
@@ -138,9 +136,6 @@ async def _on_pyfly_command_processing(request: Request, exc: Exception) -> JSON
     * ``FireflyHTTPException`` -- render directly (preserves status,
       code, title).
     * pyfly ``ResourceNotFoundException`` -- map to ``ResourceNotFound``.
-    * service-layer ``SourceNotFound`` -- map to the conventions
-      ``SourceNotFound`` (``404 source_not_found``), the contract the
-      source replace + delete endpoints document.
     * pyfly ``InvalidRequestException`` -- map to ``InvalidRequest``.
     * Anything else (raw ``ValueError`` etc.) -- fall back to a 500
       :class:`CommandProcessingError` so the caller still sees a
@@ -152,9 +147,6 @@ async def _on_pyfly_command_processing(request: Request, exc: Exception) -> JSON
         return _problem_response(_to_problem(cause, request))
     if isinstance(cause, ResourceNotFoundException):
         wrapped = ResourceNotFound(str(cause))
-        return _problem_response(_to_problem(wrapped, request))
-    if isinstance(cause, ServiceSourceNotFound):
-        wrapped = SourceNotFound(str(cause))
         return _problem_response(_to_problem(wrapped, request))
     if isinstance(cause, InvalidRequestException):
         wrapped: FireflyHTTPException = InvalidRequest(str(cause))
