@@ -57,6 +57,7 @@ jobs:
     if: ${{ github.event_name == 'push' || github.event.inputs.java != 'false' }}
     name: Publish flycanon-sdk (Java) to GitHub Packages
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     defaults:
       run:
         working-directory: sdks/java
@@ -115,6 +116,7 @@ jobs:
     if: ${{ github.event_name == 'push' || github.event.inputs.python != 'false' }}
     name: Publish flycanon-sdk (Python)
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     defaults:
       run:
         working-directory: sdks/python
