@@ -43,6 +43,7 @@ jobs:
   lint:
     name: Lint
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
@@ -75,6 +76,7 @@ jobs:
   typecheck:
     name: Typecheck (advisory)
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     continue-on-error: true
     steps:
       - uses: actions/checkout@v4
@@ -106,6 +108,7 @@ jobs:
   unit:
     name: Unit tests
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
@@ -191,6 +194,7 @@ jobs:
   docker-build:
     name: Docker build smoke (single-arch)
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     needs: [lint, unit]
     steps:
       - uses: actions/checkout@v4
@@ -221,6 +225,7 @@ jobs:
   sdk-python:
     name: SDK Python
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     defaults:
       run:
         working-directory: sdks/python
@@ -242,6 +247,7 @@ jobs:
   sdk-java:
     name: SDK Java (25 + Spring Boot 3.5.9)
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     defaults:
       run:
         working-directory: sdks/java
