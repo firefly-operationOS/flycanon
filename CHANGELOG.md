@@ -4,6 +4,8 @@ All notable changes to **flycanon** are documented here.
 
 ## [Unreleased]
 
+## [26.7.0] - 2026-07-23
+
 ### Added
 
 - **Agent-tier source replace.** `PUT /api/v1/agent/sources/{source_id}` (scope

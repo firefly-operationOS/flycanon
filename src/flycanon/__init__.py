@@ -21,6 +21,6 @@ top-level package does not boot the application; that is the job of
 
 from __future__ import annotations
 
-__version__ = "26.6.19"
+__version__ = "26.7.0"
 
 __all__ = ["__version__"]
