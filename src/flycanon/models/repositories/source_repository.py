@@ -167,3 +167,12 @@ class SourceRepository:
             merged = await session.merge(row)
             await session.flush()
             return merged
+
+    async def delete(self, row: SourceRow) -> None:
+        """Delete one source row. The caller resolves the row via
+        :meth:`get` first so the ``(tenant_id, workspace_id)`` scope
+        check has already run before anything is removed.
+        """
+        async with self.session() as session:
+            merged = await session.merge(row)
+            await session.delete(merged)

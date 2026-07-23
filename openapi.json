@@ -5305,6 +5305,29 @@
       }
     },
     "/api/v1/agent/sources/{source_id}": {
+      "delete": {
+        "description": "Scope: ``agent.sources:ingest``. Mandatory\n``Idempotency-Key`` header -- missing key returns\n``400 missing_idempotency_key``. Dispatches\n:class:`RemoveSourceCommand` -> ``IntakeService.remove``:\nthe BM25 rows + dense vectors are purged, the chunk rows are\ndeleted, and the source row is removed within the verified\ntenant/workspace scope. Object-store originals are NOT\ntouched. Unknown ids return ``404 source_not_found``.\n\nReplays dedup under the route-specific\n``agent.sources:delete`` scope: a retried DELETE with the\nsame key returns the original ``204`` without re-dispatching\n(so a retry after a successful delete does not surface a\nspurious 404).",
+        "operationId": "remove",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "source_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          }
+        },
+        "summary": "Remove a source and its indexed projections (agent tier).",
+        "tags": [
+          "AgentSources"
+        ]
+      },
       "get": {
         "description": "Scope: ``agent.sources:read``. Unknown ``source_id`` (or\nany id outside the verified ctx's workspace) returns\n``404 resource_not_found`` -- the agent gate validates the\ntoken can speak for ``(tenant, workspace)``, and the\nquery handler's scope filter completes the chain so a\ntoken with a multi-workspace allowlist cannot read sources\nfrom a workspace other than the one in the header.",
         "operationId": "get_source",
@@ -5331,6 +5354,56 @@
           }
         },
         "summary": "Read a single source record (agent tier).",
+        "tags": [
+          "AgentSources"
+        ]
+      },
+      "put": {
+        "description": "Scope: ``agent.sources:ingest``. Mandatory\n``Idempotency-Key`` header -- missing key returns\n``400 missing_idempotency_key``. Delegates to the same\n:class:`ReplaceSourceCommand` -> ``IntakeService.replace``\npath as the user-tier ``PUT /api/v1/sources/{source_id}``:\nthe pipeline re-runs against the new bytes and the chunks +\nvectors are replaced under the same ``source_id``.\n``content_base64`` is required -- URL-fetched re-ingestion\nis not supported, mirroring the user-tier PUT. Unknown ids\n(or ids outside the verified tenant/workspace scope) return\n``404 source_not_found``.\n\nReplays dedup under the route-specific\n``agent.sources:replace`` scope so a key reused across the\nPOST and the PUT cannot collide; the cached ``200`` body is\nreturned without re-dispatching the command.",
+        "operationId": "replace",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "source_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SubmitSourceJsonPayload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SourceRecord"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Replace an existing source in place (agent tier).",
         "tags": [
           "AgentSources"
         ]

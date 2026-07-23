@@ -71,6 +71,7 @@ from flycanon.core.services.pii import (
 )
 from flycanon.core.services.pii.scanner import redact as pii_redact
 from flycanon.core.services.retrieval import IndexService
+from flycanon.core.services.sources.errors import SourceNotFound
 from flycanon.core.services.storage.object_store import ObjectStore
 from flycanon.interfaces.dtos.source import SourceMetadata, SubmitSourceRequest
 from flycanon.interfaces.enums import SourceKind, SourceStatus
@@ -341,8 +342,6 @@ class IntakeService:
             workspace_id=workspace_id,
         )
         if existing is None:
-            from flycanon.core.services.sources.errors import SourceNotFound
-
             raise SourceNotFound(source_id)
 
         artifacts = await self._binary_normalizer.normalise(
@@ -489,6 +488,87 @@ class IntakeService:
             updated_row.n_chunks,
         )
         return updated_row
+
+    async def remove(
+        self,
+        *,
+        source_id: str,
+        tenant_id: str,
+        workspace_id: str,
+        actor: str | None = None,
+        correlation_id: str | None = None,
+    ) -> None:
+        """Remove a source and every indexed projection for it.
+
+        The flow:
+
+        1. Look up the existing :class:`SourceRow` scoped to
+           ``(tenant_id, workspace_id)`` -- raises
+           :class:`SourceNotFound` (404) when the id is unknown.
+        2. Purge the index projections via
+           :meth:`IndexService.remove_for_source` (BM25 rows + dense
+           vectors). This runs BEFORE the chunk rows are deleted --
+           the indexer resolves the source's chunk ids through the
+           chunk repository, so deleting the rows first would leak
+           the dense vectors.
+        3. Delete the chunk rows
+           (:meth:`ChunkRepository.replace_for_source` with an empty
+           set) and then the source row itself.
+        4. Audit ``source.removed`` + publish a ``SourceRemoved`` EDA
+           event so downstream projections can re-sync, mirroring
+           ``SourceIngested`` / ``SourceReplaced``.
+
+        Object-store originals are intentionally NOT touched --
+        removal only covers the searchable projections + the row.
+        """
+        existing = await self._sources.get(
+            source_id,
+            tenant_id=tenant_id,
+            workspace_id=workspace_id,
+        )
+        if existing is None:
+            raise SourceNotFound(source_id)
+
+        await self._indexer.remove_for_source(
+            source_id,
+            tenant_id=tenant_id,
+            workspace_id=workspace_id,
+        )
+        await self._chunks.replace_for_source(source_id, [])
+        await self._sources.delete(existing)
+
+        await self._audit.record(
+            event_type="source.removed",
+            subject_kind="source",
+            subject_id=source_id,
+            tenant_id=tenant_id,
+            workspace_id=workspace_id,
+            actor=actor,
+            correlation_id=correlation_id,
+            payload={
+                "kind": existing.kind,
+                "content_sha256": existing.content_sha256,
+            },
+        )
+        if self._publisher is not None:
+            try:
+                await self._publisher.publish(  # type: ignore[attr-defined]
+                    destination=self._settings.ingest_topic,
+                    event_type="SourceRemoved",
+                    payload={
+                        "source_id": source_id,
+                        "kind": existing.kind,
+                        "content_sha256": existing.content_sha256,
+                    },
+                    headers={"correlation-id": correlation_id} if correlation_id else None,
+                )
+            except Exception as exc:
+                logger.warning(
+                    "SourceRemoved publish failed source_id=%s: %s",
+                    source_id,
+                    exc,
+                )
+        logger.info("intake removed id=%s kind=%s", source_id, existing.kind)
 
     def _apply_pii_policy(
         self,

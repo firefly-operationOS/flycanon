@@ -14,19 +14,28 @@
 
 """Agent-tier source endpoints (``/api/v1/agent/sources``).
 
-Two routes mounted under ``/api/v1/agent/sources``:
+Four routes mounted under ``/api/v1/agent/sources``:
 
 * ``POST /api/v1/agent/sources``       -- submit a source for
   intake. Scope: ``agent.sources:ingest``. ``Idempotency-Key`` is
   **mandatory** (missing key -> ``400 missing_idempotency_key``).
 * ``GET /api/v1/agent/sources/{source_id}`` -- read a single source
   record. Scope: ``agent.sources:read``.
+* ``PUT /api/v1/agent/sources/{source_id}`` -- replace an existing
+  source in place (same ``source_id``). Scope:
+  ``agent.sources:ingest``. ``Idempotency-Key`` is **mandatory**.
+* ``DELETE /api/v1/agent/sources/{source_id}`` -- remove a source
+  and its indexed projections. Scope: ``agent.sources:ingest``.
+  ``Idempotency-Key`` is **mandatory**.
 
-Both routes reuse the **same** CQRS commands / queries the
+All routes reuse the **same** CQRS commands / queries the
 user-tier :class:`SourcesController` dispatches
-(:class:`SubmitSourceCommand`, :class:`GetSourceQuery`) -- the only
-delta is the auth layer (``X-Agent-Token`` replaces the operator
-JWT) and the mandatory idempotency key on the POST.
+(:class:`SubmitSourceCommand`, :class:`ReplaceSourceCommand`,
+:class:`GetSourceQuery`) -- the only delta is the auth layer
+(``X-Agent-Token`` replaces the operator JWT) and the mandatory
+idempotency key on the mutating verbs. ``DELETE`` has no user-tier
+sibling: removal is an agent-tier (control-plane) capability only,
+dispatched via :class:`RemoveSourceCommand`.
 
 Pyfly's ``@rest_controller`` does NOT resolve FastAPI ``Depends()``
 defaults, so we inject the raw Starlette ``Request`` and run
@@ -41,14 +50,17 @@ import logging
 
 from pyfly.container import rest_controller
 from pyfly.cqrs import DefaultCommandBus, DefaultQueryBus
+from pyfly.cqrs.exceptions import CommandProcessingException
 from pyfly.kernel import ResourceNotFoundException
 from pyfly.observability.correlation import get_correlation_id
 from pyfly.web import (
     Body,
     PathVar,
     Valid,
+    delete_mapping,
     get_mapping,
     post_mapping,
+    put_mapping,
     request_mapping,
 )
 from starlette.requests import Request
@@ -56,8 +68,11 @@ from starlette.requests import Request
 from flycanon.core.services.auth.agent_token_service import AgentTokenService
 from flycanon.core.services.sources import (
     GetSourceQuery,
+    RemoveSourceCommand,
+    ReplaceSourceCommand,
     SubmitSourceCommand,
 )
+from flycanon.core.services.sources.errors import SourceNotFound as ServiceSourceNotFound
 from flycanon.core.services.sources.url_fetcher import UrlFetcher
 from flycanon.interfaces.dtos.source import SourceRecord
 from flycanon.web.controllers.agent._helpers import (
@@ -67,6 +82,7 @@ from flycanon.web.controllers.agent._helpers import (
 )
 from flycanon.web.controllers.sources_controller import SubmitSourceJsonPayload
 from flycanon.web.conventions import IdempotencyStore
+from flycanon.web.conventions.exceptions import SourceNotFound
 
 logger = logging.getLogger(__name__)
 
@@ -189,6 +205,134 @@ class AgentSourcesController:
         if record is None:
             raise ResourceNotFoundException(f"source {source_id!r} not found")
         return record
+
+    @put_mapping("/{source_id}")
+    async def replace(
+        self,
+        http_request: Request,
+        source_id: PathVar[str],
+        payload: Valid[Body[SubmitSourceJsonPayload]],
+    ) -> SourceRecord:
+        """Replace an existing source in place (agent tier).
+
+        Scope: ``agent.sources:ingest``. Mandatory
+        ``Idempotency-Key`` header -- missing key returns
+        ``400 missing_idempotency_key``. Delegates to the same
+        :class:`ReplaceSourceCommand` -> ``IntakeService.replace``
+        path as the user-tier ``PUT /api/v1/sources/{source_id}``:
+        the pipeline re-runs against the new bytes and the chunks +
+        vectors are replaced under the same ``source_id``.
+        ``content_base64`` is required -- URL-fetched re-ingestion
+        is not supported, mirroring the user-tier PUT. Unknown ids
+        (or ids outside the verified tenant/workspace scope) return
+        ``404 source_not_found``.
+
+        Replays dedup under the route-specific
+        ``agent.sources:replace`` scope so a key reused across the
+        POST and the PUT cannot collide; the cached ``200`` body is
+        returned without re-dispatching the command.
+        """
+        ctx = await verify_agent_token(
+            http_request,
+            service=self._agent_token_service,
+            scope="agent.sources:ingest",
+        )
+        scope = "agent.sources:replace"
+        cached = await check_idempotency_replay(http_request, self._idempotency_store, scope)
+        if cached is not None:
+            return SourceRecord.model_validate(cached.body)
+        if not payload.content_base64:
+            raise ValueError("content_base64 is required; URL-fetched re-ingestion is not supported")
+        try:
+            content = base64.b64decode(payload.content_base64)
+        except Exception as exc:
+            raise ValueError(f"content_base64 is not valid base64: {exc}") from exc
+        try:
+            record = await self._commands.send(
+                ReplaceSourceCommand(
+                    source_id=source_id,
+                    content=content,
+                    metadata=payload.metadata,
+                    filename=payload.filename,
+                    content_type=payload.content_type,
+                    kind=payload.kind,
+                    uri=payload.uri,
+                    actor=ctx.actor,
+                    correlation_id=get_correlation_id(),
+                    tenant_id=ctx.tenant_id,
+                    workspace_id=ctx.workspace_id,
+                )
+            )
+        except CommandProcessingException as exc:
+            # DefaultCommandBus wraps every handler error; unwrap the
+            # unknown-id case so it renders as the documented
+            # ``404 source_not_found`` instead of a 500.
+            if isinstance(exc.cause, ServiceSourceNotFound):
+                raise SourceNotFound(str(exc.cause)) from exc
+            raise
+        await store_idempotent_response(
+            http_request,
+            self._idempotency_store,
+            scope,
+            status=200,
+            response=record,
+        )
+        return record
+
+    @delete_mapping("/{source_id}", status_code=204)
+    async def remove(
+        self,
+        http_request: Request,
+        source_id: PathVar[str],
+    ) -> None:
+        """Remove a source and its indexed projections (agent tier).
+
+        Scope: ``agent.sources:ingest``. Mandatory
+        ``Idempotency-Key`` header -- missing key returns
+        ``400 missing_idempotency_key``. Dispatches
+        :class:`RemoveSourceCommand` -> ``IntakeService.remove``:
+        the BM25 rows + dense vectors are purged, the chunk rows are
+        deleted, and the source row is removed within the verified
+        tenant/workspace scope. Object-store originals are NOT
+        touched. Unknown ids return ``404 source_not_found``.
+
+        Replays dedup under the route-specific
+        ``agent.sources:delete`` scope: a retried DELETE with the
+        same key returns the original ``204`` without re-dispatching
+        (so a retry after a successful delete does not surface a
+        spurious 404).
+        """
+        ctx = await verify_agent_token(
+            http_request,
+            service=self._agent_token_service,
+            scope="agent.sources:ingest",
+        )
+        scope = "agent.sources:delete"
+        cached = await check_idempotency_replay(http_request, self._idempotency_store, scope)
+        if cached is not None:
+            return None
+        try:
+            await self._commands.send(
+                RemoveSourceCommand(
+                    source_id=source_id,
+                    tenant_id=ctx.tenant_id,
+                    workspace_id=ctx.workspace_id,
+                    actor=ctx.actor,
+                    correlation_id=get_correlation_id(),
+                )
+            )
+        except CommandProcessingException as exc:
+            if isinstance(exc.cause, ServiceSourceNotFound):
+                raise SourceNotFound(str(exc.cause)) from exc
+            raise
+        await store_idempotent_response(
+            http_request,
+            self._idempotency_store,
+            scope,
+            status=204,
+            response={},
+        )
+        return None
 
     async def _resolve_payload_content(
         self,
