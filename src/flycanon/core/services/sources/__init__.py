@@ -26,6 +26,10 @@ from flycanon.core.services.sources.list_sources_handler import (
     ListSourcesHandler,
     ListSourcesQuery,
 )
+from flycanon.core.services.sources.remove_source_handler import (
+    RemoveSourceCommand,
+    RemoveSourceHandler,
+)
 from flycanon.core.services.sources.replace_source_handler import (
     ReplaceSourceCommand,
     ReplaceSourceHandler,
@@ -41,6 +45,8 @@ __all__ = [
     "IntakeService",
     "ListSourcesHandler",
     "ListSourcesQuery",
+    "RemoveSourceCommand",
+    "RemoveSourceHandler",
     "ReplaceSourceCommand",
     "ReplaceSourceHandler",
     "SourceNotFound",
