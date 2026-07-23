@@ -50,6 +50,7 @@ import logging
 
 from pyfly.container import rest_controller
 from pyfly.cqrs import DefaultCommandBus, DefaultQueryBus
+from pyfly.cqrs.exceptions import CommandProcessingException
 from pyfly.kernel import ResourceNotFoundException
 from pyfly.observability.correlation import get_correlation_id
 from pyfly.web import (
@@ -71,6 +72,7 @@ from flycanon.core.services.sources import (
     ReplaceSourceCommand,
     SubmitSourceCommand,
 )
+from flycanon.core.services.sources.errors import SourceNotFound as ServiceSourceNotFound
 from flycanon.core.services.sources.url_fetcher import UrlFetcher
 from flycanon.interfaces.dtos.source import SourceRecord
 from flycanon.web.controllers.agent._helpers import (
@@ -80,6 +82,7 @@ from flycanon.web.controllers.agent._helpers import (
 )
 from flycanon.web.controllers.sources_controller import SubmitSourceJsonPayload
 from flycanon.web.conventions import IdempotencyStore
+from flycanon.web.conventions.exceptions import SourceNotFound
 
 logger = logging.getLogger(__name__)
 
@@ -244,21 +247,29 @@ class AgentSourcesController:
             content = base64.b64decode(payload.content_base64)
         except Exception as exc:
             raise ValueError(f"content_base64 is not valid base64: {exc}") from exc
-        record = await self._commands.send(
-            ReplaceSourceCommand(
-                source_id=source_id,
-                content=content,
-                metadata=payload.metadata,
-                filename=payload.filename,
-                content_type=payload.content_type,
-                kind=payload.kind,
-                uri=payload.uri,
-                actor=ctx.actor,
-                correlation_id=get_correlation_id(),
-                tenant_id=ctx.tenant_id,
-                workspace_id=ctx.workspace_id,
+        try:
+            record = await self._commands.send(
+                ReplaceSourceCommand(
+                    source_id=source_id,
+                    content=content,
+                    metadata=payload.metadata,
+                    filename=payload.filename,
+                    content_type=payload.content_type,
+                    kind=payload.kind,
+                    uri=payload.uri,
+                    actor=ctx.actor,
+                    correlation_id=get_correlation_id(),
+                    tenant_id=ctx.tenant_id,
+                    workspace_id=ctx.workspace_id,
+                )
             )
-        )
+        except CommandProcessingException as exc:
+            # DefaultCommandBus wraps every handler error; unwrap the
+            # unknown-id case so it renders as the documented
+            # ``404 source_not_found`` instead of a 500.
+            if isinstance(exc.cause, ServiceSourceNotFound):
+                raise SourceNotFound(str(exc.cause)) from exc
+            raise
         await store_idempotent_response(
             http_request,
             self._idempotency_store,
@@ -300,15 +311,20 @@ class AgentSourcesController:
         cached = await check_idempotency_replay(http_request, self._idempotency_store, scope)
         if cached is not None:
             return None
-        await self._commands.send(
-            RemoveSourceCommand(
-                source_id=source_id,
-                tenant_id=ctx.tenant_id,
-                workspace_id=ctx.workspace_id,
-                actor=ctx.actor,
-                correlation_id=get_correlation_id(),
+        try:
+            await self._commands.send(
+                RemoveSourceCommand(
+                    source_id=source_id,
+                    tenant_id=ctx.tenant_id,
+                    workspace_id=ctx.workspace_id,
+                    actor=ctx.actor,
+                    correlation_id=get_correlation_id(),
+                )
             )
-        )
+        except CommandProcessingException as exc:
+            if isinstance(exc.cause, ServiceSourceNotFound):
+                raise SourceNotFound(str(exc.cause)) from exc
+            raise
         await store_idempotent_response(
             http_request,
             self._idempotency_store,
