@@ -69,7 +69,7 @@ production posture.
 
 | Scope | Endpoints | Grant to |
 |-------|-----------|----------|
-| `agent.sources:ingest` | `POST /api/v1/agent/sources` | Discovery pipelines pushing artefacts (flyradar, batch importers, ...). |
+| `agent.sources:ingest` | `POST /api/v1/agent/sources`, `PUT /api/v1/agent/sources/{id}`, `DELETE /api/v1/agent/sources/{id}` | Discovery pipelines pushing artefacts (flyradar, batch importers, ...) and index writers that keep external records mirrored (replace / remove by stable id). |
 | `agent.sources:read` | `GET /api/v1/agent/sources/{id}` | Operators / consoles that verify intake. |
 | `agent.query:run` | `POST /api/v1/agent/query`, `POST /api/v1/agent/query/stream`, `POST /api/v1/agent/search` | Headless RAG callers, copilot services, scheduled report runners. |
 | `agent.knowledge:read` | `GET /api/v1/agent/knowledge/{id}`, `.../provenance` | Citation-rendering UIs, downstream provenance tools. |

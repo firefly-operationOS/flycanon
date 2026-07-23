@@ -28,6 +28,7 @@ from __future__ import annotations
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from pydantic import BaseModel
+from pyfly.cqrs.exceptions import CommandProcessingException
 
 from flycanon.web.conventions.context import (
     TenantContext,
@@ -35,6 +36,7 @@ from flycanon.web.conventions.context import (
 )
 from flycanon.web.conventions.exceptions import (
     InvalidRequest,
+    SourceNotFound,
     WorkspaceNotFound,
 )
 from flycanon.web.conventions.handlers import register_exception_handlers
@@ -67,6 +69,22 @@ def _build_app() -> FastAPI:
     @app.post("/validates_body")
     def _v(body: Body) -> dict[str, str]:
         return {"ok": body.name}
+
+    @app.get("/raises_source_not_found")
+    def _snf() -> None:
+        # The source controllers translate the service-layer
+        # ``SourceNotFound`` (surfaced by the command bus inside
+        # ``CommandProcessingException``) to this conventions class;
+        # the plain ``FireflyHTTPException`` handler renders it.
+        raise SourceNotFound("source 'src-missing' not found")
+
+    @app.get("/raises_wrapped_unknown_cause")
+    def _wuc() -> None:
+        cause = RuntimeError("boom")
+        raise CommandProcessingException(
+            "Failed to process command SubmitSourceCommand",
+            cause=cause,
+        ) from cause
 
     @app.get("/raises_with_correlation")
     async def _cwc() -> None:
@@ -121,6 +139,26 @@ def test_pydantic_validation_error_renders_invalid_request() -> None:
     # path is normalized: location-source prefix (body/query/path/header/cookie)
     # is stripped — callers branch on field name, not on where it lived.
     assert e0["path"] == "name"
+
+
+def test_source_not_found_renders_404_source_not_found() -> None:
+    """The 404 the source replace + delete endpoints document."""
+    client = TestClient(_build_app(), raise_server_exceptions=False)
+    response = client.get("/raises_source_not_found")
+    assert response.status_code == 404
+    assert response.headers["content-type"] == "application/problem+json"
+    body = response.json()
+    assert body["code"] == "source_not_found"
+    assert body["title"] == "Source not found"
+    assert body["detail"] == "source 'src-missing' not found"
+    assert body["type"] == "https://firefly.dev/problems/source_not_found"
+
+
+def test_wrapped_unknown_cause_falls_back_to_500() -> None:
+    client = TestClient(_build_app(), raise_server_exceptions=False)
+    response = client.get("/raises_wrapped_unknown_cause")
+    assert response.status_code == 500
+    assert response.json()["code"] == "command_processing_error"
 
 
 def test_correlation_id_propagated_from_context() -> None:

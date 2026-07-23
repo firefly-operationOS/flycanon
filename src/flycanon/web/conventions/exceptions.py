@@ -113,6 +113,20 @@ class WorkspaceNotFound(FireflyHTTPException):
     title = "Workspace not found"
 
 
+class SourceNotFound(FireflyHTTPException):
+    """Rendered form of the service-layer ``SourceNotFound``.
+
+    The intake service raises its own (plain-``Exception``)
+    ``SourceNotFound``; the conventions handler bridges it to this
+    class so the wire contract is ``404 source_not_found`` as the
+    source endpoints document.
+    """
+
+    status = 404
+    code = "source_not_found"
+    title = "Source not found"
+
+
 # -- 409 -------------------------------------------------------------
 
 
