@@ -12,6 +12,17 @@ All notable changes to **flycanon** are documented here.
   result is now surfaced as `no_answer=true` with an explanatory note, and the
   out-of-iterations fallback re-asks the model with no tools so a diverged run
   must emit text instead of nothing.
+- **CodeAct truncation divergence.** A long answer synthesised into a REPL
+  variable looked cut off when printed (the 4000-char stdout cap is display
+  only), so the model spent every remaining turn re-asking for "the missing
+  parts" and never called `final()`. The system prompt now states that a
+  variable is held in full even when its printout looks truncated and that the
+  built answer should be submitted rather than reassembled.
+- **Actuator/admin stayed on the app port.** pyfly v26.06 splits actuator +
+  admin onto a dedicated management port (9090) by default; flycanon collapses
+  them back onto the app port (8500) via `pyfly.management.server.port` so
+  `/actuator/*` health probes and `/admin` remain reachable on the single
+  business port.
 
 ### Added
 
@@ -31,6 +42,7 @@ All notable changes to **flycanon** are documented here.
 - **Scoped RLM system prompt** — requires verifying every benchmark, threshold,
   and figure against the source documents and forbids stating a value not found
   in them.
+- **pyfly bumped to v26.06.113.**
 
 ## [26.6.18] - 2026-06-18
 
