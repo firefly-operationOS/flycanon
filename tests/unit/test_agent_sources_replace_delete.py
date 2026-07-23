@@ -39,6 +39,7 @@ from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from pyfly.cqrs.exceptions import CommandProcessingException
 
 from flycanon.core.services.auth.agent_token_service import (
     AgentScopeDenied,
@@ -54,6 +55,7 @@ from flycanon.models.entities.source import SourceRow
 from flycanon.web.controllers.agent.sources_controller import AgentSourcesController
 from flycanon.web.controllers.sources_controller import SubmitSourceJsonPayload
 from flycanon.web.conventions import InMemoryIdempotencyStore, MissingIdempotencyKey
+from flycanon.web.conventions.exceptions import SourceNotFound as SourceNotFoundProblem
 
 # ---------------------------------------------------------------------
 # Test doubles (mirroring test_agent_surface)
@@ -264,14 +266,51 @@ async def test_replace_wrong_scope_returns_403(agent_token_service: AgentTokenSe
 
 
 @pytest.mark.asyncio
-async def test_replace_unknown_id_raises_source_not_found(
+async def test_replace_unknown_id_maps_to_404_source_not_found(
+    agent_token_service: AgentTokenService,
+) -> None:
+    """The production bus wraps ``SourceNotFound`` -- the controller must unwrap it.
+
+    ``DefaultCommandBus`` never lets a handler error through raw: it
+    re-raises as ``CommandProcessingException(cause=exc)``. The
+    controller has to translate that back to the conventions
+    ``SourceNotFound`` (``404 source_not_found``) or the caller would
+    see a 500 ``command_processing_error``.
+    """
+    token = await _mint(agent_token_service, scopes=["agent.sources:ingest"])
+    commands = _command_bus()
+    cause = SourceNotFound("src-missing")
+    commands.send = AsyncMock(
+        side_effect=CommandProcessingException(
+            "Failed to process command ReplaceSourceCommand",
+            cause=cause,
+        )
+    )
+    controller = _sources_controller(agent_token_service, commands=commands)
+    with pytest.raises(SourceNotFoundProblem) as excinfo:
+        await controller.replace(
+            _request(token, idempotency_key="key"),
+            "src-missing",
+            _submit_source_payload(),
+        )
+    assert excinfo.value.status == 404
+    assert excinfo.value.code == "source_not_found"
+
+
+@pytest.mark.asyncio
+async def test_replace_wrapped_unrelated_cause_is_reraised(
     agent_token_service: AgentTokenService,
 ) -> None:
     token = await _mint(agent_token_service, scopes=["agent.sources:ingest"])
     commands = _command_bus()
-    commands.send = AsyncMock(side_effect=SourceNotFound("src-missing"))
+    commands.send = AsyncMock(
+        side_effect=CommandProcessingException(
+            "Failed to process command ReplaceSourceCommand",
+            cause=RuntimeError("boom"),
+        )
+    )
     controller = _sources_controller(agent_token_service, commands=commands)
-    with pytest.raises(SourceNotFound):
+    with pytest.raises(CommandProcessingException):
         await controller.replace(
             _request(token, idempotency_key="key"),
             "src-missing",
@@ -355,15 +394,24 @@ async def test_remove_wrong_scope_returns_403(agent_token_service: AgentTokenSer
 
 
 @pytest.mark.asyncio
-async def test_remove_unknown_id_raises_source_not_found(
+async def test_remove_unknown_id_maps_to_404_source_not_found(
     agent_token_service: AgentTokenService,
 ) -> None:
+    """Same unwrap contract as the PUT: wrapped ``SourceNotFound`` -> 404."""
     token = await _mint(agent_token_service, scopes=["agent.sources:ingest"])
     commands = _command_bus()
-    commands.send = AsyncMock(side_effect=SourceNotFound("src-missing"))
+    cause = SourceNotFound("src-missing")
+    commands.send = AsyncMock(
+        side_effect=CommandProcessingException(
+            "Failed to process command RemoveSourceCommand",
+            cause=cause,
+        )
+    )
     controller = _sources_controller(agent_token_service, commands=commands)
-    with pytest.raises(SourceNotFound):
+    with pytest.raises(SourceNotFoundProblem) as excinfo:
         await controller.remove(_request(token, idempotency_key="key"), "src-missing")
+    assert excinfo.value.status == 404
+    assert excinfo.value.code == "source_not_found"
 
 
 @pytest.mark.asyncio
