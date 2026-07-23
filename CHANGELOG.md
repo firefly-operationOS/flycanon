@@ -2,6 +2,22 @@
 
 All notable changes to **flycanon** are documented here.
 
+## [Unreleased]
+
+### Added
+
+- **Agent-tier source replace.** `PUT /api/v1/agent/sources/{source_id}` (scope
+  `agent.sources:ingest`, mandatory `Idempotency-Key`) re-ingests an existing
+  source in place through the same pipeline as the user-tier PUT: chunks and
+  dense vectors are replaced under the same `source_id`. `content_base64` is
+  required; replays dedup under a route-specific scope.
+- **Agent-tier source delete.** `DELETE /api/v1/agent/sources/{source_id}`
+  (scope `agent.sources:ingest`, mandatory `Idempotency-Key`, `204`) removes a
+  source within the tenant/workspace scope: BM25 rows and dense vectors are
+  purged, chunk rows and the source row are deleted, an audit entry is recorded
+  and a `SourceRemoved` EDA event is published. Object-store originals are not
+  touched. A retried DELETE with the same key replays the original `204`.
+
 ## [26.6.18] - 2026-06-18
 
 ### Added
