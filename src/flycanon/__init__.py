@@ -21,6 +21,8 @@ top-level package does not boot the application; that is the job of
 
 from __future__ import annotations
 
-__version__ = "26.6.19"
+from importlib.metadata import version
+
+__version__ = version("flycanon")
 
 __all__ = ["__version__"]

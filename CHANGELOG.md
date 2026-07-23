@@ -4,6 +4,8 @@ All notable changes to **flycanon** are documented here.
 
 ## [Unreleased]
 
+## [26.7.0] - 2026-07-23
+
 ### Added
 
 - **Agent-tier source replace.** `PUT /api/v1/agent/sources/{source_id}` (scope
@@ -17,6 +19,13 @@ All notable changes to **flycanon** are documented here.
   purged, chunk rows and the source row are deleted, an audit entry is recorded
   and a `SourceRemoved` EDA event is published. Object-store originals are not
   touched. A retried DELETE with the same key replays the original `204`.
+
+### Changed
+
+- **Single-source version.** `__version__` (and the version reported by
+  `pyfly_application` / `GET /api/v1/version`) is now derived from the
+  installed package metadata via `importlib.metadata`, so `pyproject.toml`
+  is the only place a release bump touches.
 
 ## [26.6.19] - 2026-06-30
 

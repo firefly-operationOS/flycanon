@@ -31,11 +31,13 @@ from __future__ import annotations
 from pyfly.core import pyfly_application
 from pyfly.starters.core import enable_core_stack
 
+from flycanon import __version__
+
 
 @enable_core_stack
 @pyfly_application(
     name="flycanon",
-    version="26.6.19",
+    version=__version__,
     description=(
         "flycanon -- Operational Knowledge Repository. Versioned, "
         "provenance-tracked canonical knowledge with hybrid retrieval "

@@ -4931,7 +4931,7 @@
       "url": "https://github.com/firefly-operationOS/flycanon/blob/main/LICENSE"
     },
     "title": "flycanon",
-    "version": "26.6.19"
+    "version": "26.7.0"
   },
   "openapi": "3.1.0",
   "paths": {
