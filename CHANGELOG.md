@@ -20,6 +20,13 @@ All notable changes to **flycanon** are documented here.
   and a `SourceRemoved` EDA event is published. Object-store originals are not
   touched. A retried DELETE with the same key replays the original `204`.
 
+### Changed
+
+- **Single-source version.** `__version__` (and the version reported by
+  `pyfly_application` / `GET /api/v1/version`) is now derived from the
+  installed package metadata via `importlib.metadata`, so `pyproject.toml`
+  is the only place a release bump touches.
+
 ## [26.6.18] - 2026-06-18
 
 ### Added
