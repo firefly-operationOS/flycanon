@@ -331,3 +331,146 @@ async def test_get_chunks_respects_scope(postgres_url: str) -> None:
         assert rows_foreign == []
     finally:
         await corpus.close()
+
+
+# ---------------------------------------------------------------------------
+# Row-level security under a NOBYPASSRLS role. The three tests above run as
+# the container's superuser, which BYPASSES RLS, so they would pass even if
+# the corpus never set a GUC -- and until 26.7.1 it did not: ``bm25_search``
+# ran on a bare Core connection where the ORM's ``after_begin`` listener
+# never fires, and under FORCE RLS the BM25 channel returned zero rows for a
+# ``flycanon_app``-shaped role (found by the dworkers programme on
+# 2026-09-17). These tests mint that role and prove the corpus binds
+# ``app.tenant_id`` / ``app.workspace_id`` itself.
+# ---------------------------------------------------------------------------
+
+
+def _mint_app_role(admin_sync_url: str) -> None:
+    """Create the non-bypass ``corpus_app`` LOGIN role with plain DML grants.
+
+    Mirrors the ``flycanon_app`` posture of a shared deployment: LOGIN,
+    NOSUPERUSER, NOBYPASSRLS, ``USAGE`` on the schema and DML on every
+    table -- exactly what ``docs/deployment.md`` "RLS roles" prescribes.
+    """
+    engine = sa.create_engine(admin_sync_url, isolation_level="AUTOCOMMIT")
+    with engine.connect() as conn:
+        # Idempotent on purpose: a role that already holds grants cannot be
+        # DROPped (its privileges are dependencies), and the module-scoped
+        # container serves several tests that each mint the same role.
+        conn.execute(
+            sa.text(
+                """
+                DO $$
+                BEGIN
+                    IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'corpus_app') THEN
+                        CREATE ROLE corpus_app LOGIN PASSWORD 'app' NOSUPERUSER NOBYPASSRLS;
+                    END IF;
+                END
+                $$;
+                """
+            )
+        )
+        conn.execute(sa.text("GRANT USAGE ON SCHEMA public TO corpus_app"))
+        conn.execute(
+            sa.text("GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO corpus_app")
+        )
+        conn.execute(sa.text("GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO corpus_app"))
+    engine.dispose()
+
+
+def _as_app_role(async_url: str) -> str:
+    """Return *async_url* with the credentials swapped for ``corpus_app``."""
+    scheme, rest = async_url.split("://", 1)
+    _, host_part = rest.split("@", 1)
+    return f"{scheme}://corpus_app:app@{host_part}"
+
+
+@pytest.mark.skipif(
+    not (_TESTCONTAINERS_AVAILABLE and _DOCKER_AVAILABLE),
+    reason=_SKIP_REASON,
+)
+@pytest.mark.asyncio
+async def test_bm25_search_returns_rows_under_a_non_bypass_role(postgres_url: str) -> None:
+    """``bm25_search`` and ``get_chunks`` find the scope's rows as a NOBYPASSRLS role.
+
+    The seeded chunk is inserted as the superuser; the corpus reads it as
+    ``corpus_app``. Without the GUC binding in
+    :meth:`PostgresCorpus._scoped_connection` FORCE RLS on ``canon_chunks``
+    and ``canon_sources`` hides every row and both calls return ``[]``.
+    """
+    sync_url = _sync_url(postgres_url)
+    _mint_app_role(sync_url)
+    chunk_id = str(uuid.uuid4())
+    source_id = str(uuid.uuid4())
+    _seed_chunk(
+        sync_url,
+        chunk_id=chunk_id,
+        source_id=source_id,
+        content="the daily meal allowance abroad is seventy euros",
+        tenant_id="acme",
+        workspace_id="ws-rls",
+    )
+
+    corpus = PostgresCorpus(database_url=_as_app_role(postgres_url))
+    try:
+        hits = await corpus.bm25_search("allowance abroad", top_k=10, tenant_id="acme", workspace_id="ws-rls")
+        assert [h.chunk_id for h in hits] == [chunk_id]
+        assert hits[0].doc_id == source_id  # the JOIN on canon_sources passed RLS too
+
+        rows = await corpus.get_chunks([chunk_id], tenant_id="acme", workspace_id="ws-rls")
+        assert [r.chunk_id for r in rows] == [chunk_id]
+
+        # The policy still fails closed for a foreign scope: the GUCs name
+        # bcorp, the WHERE clause names bcorp, and neither matches the row.
+        assert (
+            await corpus.bm25_search("allowance abroad", top_k=10, tenant_id="bcorp", workspace_id="ws-rls")
+            == []
+        )
+        assert await corpus.get_chunks([chunk_id], tenant_id="bcorp", workspace_id="ws-rls") == []
+    finally:
+        await corpus.close()
+
+
+@pytest.mark.skipif(
+    not (_TESTCONTAINERS_AVAILABLE and _DOCKER_AVAILABLE),
+    reason=_SKIP_REASON,
+)
+@pytest.mark.asyncio
+async def test_bare_connection_without_gucs_sees_nothing_as_the_app_role(postgres_url: str) -> None:
+    """The control: the same SQL on a bare connection, no GUCs, returns no row.
+
+    This is the pre-26.7.1 shape of ``bm25_search`` (``engine.connect()``
+    with the WHERE clause alone). It pins WHY the GUC binding exists: RLS
+    fails closed, so a scoped read that forgets the GUCs is not "less
+    isolated", it is empty -- and the assertion above would regress to
+    ``[]`` the day someone drops :meth:`PostgresCorpus._scoped_connection`.
+    """
+    from sqlalchemy.ext.asyncio import create_async_engine
+
+    sync_url = _sync_url(postgres_url)
+    _mint_app_role(sync_url)
+    chunk_id = str(uuid.uuid4())
+    _seed_chunk(
+        sync_url,
+        chunk_id=chunk_id,
+        source_id=str(uuid.uuid4()),
+        content="invisible without the tenant guc",
+        tenant_id="acme",
+        workspace_id="ws-bare",
+    )
+    engine = create_async_engine(_as_app_role(postgres_url))
+    try:
+        async with engine.connect() as conn:
+            result = await conn.execute(
+                sa.text(
+                    "SELECT c.id FROM canon_chunks c JOIN canon_sources s ON s.id = c.source_id "
+                    "WHERE c.tenant_id = :t AND c.workspace_id = :w AND c.id = :id"
+                ),
+                {"t": "acme", "w": "ws-bare", "id": chunk_id},
+            )
+            assert result.all() == []
+            # ... and the GUC really is unset on this connection.
+            guc = (await conn.execute(sa.text("SELECT current_setting('app.tenant_id', true)"))).scalar_one()
+            assert guc in (None, "")
+    finally:
+        await engine.dispose()

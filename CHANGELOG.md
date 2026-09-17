@@ -137,6 +137,54 @@ found by wiring that caller against 26.7.0.
   the RLM sandbox runner now tolerates that refusal there (CPU and
   file-size caps still apply) instead of dying at startup, which had
   failed 27 unit tests on every developer Mac.
+- **Zero search hits under the application role.** `PostgresCorpus`
+  (the BM25 channel) ran its reads on a bare Core connection of its own
+  engine, where the ORM `after_begin` listener that sets the
+  `app.tenant_id` / `app.workspace_id` GUCs never fires; under FORCE
+  RLS a `NOBYPASSRLS` serving role (`flycanon_app`, as
+  `docs/deployment.md` prescribes) therefore saw no chunk on the
+  lexical channel and no row on the RRF hydration, and `/search` and
+  `/agent/search` answered `hits: []` while the vector channel alone
+  found the chunk. Invisible in a stack where every process is the
+  database owner. Every scoped corpus read now binds the GUCs itself,
+  from the explicit `(tenant_id, workspace_id)` it is handed, through
+  `set_config(..., is_local => true)` inside the read's own transaction.
+  `tests/integration/test_search_under_app_role.py` runs the real
+  `RetrievalService.search` as a NOBYPASSRLS role and gets the row;
+  `tests/unit/test_postgres_corpus_scope_filter.py` pins the corpus
+  alone, with the bare-connection control that returns nothing.
+- **DDL at boot under the serving role.** `canon_chunk_vectors`
+  (framework `PgVectorVectorStore`: extension, table, HNSW + namespace
+  indexes, flycanon's RLS policy) and PyFly's `pyfly_eda_outbox` /
+  `pyfly_eda_offsets` were created lazily by whichever process first
+  touched them. PostgreSQL checks `CREATE` on the schema before it
+  honours `CREATE TABLE IF NOT EXISTS`, and demands ownership before
+  `CREATE INDEX IF NOT EXISTS`, so a serving role with USAGE + DML could
+  not boot the dense store (its first ingest died with
+  `permission denied for schema public`). New migration
+  `0016_boot_created_tables` creates all three as the migration role
+  (the vector table sized by `FLYCANON_EMBEDDING_DIMENSIONS` and the
+  `FLYCANON_PGVECTOR_HNSW_*` settings of the migrate job, the outbox
+  tables from PyFly's own DDL constants), and
+  `RlsPgVectorVectorStore._create_schema` is verify-first: on an
+  existing table it runs no DDL and refuses a width other than the
+  configured one (`VectorStoreError`, before the first vector is
+  written). PyFly's outbox DDL still runs in `start()` -- an upstream
+  ask -- so a non-owner serving role keeps `CREATE` on the schema and
+  membership of the owning role until it ships (`docs/deployment.md`).
+- **`temperature` refused by Claude 5 / 4.7 / 4.8.** The RLM client sent
+  `temperature: 0.0` on every Messages call; `claude-sonnet-5` answers
+  `400 temperature is deprecated for this model`, so `FLYCANON_RLM_*_MODEL`
+  could not name a current model. `request_shape(model)` now classifies
+  the id: Claude 4.6 and later (`claude-*-5*`, Opus 4.6/4.7/4.8, Sonnet
+  4.6) get `thinking: {"type": "adaptive"}`, no sampling knobs, and a
+  `max_tokens` floor of 8192 (thinking tokens count against the budget;
+  the old 1500 tool-turn ceiling came back as `stop_reason: max_tokens`
+  with no `tool_use`, which the session read as an empty plain-text
+  answer); Haiku 4.5, Sonnet 4.5 and any id that does not parse keep
+  the deterministic `temperature: 0.0` byte for byte. Price rows added
+  for Sonnet 5, Opus 5, Opus 4.6/4.7; Opus 4.8 corrected from the old
+  Opus tier (15/75) to 5/25.
 
 ### Docs + SDK
 

@@ -133,8 +133,8 @@ value other than `rag` is normalised to `rlm`.
 | Key | What it is | Default |
 |-----|------------|---------|
 | `FLYCANON_ANSWER_MODE` | `rlm` (default) routes to the Recursive Language Model answerer; `rag` routes to the legacy hybrid-retrieval answerer. | `rlm` |
-| `FLYCANON_RLM_ROOT_MODEL` | Orchestrator model that drives the CodeAct REPL loop. `<provider>:<model>`. | `anthropic:claude-sonnet-4-6` |
-| `FLYCANON_RLM_SUB_MODEL` | Model for flat recursive sub-calls made from REPL code. | `anthropic:claude-sonnet-4-6` |
+| `FLYCANON_RLM_ROOT_MODEL` | Orchestrator model that drives the CodeAct REPL loop. `<provider>:<model>`. Claude 4.6 and later (`claude-sonnet-5`, `claude-opus-5`, Opus 4.6/4.7/4.8, Sonnet 4.6) are called with adaptive thinking and no sampling knobs; Haiku 4.5 / Sonnet 4.5 with the deterministic `temperature: 0.0`. | `anthropic:claude-sonnet-4-6` |
+| `FLYCANON_RLM_SUB_MODEL` | Model for flat recursive sub-calls made from REPL code. Same generation rule as the root model. | `anthropic:claude-sonnet-4-6` |
 | `FLYCANON_RLM_ANSWER_MODEL` | Model for the final single-shot answer synthesis. | `anthropic:claude-sonnet-4-6` |
 | `FLYCANON_RLM_MAX_ITERS` | Max orchestrator turns before the loop gives up and asks for a plain-text answer from the transcript. | `8` |
 | `FLYCANON_RLM_SUB_BUDGET` | Total recursive sub-call budget across one root session. | `12` |
@@ -346,8 +346,38 @@ second engine because the `canon_workspaces` policy limits the request
 engine to the caller's own workspace. See
 [architecture.md -> Row-level security](architecture.md#deployment-requirement)
 for the rationale; the integration suite
-(`tests/integration/test_rls_isolation.py`) exercises the
-`BYPASSRLS` vs. `app_user` contract end-to-end.
+(`tests/integration/test_rls_isolation.py`,
+`tests/integration/test_search_under_app_role.py`) exercises the
+`BYPASSRLS` vs. `app_user` contract end-to-end, the second one through
+the real `RetrievalService.search`.
+
+**What the serving role creates: nothing (since 26.7.1).** Migration
+`0016_boot_created_tables` creates `canon_chunk_vectors` (sized by the
+`FLYCANON_EMBEDDING_DIMENSIONS` / `FLYCANON_PGVECTOR_HNSW_*` values in
+the environment of the **migrate** job -- give it the same values as
+`serve`), `pyfly_eda_outbox` and `pyfly_eda_offsets`, so the dense store
+finds its table and only verifies it. Before 26.7.1 every process created
+those lazily, and PostgreSQL refuses that for `flycanon_app`: it checks
+`CREATE` on the schema before it honours `CREATE TABLE IF NOT EXISTS`, and
+demands ownership before `CREATE INDEX IF NOT EXISTS`. One piece of that
+lazy DDL remains, in PyFly rather than flycanon: `PostgresEventBus.start()`
+still runs the outbox `CREATE TABLE / INDEX IF NOT EXISTS` in every
+process. Until PyFly skips it on existing tables, a `serve` process that
+runs as `flycanon_app` needs the two statements below on top of the
+grants above; they widen nothing else (the role stays NOBYPASSRLS, and
+the two outbox tables hold no tenant rows):
+
+```sql
+-- Temporary, for PyFly's outbox DDL at boot (see the note above).
+GRANT CREATE ON SCHEMA public TO flycanon_app;
+ALTER TABLE pyfly_eda_outbox  OWNER TO flycanon_app;   -- or a NOLOGIN role
+ALTER TABLE pyfly_eda_offsets OWNER TO flycanon_app;   -- both roles belong to
+```
+
+A deployment that prefers a shared NOLOGIN owner (so the admin role keeps
+writing the outbox too) makes both login roles members of it and hands
+the two tables to that role instead -- the dworkers programme's
+`postgres-init.sql` is one worked example.
 
 ### BM25 projection
 
@@ -408,11 +438,15 @@ id, the dimensions, and the provider's API key env var.
 | Mistral | `mistral:mistral-embed` | 1024 | `MISTRAL_API_KEY` |
 | Ollama (local) | `ollama:nomic-embed-text` | 768 | (none -- needs `OLLAMA_HOST`) |
 
-**Dimensions must match the `pgvector` column.** flycanon's
-migrations create `canon_chunk_vectors.embedding` as `vector(<dim>)`
-at first boot using `FLYCANON_EMBEDDING_DIMENSIONS`. **Changing the
-embedding model after data is loaded is a re-index** -- not a hot
-swap.
+**Dimensions must match the `pgvector` column.** Migration
+`0016_boot_created_tables` creates `canon_chunk_vectors.embedding` as
+`vector(<dim>)` from the `FLYCANON_EMBEDDING_DIMENSIONS` in the migrate
+job's environment (before 26.7.1 the dense store created it at first
+boot). The width is locked at that moment: a `serve` process configured
+for another width refuses to boot (`VectorStoreError: ... needs a fresh
+database`) rather than write a vector the index cannot compare.
+**Changing the embedding model after data is loaded is a re-index on a
+fresh database** -- not a hot swap.
 
 ---
 

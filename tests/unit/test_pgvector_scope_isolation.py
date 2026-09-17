@@ -86,6 +86,7 @@ class TestRlsHooks:
             database_url="postgresql://u:p@h/db", dimension=4, table_name="canon_chunk_vectors"
         )
         conn = AsyncMock()
+        conn.fetchrow.return_value = None  # fresh database: the table does not exist yet
         await store._create_schema(conn)
         executed = "\n".join(str(call.args[0]) for call in conn.execute.await_args_list)
         # Base schema (extension/table) still created...
@@ -95,3 +96,47 @@ class TestRlsHooks:
         assert "tenant_workspace_isolation" in executed
         assert "app.scope_namespace" in executed
         assert "FORCE ROW LEVEL SECURITY" in executed
+
+    # The verify-first contract: a table that already exists (migration 0016 or
+    # an earlier boot as the owner) gets NO DDL, so a serving role without
+    # CREATE on the schema and without ownership of the table boots. PostgreSQL
+    # checks those privileges before it honours IF NOT EXISTS, which is why the
+    # framework's idempotent DDL was not idempotent for flycanon_app.
+
+    async def test_existing_table_with_policy_runs_no_ddl(self) -> None:
+        store = RlsPgVectorVectorStore(
+            database_url="postgresql://u:p@h/db", dimension=768, table_name="canon_chunk_vectors"
+        )
+        conn = AsyncMock()
+        conn.fetchrow.return_value = {"column_type": "vector(768)", "has_policy": True}
+        await store._create_schema(conn)
+        conn.execute.assert_not_awaited()
+        # The probe itself is a catalogue read for THIS table, in the current schema.
+        probe_sql, table = conn.fetchrow.await_args.args
+        assert "pg_class" in probe_sql and "current_schema()" in probe_sql
+        assert table == "canon_chunk_vectors"
+
+    async def test_existing_table_without_policy_installs_only_the_policy(self) -> None:
+        store = RlsPgVectorVectorStore(
+            database_url="postgresql://u:p@h/db", dimension=768, table_name="canon_chunk_vectors"
+        )
+        conn = AsyncMock()
+        conn.fetchrow.return_value = {"column_type": "vector(768)", "has_policy": False}
+        await store._create_schema(conn)
+        executed = [str(call.args[0]) for call in conn.execute.await_args_list]
+        assert len(executed) == 1
+        assert "CREATE EXTENSION" not in executed[0] and "CREATE TABLE" not in executed[0]
+        assert "CREATE INDEX" not in executed[0]
+        assert "tenant_workspace_isolation" in executed[0] and "insufficient_privilege" in executed[0]
+
+    async def test_existing_table_of_another_width_is_refused(self) -> None:
+        from fireflyframework_agentic.exceptions import VectorStoreError
+
+        store = RlsPgVectorVectorStore(
+            database_url="postgresql://u:p@h/db", dimension=1536, table_name="canon_chunk_vectors"
+        )
+        conn = AsyncMock()
+        conn.fetchrow.return_value = {"column_type": "vector(768)", "has_policy": True}
+        with pytest.raises(VectorStoreError, match=r"vector\(768\).*vector\(1536\).*fresh database"):
+            await store._create_schema(conn)
+        conn.execute.assert_not_awaited()

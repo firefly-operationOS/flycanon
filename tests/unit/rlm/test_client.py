@@ -23,7 +23,7 @@ import httpx
 import pytest
 
 from flycanon.config import CanonSettings
-from flycanon.core.services.query.rlm.client import AnthropicClient, _strip_provider
+from flycanon.core.services.query.rlm.client import AnthropicClient, _strip_provider, request_shape
 
 
 class _FakeResponse:
@@ -231,3 +231,123 @@ def test_reset_tokens_clears(monkeypatch):
     client.reset_tokens()
     totals = client.token_totals()
     assert totals == {"input_tokens": 0, "output_tokens": 0, "estimated_cost_usd": 0.0, "by_model": {}}
+
+
+# ---------------------------------------------------------------------------
+# Request shape per model generation. Recorded through the fake transport, so
+# what is asserted is the wire body the Anthropic API would receive.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("model", "adaptive"),
+    [
+        ("anthropic:claude-sonnet-5", True),
+        ("claude-opus-5", True),
+        ("claude-fable-5-1", True),
+        ("anthropic:claude-sonnet-4-6", True),
+        ("claude-opus-4-6", True),
+        ("claude-opus-4-7", True),
+        ("claude-opus-4-8", True),
+        ("claude-haiku-4-5", False),
+        ("claude-sonnet-4-5", False),
+        ("claude-haiku-4-5-20251001", False),  # dated snapshot ids keep their generation
+        ("claude-3-5-sonnet-20241022", False),  # the pre-4 naming does not parse: legacy
+        ("gpt-4o", False),  # not Claude at all: the request is what it always was
+    ],
+)
+def test_request_shape_classifies_the_model_generation(model: str, adaptive: bool):
+    shape = request_shape(model)
+    assert shape.adaptive is adaptive
+    assert ":" not in shape.model
+
+
+def test_adaptive_model_sends_thinking_and_no_sampling_knobs_on_chat_raw(monkeypatch):
+    """claude-sonnet-5: ``thinking: adaptive``, no temperature/top_p/top_k, floored max_tokens.
+
+    The recorded body is the request the dworkers stack measured a 400
+    against (``temperature is deprecated for this model``) before 26.7.1.
+    """
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "k")
+    payload = {"content": [{"type": "tool_use", "id": "t1", "input": {}}], "stop_reason": "tool_use"}
+    http = _FakeHttp([_FakeResponse(200, payload)])
+    client = AnthropicClient(
+        CanonSettings(rlm_root_model="anthropic:claude-sonnet-5", rlm_sub_model="anthropic:claude-sonnet-5"),
+        http_client=http,
+    )
+    client.chat_raw([{"role": "user", "content": "hi"}], "sys", [{"name": "python"}])
+    body = http.calls[0]["json"]
+    assert body["model"] == "claude-sonnet-5"
+    assert body["thinking"] == {"type": "adaptive"}
+    assert "temperature" not in body and "top_p" not in body and "top_k" not in body
+    # 1500 (the tool-turn default) is raised to the adaptive floor: thinking
+    # tokens count against max_tokens and a mid-thought cut-off reads as an
+    # empty answer to the session.
+    assert body["max_tokens"] == 8192
+    assert body["tools"] == [{"name": "python"}]
+    assert body["messages"] == [{"role": "user", "content": "hi"}]
+    assert body["system"] == [{"type": "text", "text": "sys", "cache_control": {"type": "ephemeral"}}]
+    assert set(body) == {"model", "max_tokens", "thinking", "system", "messages", "tools"}
+
+
+def test_adaptive_model_sends_thinking_and_no_sampling_knobs_on_complete(monkeypatch):
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "k")
+    payload = {"content": [{"type": "text", "text": "seventy euros"}], "usage": {}}
+    http = _FakeHttp([_FakeResponse(200, payload)])
+    client = AnthropicClient(_settings(), http_client=http)
+    assert client.complete("q", model="anthropic:claude-opus-5", max_tokens=16000) == "seventy euros"
+    body = http.calls[0]["json"]
+    assert body["model"] == "claude-opus-5"
+    assert body["thinking"] == {"type": "adaptive"}
+    assert "temperature" not in body
+    assert body["max_tokens"] == 16000  # a caller's budget above the floor is kept as is
+    assert set(body) == {"model", "max_tokens", "thinking", "messages"}
+
+
+def test_legacy_model_keeps_the_deterministic_temperature(monkeypatch):
+    """Haiku 4.5 has no adaptive mode: the body is byte-for-byte the pre-26.7.1 one."""
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "k")
+    payload = {"content": [{"type": "text", "text": "ok"}], "usage": {}}
+    http = _FakeHttp([_FakeResponse(200, payload), _FakeResponse(200, payload)])
+    client = AnthropicClient(
+        CanonSettings(
+            rlm_root_model="anthropic:claude-haiku-4-5", rlm_sub_model="anthropic:claude-haiku-4-5"
+        ),
+        http_client=http,
+    )
+    client.complete("q")
+    client.chat_raw([{"role": "user", "content": "hi"}], "sys", [])
+    for call in http.calls:
+        body = call["json"]
+        assert body["model"] == "claude-haiku-4-5"
+        assert body["temperature"] == 0.0
+        assert "thinking" not in body
+    assert http.calls[0]["json"]["max_tokens"] == 1000  # complete() default, not floored
+    assert http.calls[1]["json"]["max_tokens"] == 1500  # chat_raw() default, not floored
+
+
+def test_default_sonnet_4_6_is_on_the_adaptive_shape(monkeypatch):
+    """The settings default (claude-sonnet-4-6) is a 4.6 model: adaptive, no temperature."""
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "k")
+    payload = {"content": [{"type": "text", "text": "ok"}], "usage": {}}
+    http = _FakeHttp([_FakeResponse(200, payload)])
+    AnthropicClient(_settings(), http_client=http).complete("q")
+    body = http.calls[0]["json"]
+    assert body["model"] == "claude-sonnet-4-6"
+    assert body["thinking"] == {"type": "adaptive"} and "temperature" not in body
+
+
+def test_token_accounting_prices_the_5_series(monkeypatch):
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "k")
+    payload = {
+        "content": [{"type": "text", "text": "x"}],
+        "usage": {"input_tokens": 1_000_000, "output_tokens": 1_000_000},
+    }
+    http = _FakeHttp([_FakeResponse(200, payload), _FakeResponse(200, payload)])
+    client = AnthropicClient(_settings(), http_client=http)
+    client.complete("a", model="anthropic:claude-sonnet-5")
+    client.complete("b", model="anthropic:claude-opus-4-8")
+    totals = client.token_totals()
+    # 1M in @ $2 + 1M out @ $10 (Sonnet 5) + 1M in @ $5 + 1M out @ $25 (Opus 4.8)
+    assert totals["estimated_cost_usd"] == pytest.approx(2.0 + 10.0 + 5.0 + 25.0)
+    assert set(totals["by_model"]) == {"claude-sonnet-5", "claude-opus-4-8"}

@@ -128,6 +128,11 @@ FLYCANON_ANSWER_MODE=rlm
 #   root   -- orchestrator model that drives the CodeAct REPL loop.
 #   sub    -- model for flat recursive sub-calls made from REPL code.
 #   answer -- model for the final single-shot answer synthesis.
+# The client shapes the request per model generation: Claude 4.6 and
+# later (claude-sonnet-5, claude-opus-5, Opus 4.6/4.7/4.8, Sonnet 4.6)
+# are called with adaptive thinking and no temperature (the API refuses
+# sampling knobs on the 5-series); Haiku 4.5 / Sonnet 4.5 keep the
+# deterministic temperature 0.0. Any of them is a valid value here.
 FLYCANON_RLM_ROOT_MODEL=anthropic:claude-sonnet-4-6
 FLYCANON_RLM_SUB_MODEL=anthropic:claude-sonnet-4-6
 FLYCANON_RLM_ANSWER_MODEL=anthropic:claude-sonnet-4-6
