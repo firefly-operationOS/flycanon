@@ -29,6 +29,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from contextlib import asynccontextmanager
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -37,6 +38,15 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 from flycanon.models.entities.ingest_job import IngestJobEventRow, IngestJobRow
 from flycanon.models.repositories._engine import build_session_factory
+
+
+@dataclass(frozen=True, slots=True)
+class ReclaimedJob:
+    """One row :meth:`IngestJobRepository.reclaim_stuck` demoted back to ``queued``."""
+
+    job_id: str
+    tenant_id: str
+    workspace_id: str
 
 
 class IngestJobRepository:
@@ -181,22 +191,31 @@ class IngestJobRepository:
         *,
         lease_seconds: int,
         limit: int = 100,
-    ) -> list[str]:
+    ) -> list[ReclaimedJob]:
         """Bulk reset ``running`` rows whose lease has expired.
 
         Belt-and-braces companion to per-job lease recovery in
         :meth:`mark_running`. A long-stuck job whose EDA delivery has
         also been lost would never be re-claimed without an explicit
         sweep -- this method finds those rows, demotes them back to
-        ``queued``, and returns the ids so the caller can republish
-        the ``IngestSourceRequested`` event.
+        ``queued``, and returns them so the caller can republish the
+        ``IngestSourceRequested`` event.
+
+        Each entry carries the job's ``tenant_id`` / ``workspace_id``
+        beside the id. The republished event must carry the same scope
+        the submit-time event did (every ``flycanon.ingest`` payload
+        does since 26.7.1); returning bare ids here forced the sweep to
+        publish ``{job_id}`` only, so a consumer routing by tenant saw
+        an unscoped event exactly for the jobs that had already gone
+        wrong once. Reading the scope in the same statement costs
+        nothing and keeps the two publish paths identical.
         """
         if lease_seconds <= 0:
             return []
         cutoff = datetime.now(UTC) - timedelta(seconds=lease_seconds)
         async with self.session() as session:
             stmt = (
-                select(IngestJobRow.id)
+                select(IngestJobRow.id, IngestJobRow.tenant_id, IngestJobRow.workspace_id)
                 .where(
                     IngestJobRow.status == "running",
                     IngestJobRow.started_at.isnot(None),
@@ -204,15 +223,18 @@ class IngestJobRepository:
                 )
                 .limit(limit)
             )
-            ids = list((await session.execute(stmt)).scalars().all())
-            if not ids:
+            reclaimed = [
+                ReclaimedJob(job_id=row.id, tenant_id=row.tenant_id, workspace_id=row.workspace_id)
+                for row in (await session.execute(stmt)).all()
+            ]
+            if not reclaimed:
                 return []
             await session.execute(
                 update(IngestJobRow)
-                .where(IngestJobRow.id.in_(ids))
+                .where(IngestJobRow.id.in_([job.job_id for job in reclaimed]))
                 .values(status="queued", error_code=None, error_message=None)
             )
-            return ids
+            return reclaimed
 
     async def mark_succeeded(
         self,

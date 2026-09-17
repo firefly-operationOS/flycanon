@@ -146,7 +146,10 @@ subscribes. Three layers of defence:
    `IngestSourceRequested` for any stale `running` row that the
    in-band re-claim hasn't picked up (e.g. the broker also dropped
    the redelivery). Covers the worst-case "worker crashed AND broker
-   lost message" scenario without operator intervention.
+   lost message" scenario without operator intervention. The
+   republished event carries the job's `tenant_id` / `workspace_id`
+   exactly like the submit-time one (`reclaim_stuck` returns the
+   scope with each id).
 4. **Lease-poaching guard**. `mark_succeeded` and `mark_failed`
    gate their UPDATE on `attempts` equalling the value the worker
    captured at claim time. If another replica re-claimed the job

@@ -44,8 +44,13 @@ Order of operations, and why it is this order:
    trail says what was erased even though the rows are gone. Audit
    rows themselves are never purged (see the repository module).
 
-Idempotent: purging an empty or never-created workspace returns zeros
-and ``closed=False`` with 200, so an off-boarding job can retry safely.
+Idempotent: every counter is what THIS call erased, and ``closed`` is
+whether THIS call moved the row to ``closed``. A repeat on an
+already-purged workspace (or a purge of a never-created one) returns
+zeros and ``closed=False`` with 200, publishes no ``WorkspaceDeleted``
+and writes no ``workspace.purged`` audit row -- nothing happened, so
+the trail says nothing. An off-boarding job can therefore retry
+safely and read the response literally.
 """
 
 from __future__ import annotations
@@ -78,6 +83,11 @@ class PurgeReport:
     originals_deleted: int = 0
     counts: dict[str, int] = field(default_factory=dict)
     closed: bool = False
+
+    @property
+    def erased_anything(self) -> bool:
+        """Whether this purge changed anything at all (rows, objects or the workspace status)."""
+        return self.closed or self.sources_removed > 0 or any(v > 0 for v in self.counts.values())
 
 
 @service
@@ -119,8 +129,7 @@ class WorkspacePurgeService:
             if not rows:
                 break
             for row in rows:
-                had_original = bool(getattr(row, "object_store_key", None))
-                await self._intake.remove(
+                removal = await self._intake.remove(
                     source_id=row.id,
                     tenant_id=tenant_id,
                     workspace_id=workspace_id,
@@ -128,18 +137,40 @@ class WorkspacePurgeService:
                     correlation_id=correlation_id,
                 )
                 report.sources_removed += 1
-                if had_original:
+                # Count what the removal reports, not what the row
+                # promised. The first cut counted ``object_store_key``
+                # being set and told an off-boarding job that two
+                # originals were gone while both were still on the
+                # worker's volume (the API's localfs root was not the
+                # worker's). The per-source audit row was right all
+                # along; this counter and the ``workspace.purged`` audit
+                # payload now say the same thing it does.
+                if removal.original_deleted:
                     report.originals_deleted += 1
 
         # 2. Everything else in the scope.
         report.counts = await self._purge.purge_scope(tenant_id=tenant_id, workspace_id=workspace_id)
 
-        # 3. Close the workspace row if there is one.
-        report.closed = await self._workspaces.close(tenant_id, workspace_id)
+        # 3. Close the workspace row if there is one and it is still open.
+        # ``close_if_open`` (not ``close``) so a repeat reports
+        # ``closed=False`` instead of restamping ``closed_at`` and
+        # re-announcing a deletion that already happened.
+        report.closed = await self._workspaces.close_if_open(tenant_id, workspace_id)
         if report.closed:
             await self._events.publish_deleted(tenant_id=tenant_id, workspace_id=workspace_id)
 
-        # 4. The trail.
+        # 4. The trail -- only when there is something to record. A
+        # no-op repeat writing a ``workspace.purged`` row with all
+        # zeros would make the audit log say the workspace was purged
+        # N times, and an auditor would have to read the payloads to
+        # learn that N-1 of them erased nothing.
+        if not report.erased_anything:
+            logger.info(
+                "workspace purge no-op tenant=%s workspace=%s (already purged or never populated)",
+                tenant_id,
+                workspace_id,
+            )
+            return report
         await self._audit.record(
             event_type="workspace.purged",
             subject_kind="workspace",

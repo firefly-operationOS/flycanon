@@ -166,6 +166,17 @@ class TestHostPolicyOnFetch:
         assert exc_info.value.code == "url_fetch_forbidden_host"
 
     @pytest.mark.asyncio
+    async def test_shared_address_space_refused_before_any_request(self):
+        """100.64.0.0/10 (RFC 6598) was dialled by the first 26.7.1 build."""
+        with respx.mock(assert_all_called=False) as router:
+            route = router.get("http://100.64.0.1/").mock(return_value=httpx.Response(200, content=b"pod"))
+            with pytest.raises(UrlFetchError) as exc_info:
+                await _fetcher().fetch("http://100.64.0.1/")
+            assert exc_info.value.code == "url_fetch_forbidden_host"
+            assert "shared address space" in str(exc_info.value)
+            assert not route.called
+
+    @pytest.mark.asyncio
     async def test_hostname_resolving_to_private_refused(self):
         with pytest.raises(UrlFetchError) as exc_info:
             await _fetcher().fetch("https://internal.example.com/secret.pdf")

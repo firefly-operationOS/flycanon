@@ -23,6 +23,10 @@
   cache-invalidation bridge on ``*`` in every process, so an API that
   shared the worker's group advanced the outbox cursor past the
   ``IngestSourceRequested`` events and async jobs never ran.
+* ``worker`` runs no server, and pyfly logs ``server_started``
+  unconditionally with ``0.0.0.0:8080`` as the fallback -- so the
+  worker exports ``server=none host=- port=0`` rather than letting the
+  log claim a listener it does not hold.
 """
 
 from __future__ import annotations
@@ -82,3 +86,33 @@ def test_api_and_worker_groups_differ_by_default() -> None:
     yaml_text = (Path(cli.__file__).resolve().parents[2] / "pyfly.yaml").read_text()
     assert "group: ${FLYCANON_EDA_GROUP:flycanon-api}" in yaml_text
     assert cli.WORKER_EDA_GROUP != "flycanon-api"
+
+
+def test_worker_exports_a_no_listener_server_contract() -> None:
+    """The worker holds no socket; pyfly's boot line must not say 0.0.0.0:8080."""
+    cli.ensure_worker_server_contract()
+    assert os.environ["_PYFLY_SERVER_TYPE"] == "none"
+    assert os.environ["_PYFLY_SERVER_HOST"] == "-"
+    assert os.environ["_PYFLY_SERVER_PORT"] == "0"
+    # pyfly casts the port with int(); the contract must survive that.
+    assert int(os.environ["_PYFLY_SERVER_PORT"]) == 0
+
+
+def test_server_contract_respects_an_explicit_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("_PYFLY_SERVER_PORT", "9999")
+    cli.export_server_contract(server_type="uvicorn", host="0.0.0.0", port=8765)
+    assert os.environ["_PYFLY_SERVER_PORT"] == "9999"
+    assert os.environ["_PYFLY_SERVER_TYPE"] == "uvicorn"
+
+
+def test_worker_boot_line_is_what_pyfly_will_log(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Drive pyfly's own ``_log_server_info`` with the worker contract and read the line back."""
+    from pyfly.core.application import PyFlyApplication
+
+    cli.ensure_worker_server_contract()
+    fields: dict = {}
+    app = PyFlyApplication.__new__(PyFlyApplication)
+    app._logger = SimpleNamespace(info=lambda event, **kw: fields.update({"event": event, **kw}))  # type: ignore[attr-defined]
+    PyFlyApplication._log_server_info(app)
+    assert fields["event"] == "server_started"
+    assert (fields["server"], fields["host"], fields["port"]) == ("none", "-", 0)

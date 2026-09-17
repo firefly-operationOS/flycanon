@@ -30,10 +30,15 @@ found by wiring that caller against 26.7.0.
   `SecurityContext` (`ApiKeyPrincipalFilter`) so the dashboard answers
   to the key and refuses everything else.
 - **Outbound host policy (SSRF guard).** `uri` fetches and
-  `callback_url` webhooks refuse loopback, private (RFC 1918 / ULA),
-  link-local (instance metadata), multicast and reserved addresses --
-  literal, DNS-resolved, and on every redirect hop (redirects are now
-  followed by hand, at most five) -- with `400 url_fetch_forbidden_host`
+  `callback_url` webhooks refuse every address that is not globally
+  routable -- loopback, private (RFC 1918 / ULA), link-local (instance
+  metadata), multicast, reserved, unspecified, RFC 6598 shared address
+  space (`100.64.0.0/10`: CGNAT, Tailscale, the pod CIDR of most
+  managed Kubernetes clusters), site-local, documentation and
+  benchmarking blocks; the decision is `ipaddress`'s `is_global`, the
+  named checks only shape the message -- literal, DNS-resolved, and on
+  every redirect hop (redirects are now followed by hand, at most
+  five) -- with `400 url_fetch_forbidden_host`
   / `400 callback_url_not_allowed`. `FLYCANON_URL_FETCH_ALLOW_PRIVATE=true`
   lifts the denylist for private dev stacks. Fetcher failures now render
   as problem+json (`url_fetch_*` codes, 400 / 413 / 502) instead of the
@@ -50,15 +55,25 @@ found by wiring that caller against 26.7.0.
   source_not_found`). Both it and the agent-tier DELETE now **delete the
   stored original from the object store** as well as the index, chunks
   and row -- before, an "erased" document stayed readable by the RLM
-  corpus. The audit payload and `SourceRemoved` event carry
-  `original_deleted`.
+  corpus. `IntakeService.remove` returns a `SourceRemoval`, and its
+  `original_deleted` is a fact, not a promise: the store is asked
+  whether the object exists before the (no-op-on-missing) delete, and a
+  key that is not in this process's store is logged as a warning and
+  reported `false` -- the audit payload, the `SourceRemoved` event and
+  the purge counter all carry that same value.
 - **`POST /api/v1/workspaces/{id}:purge`** -> `WorkspacePurgeResult`.
   Removes every source through the full pipeline, then knowledge items
   / versions / citations / relations, candidates, conversations /
   turns, ingest jobs / events and cost events in one transaction,
   closes the workspace and emits `WorkspaceDeleted`; audit rows are
   kept and a `workspace.purged` row records the counts. `X-Workspace-Id`
-  must equal the path id (`400 workspace_scope_mismatch`). Idempotent.
+  must equal the path id (`400 workspace_scope_mismatch`). Idempotent
+  in the literal sense: every counter is what this call erased,
+  `originals_deleted` counts objects actually found and deleted, and
+  `closed` is `true` only for the call that moved the row to `closed`
+  (`WorkspaceRepository.close_if_open`); a repeat is all zeros with
+  `closed: false`, restamps nothing, publishes no second
+  `WorkspaceDeleted` and writes no second audit row.
 - **Job-stream resume.** `GET /api/v1/ingest-jobs/{id}/stream` accepts
   `?after_id=<id>` and the standard `Last-Event-ID` header, and stamps
   `id:` on every `event` frame, so a reconnect no longer replays the
@@ -71,11 +86,18 @@ found by wiring that caller against 26.7.0.
   (`ApiKeyHeader`, `ApiKeyAuthorization`, `AgentToken`) and reusable
   header parameters (`X-Tenant-Id`, `X-Workspace-Id`, `X-Correlation-Id`,
   `Idempotency-Key`) attached to every operation, so a generated client
-  sends the mandatory headers.
+  sends the mandatory headers. `security` describes what satisfies the
+  operation, not what the middleware lets through: `/api/v1/agent/*`
+  lists `AgentToken` alone (the platform key is neither required nor
+  accepted there -- the route answers `401 missing_agent_token`), every
+  other tenant operation lists the two platform-key forms.
 - **Scope on ingest events.** Every `flycanon.ingest` payload
   (`SourceIngested`, `SourceReplaced`, `SourceRemoved`,
   `SourceIngestionFailed`, `IngestSourceRequested`, `IngestSourceFinished`,
-  `IngestSourceFailed`) carries `tenant_id` / `workspace_id`.
+  `IngestSourceFailed`) carries `tenant_id` / `workspace_id` -- including
+  the `IngestSourceRequested` the stuck-job sweep republishes:
+  `IngestJobRepository.reclaim_stuck` returns `ReclaimedJob(job_id,
+  tenant_id, workspace_id)` and the service has no unscoped publish path.
 
 ### Changed
 
@@ -95,8 +117,13 @@ found by wiring that caller against 26.7.0.
   `?mode=async` jobs stayed `queued` forever. The API defaults to
   `flycanon-api`, `flycanon worker` to `flycanon-workers`
   (`FLYCANON_EDA_GROUP` overrides either).
-- **`flycanon serve` exports pyfly's `_PYFLY_SERVER_*` variables** so the
-  `server_started` log line reports the real port instead of `8080`.
+- **Both entry points export pyfly's `_PYFLY_SERVER_*` variables.**
+  pyfly logs `server_started` in every process with `0.0.0.0:8080` as
+  the fallback. `flycanon serve` exports `uvicorn` / `0.0.0.0` /
+  `FLYCANON_PORT` so the line reports the real socket; `flycanon worker`,
+  which runs no server, exports `none` / `-` / `0` so the line cannot
+  claim a listener the process does not hold, and logs its own "no HTTP
+  listener in this process" line beside it.
 
 ### Fixed
 

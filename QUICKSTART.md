@@ -203,7 +203,7 @@ curl -fsS -N http://localhost:8500/api/v1/ingest-jobs/$JOB/stream "${H[@]}"
 Add `&callback_url=https://hooks.example.com/flycanon` to be POSTed the
 outcome instead; with `FLYCANON_WEBHOOK_SECRET` set the request carries
 an `X-Flycanon-Signature` HMAC (see [docs/async-ingest.md](docs/async-ingest.md)).
-Private, loopback and link-local callback hosts are refused.
+Callback hosts that are not globally routable (private, loopback, link-local, `100.64.0.0/10`) are refused.
 
 ### Tear a workspace down
 

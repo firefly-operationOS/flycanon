@@ -4686,7 +4686,7 @@
         "type": "object"
       },
       "WorkspacePurgeResult": {
-        "description": "Wire shape of ``POST /api/v1/workspaces/{workspace_id}:purge``.\n\nEvery counter is the number of rows (or objects) erased by THIS\ncall; a repeated purge reports zeros. ``closed`` is ``False`` when\nno ``canon_workspaces`` row existed for the id -- an implicit\nworkspace that only ever held data -- and the data was still\npurged. Audit rows are never counted because they are never\ndeleted.",
+        "description": "Wire shape of ``POST /api/v1/workspaces/{workspace_id}:purge``.\n\nEvery counter is the number of rows (or objects) erased by THIS\ncall; a repeated purge reports zeros. ``originals_deleted`` counts\nobjects the removal actually found and deleted in the object\nstore, not rows that carried a key. ``closed`` is ``True`` only when\nTHIS call moved the ``canon_workspaces`` row to ``closed``; it is\n``False`` on a repeat (the row was already closed) and when no row\nexisted for the id -- an implicit workspace that only ever held\ndata -- in which case the data was still purged. A call that erased\nnothing and closed nothing publishes no event and writes no audit\nrow. Audit rows are never counted because they are never deleted.",
         "properties": {
           "candidates_removed": {
             "minimum": 0,
@@ -4704,7 +4704,7 @@
             "type": "integer"
           },
           "closed": {
-            "description": "Whether a workspace row existed and was moved to ``closed``.",
+            "description": "Whether THIS call moved the workspace row to ``closed`` (false on a repeat).",
             "title": "Closed",
             "type": "boolean"
           },
@@ -4749,7 +4749,7 @@
             "type": "integer"
           },
           "originals_deleted": {
-            "description": "Stored originals removed from the object store.",
+            "description": "Stored originals actually found and removed from the object store by this call.",
             "minimum": 0,
             "title": "Originals Deleted",
             "type": "integer"
@@ -5066,7 +5066,7 @@
     },
     "securitySchemes": {
       "AgentToken": {
-        "description": "Tenant-scoped agent token (``agt_<8hex>_<32hex>``) minted by ``POST /api/v1/agent-tokens``. The credential of the ``/api/v1/agent/*`` tier: verified per request against the tenant in ``X-Tenant-Id``, the workspace allowlist and the route scope. An agent-tier request carrying it does not need the platform key.",
+        "description": "Tenant-scoped agent token (``agt_<8hex>_<32hex>``) minted by ``POST /api/v1/agent-tokens``. The credential of the ``/api/v1/agent/*`` tier: verified per request against the tenant in ``X-Tenant-Id``, the workspace allowlist and the route scope. It is the only credential that satisfies an agent-tier operation: the platform key is neither required nor accepted in its place (a platform-key-only call to ``/api/v1/agent/*`` fails with ``401 missing_agent_token``).",
         "in": "header",
         "name": "X-Agent-Token",
         "type": "apiKey"
@@ -5300,12 +5300,6 @@
         "security": [
           {
             "AgentToken": []
-          },
-          {
-            "ApiKeyHeader": []
-          },
-          {
-            "ApiKeyAuthorization": []
           }
         ],
         "summary": "Propose candidates from an existing source (agent tier).",
@@ -5352,12 +5346,6 @@
         "security": [
           {
             "AgentToken": []
-          },
-          {
-            "ApiKeyHeader": []
-          },
-          {
-            "ApiKeyAuthorization": []
           }
         ],
         "summary": "Fetch a single knowledge item by id (agent tier).",
@@ -5413,12 +5401,6 @@
         "security": [
           {
             "AgentToken": []
-          },
-          {
-            "ApiKeyHeader": []
-          },
-          {
-            "ApiKeyAuthorization": []
           }
         ],
         "summary": "Resolve the citation graph for ``(item_id, version)``.",
@@ -5480,12 +5462,6 @@
         "security": [
           {
             "AgentToken": []
-          },
-          {
-            "ApiKeyHeader": []
-          },
-          {
-            "ApiKeyAuthorization": []
           }
         ],
         "summary": "Grounded RAG answer with explicit citations (agent tier).",
@@ -5540,12 +5516,6 @@
         "security": [
           {
             "AgentToken": []
-          },
-          {
-            "ApiKeyHeader": []
-          },
-          {
-            "ApiKeyAuthorization": []
           }
         ],
         "summary": "SSE answer stream (agent tier).",
@@ -5607,12 +5577,6 @@
         "security": [
           {
             "AgentToken": []
-          },
-          {
-            "ApiKeyHeader": []
-          },
-          {
-            "ApiKeyAuthorization": []
           }
         ],
         "summary": "Hybrid retrieval over the canon corpus (agent tier).",
@@ -5674,12 +5638,6 @@
         "security": [
           {
             "AgentToken": []
-          },
-          {
-            "ApiKeyHeader": []
-          },
-          {
-            "ApiKeyAuthorization": []
           }
         ],
         "summary": "Submit a source for intake (agent tier).",
@@ -5722,12 +5680,6 @@
         "security": [
           {
             "AgentToken": []
-          },
-          {
-            "ApiKeyHeader": []
-          },
-          {
-            "ApiKeyAuthorization": []
           }
         ],
         "summary": "Remove a source and its indexed projections (agent tier).",
@@ -5772,12 +5724,6 @@
         "security": [
           {
             "AgentToken": []
-          },
-          {
-            "ApiKeyHeader": []
-          },
-          {
-            "ApiKeyAuthorization": []
           }
         ],
         "summary": "Read a single source record (agent tier).",
@@ -5845,12 +5791,6 @@
         "security": [
           {
             "AgentToken": []
-          },
-          {
-            "ApiKeyHeader": []
-          },
-          {
-            "ApiKeyAuthorization": []
           }
         ],
         "summary": "Replace an existing source in place (agent tier).",

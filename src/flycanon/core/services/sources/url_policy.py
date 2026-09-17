@@ -25,8 +25,10 @@ hands out IAM credentials), or any RFC 1918 host on the operator's
 network, and read the response back through the ingested source.
 
 :class:`HostPolicy` resolves the hostname **before** the connection is
-made and refuses every address that falls in a loopback, private,
-link-local, multicast, reserved or unspecified block. IP literals are
+made and refuses every address that is not globally routable
+(loopback, private, link-local, multicast, reserved, unspecified,
+shared address space, site-local, documentation and benchmarking
+blocks -- the decision is ``ipaddress``'s ``is_global``). IP literals are
 checked directly, ``localhost`` and single-label names are refused
 outright, and a hostname whose resolution yields *any* forbidden
 address is refused (an attacker who controls DNS can return a mix).
@@ -63,6 +65,9 @@ Resolver = Callable[[str], list[str]]
 
 _ALLOWED_SCHEMES: frozenset[str] = frozenset({"http", "https"})
 _LOCAL_NAMES: frozenset[str] = frozenset({"localhost", "localhost.localdomain", "ip6-localhost"})
+#: RFC 6598 shared address space. Named only for the error message --
+#: ``is_global`` already refuses it (see :func:`address_is_forbidden`).
+_SHARED_ADDRESS_SPACE = ipaddress.ip_network("100.64.0.0/10")
 
 
 class ForbiddenHost(Exception):
@@ -103,7 +108,23 @@ def address_is_forbidden(ip_text: str) -> str | None:
     hand-typed table that rots: loopback (127/8, ::1), private
     (RFC 1918, fc00::/7), link-local (169.254/16 -- the cloud metadata
     range -- and fe80::/10), multicast, reserved, unspecified
-    (0.0.0.0, ::) and IPv4-mapped IPv6 forms of any of those.
+    (0.0.0.0, ::), the deprecated IPv6 site-local block (fec0::/10)
+    and IPv4-mapped IPv6 forms of any of those.
+
+    The named checks exist for the error message; the decision is the
+    last line, ``not addr.is_global``. The two are not the same set and
+    the difference was a live hole in 26.7.1's first cut: RFC 6598
+    shared address space (100.64.0.0/10 -- CGNAT, Tailscale, the pod
+    CIDR of most managed Kubernetes clusters) is neither ``is_private``
+    nor ``is_loopback`` nor ``is_link_local`` in :mod:`ipaddress`, yet it
+    is not globally routable either, so a tenant could POST
+    ``uri=http://100.64.0.1/`` and read a pod on the operator's cluster
+    back through the ingested source. The same goes for the
+    benchmarking and documentation ranges. ``is_global`` is the stdlib's
+    own "globally reachable" column of the IANA registry, so it is the
+    catch-all: anything that reaches this function and is not global is
+    refused with a generic reason, and adding a new named check only
+    ever improves the message, never the decision.
     """
     try:
         addr: Any = ipaddress.ip_address(ip_text)
@@ -124,6 +145,15 @@ def address_is_forbidden(ip_text: str) -> str | None:
         return "reserved address"
     if addr.is_unspecified:
         return "unspecified address"
+    if getattr(addr, "is_site_local", False):
+        # fec0::/10 is deprecated (RFC 3879) and ``ipaddress`` reports it
+        # as global, but a stack that still honours it routes it inside
+        # the site -- the neighbours a tenant must not reach.
+        return "site-local address"
+    if addr.version == 4 and addr in _SHARED_ADDRESS_SPACE:
+        return "shared address space (RFC 6598, carrier-grade NAT / cluster pod range)"
+    if not addr.is_global:
+        return "non-public address (IANA special-purpose block)"
     return None
 
 

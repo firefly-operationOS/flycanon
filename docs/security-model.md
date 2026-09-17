@@ -20,7 +20,7 @@ flycanon is designed against four classes of adversary.
 | Adversary | Capability | flycanon response |
 |---|---|---|
 | **External attacker, no credentials** | Hits any `/api/v1/*` endpoint without auth headers. | `401 missing_api_key` at the first gate when `FLYCANON_API_KEYS` is set (the `ApiKeyMiddleware`, enforced since 26.7.1 -- before that the setting was parsed and read by nothing). The only unauthenticated routes are `GET /api/v1/version`, the `/actuator/health/*` probes and the OpenAPI docs. Every other path requires the platform key (`X-API-Key` or `Authorization: ApiKey`) plus tenant headers, or `X-Agent-Token` on the agent tier. With the setting EMPTY the user tier is open -- acceptable only on a private network -- and the boot log warns `api-key gate DISABLED`. |
-| **Tenant that can reach the service, aiming it at the operator's network** | Submits `uri` or `callback_url` pointing at `127.0.0.1`, RFC 1918 space or `169.254.169.254`. | Refused before any socket opens: the outbound host policy resolves the name, rejects loopback / private / link-local / multicast / reserved addresses (literal, via DNS, and on every redirect hop) with `400 url_fetch_forbidden_host` / `400 callback_url_not_allowed`. Known gap: DNS rebinding between the check and the dial (see § 8). |
+| **Tenant that can reach the service, aiming it at the operator's network** | Submits `uri` or `callback_url` pointing at `127.0.0.1`, RFC 1918 space or `169.254.169.254`. | Refused before any socket opens: the outbound host policy resolves the name and rejects every address that is not globally routable -- loopback / private / link-local / multicast / reserved / unspecified / RFC 6598 shared address space (`100.64.0.0/10`, the pod CIDR of EKS/GKE and the Tailscale/CGNAT range) / site-local / documentation and benchmarking blocks; the decision is `ipaddress.is_global` -- literal, via DNS, and on every redirect hop with `400 url_fetch_forbidden_host` / `400 callback_url_not_allowed`. Known gap: DNS rebinding between the check and the dial (see § 8). |
 | **Party that learned a callback URL** | Forges or replays an async-ingest webhook to the receiver. | Every callback carries `X-Flycanon-Signature` (HMAC-SHA256 over the raw body, timestamp-bound) when `FLYCANON_WEBHOOK_SECRET` is set; receivers verify + reject stale timestamps. Unsigned mode is announced at boot. |
 | **Authenticated user in tenant A, trying to reach tenant B** | Holds a valid JWT for tenant A; hand-crafts a request with `X-Tenant-Id: B`. | `403 tenant_claim_mismatch` from the conventions layer (the JWT `tenant` claim is compared with `X-Tenant-Id`). Note the JWT is decoded WITHOUT signature verification -- it labels the actor and cross-checks the claim, it does not authenticate; a verifying gateway or the platform key does. Even if that gate were bypassed, Postgres RLS returns zero rows. |
 | **Authenticated user in workspace X, trying to reach workspace Y in same tenant** | Holds a valid JWT for tenant T; hand-crafts a request with `X-Workspace-Id: Y` while referencing a resource id from workspace X. | `404 resource_not_found` (workspace scope enforced on every read-by-id route; documented in [api-reference.md § Workspace scope enforcement](api-reference.md#workspace-scope-enforcement)). The repository WHERE clause and Postgres RLS each independently produce the 404. |
@@ -166,6 +166,14 @@ on top would force every agent to hold the operator secret -- the
 opposite of what agent tokens are for. The exemption applies only to
 `/api/v1/agent/*` paths; minting (`/api/v1/agent-tokens`) is user tier
 and needs the platform key.
+
+The converse does not hold: the platform key never satisfies an agent
+operation. The middleware lets a platform-key request through to an
+agent route, but the route itself answers `401 missing_agent_token`,
+so the agent token is the only credential that works there. The
+OpenAPI document says exactly that (`security: [{AgentToken: []}]` on
+every `/api/v1/agent/*` operation, nothing else) so a generated client
+cannot be misled into sending the operator secret to the agent tier.
 
 When `Authorization: Bearer <jwt>` is presented together with
 `X-Agent-Token`, the JWT `sub` wins as the `actor` label and the agent

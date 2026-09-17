@@ -171,18 +171,29 @@ class AsyncIngestService:
         job_id: str,
         correlation_id: str | None,
         *,
-        tenant_id: str | None = None,
-        workspace_id: str | None = None,
+        tenant_id: str,
+        workspace_id: str,
     ) -> None:
+        """Publish ``IngestSourceRequested`` for ``job_id`` with its scope.
+
+        Scope travels on the ingest topic (26.7.1) so a consumer on a
+        shared broker can route by tenant without a DB lookup; the
+        worker itself still reads the row for the scope. The two
+        arguments are keyword-only and required, not optional with a
+        "when both are passed" branch: the first cut had that branch,
+        and the stuck-job sweep -- which had only ids in hand -- took
+        it, so the one republish path that fires after something has
+        already gone wrong was also the one path that published an
+        unscoped event. A caller that has no scope has no business
+        publishing this event; make it read the row first.
+        """
         if self._publisher is None:
             return
-        payload: dict[str, Any] = {"job_id": job_id}
-        if tenant_id is not None and workspace_id is not None:
-            # Scope travels on the ingest topic (26.7.1) so a consumer on
-            # a shared broker can route by tenant without a DB lookup;
-            # the worker itself still reads the row for the scope.
-            payload["tenant_id"] = tenant_id
-            payload["workspace_id"] = workspace_id
+        payload: dict[str, Any] = {
+            "job_id": job_id,
+            "tenant_id": tenant_id,
+            "workspace_id": workspace_id,
+        }
         try:
             await self._publisher.publish(  # type: ignore[attr-defined]
                 destination=self._settings.ingest_topic,
@@ -451,9 +462,18 @@ class AsyncIngestService:
             return
         if not reclaimed:
             return
-        logger.info("stuck-job sweep reclaimed %d job(s): %s", len(reclaimed), reclaimed)
-        for job_id in reclaimed:
-            await self._publish_requested(job_id, correlation_id=None)
+        logger.info(
+            "stuck-job sweep reclaimed %d job(s): %s",
+            len(reclaimed),
+            [job.job_id for job in reclaimed],
+        )
+        for job in reclaimed:
+            await self._publish_requested(
+                job.job_id,
+                correlation_id=None,
+                tenant_id=job.tenant_id,
+                workspace_id=job.workspace_id,
+            )
 
     async def _publish_finish(self, *, event_type: str, job_id: str, payload: dict[str, Any]) -> None:
         if self._publisher is None:

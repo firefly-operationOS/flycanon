@@ -164,3 +164,25 @@ class TestClose:
     @pytest.mark.asyncio
     async def test_close_unknown_workspace_returns_false(self, workspace_repo: WorkspaceRepository) -> None:
         assert await workspace_repo.close("acme", "ws-missing") is False
+
+    @pytest.mark.asyncio
+    async def test_close_if_open_transitions_once_and_keeps_closed_at(
+        self, workspace_repo: WorkspaceRepository
+    ) -> None:
+        """The purge's variant: ``True`` only for the call that closed the row.
+
+        ``close`` restamps ``closed_at`` on every call; ``close_if_open``
+        leaves an already-closed row untouched so a repeated purge can
+        truthfully report ``closed=False``.
+        """
+        await workspace_repo.insert({"id": "ws-2", "tenant_id": "acme", "name": "Q4", "status": "active"})
+        assert await workspace_repo.close_if_open("acme", "ws-2") is True
+        first = await workspace_repo.get("acme", "ws-2")
+        assert first is not None and first["status"] == "closed"
+
+        assert await workspace_repo.close_if_open("acme", "ws-2") is False
+        second = await workspace_repo.get("acme", "ws-2")
+        assert second is not None
+        assert second["closed_at"] == first["closed_at"]
+        assert second["updated_at"] == first["updated_at"]
+        assert await workspace_repo.close_if_open("acme", "ws-missing") is False

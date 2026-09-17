@@ -57,11 +57,71 @@ _PUBLIC = "93.184.216.34"
         ("::ffff:127.0.0.1", "loopback"),
         ("::ffff:10.1.1.1", "private"),
         ("240.0.0.1", "address"),
+        # RFC 6598 shared address space: neither private nor loopback
+        # nor link-local in ``ipaddress``, and exactly the pod CIDR of
+        # EKS/GKE and the Tailscale/CGNAT range. The skeptic dialled
+        # 100.64.0.1 through the first 26.7.1 build.
+        ("100.64.0.1", "shared address space"),
+        ("100.127.255.254", "shared address space"),
+        ("::ffff:100.64.0.1", "shared address space"),
+        ("fec0::1", "site-local"),
+        ("198.18.0.1", "address"),  # benchmarking (RFC 2544)
+        ("192.0.2.1", "address"),  # TEST-NET-1
+        ("198.51.100.1", "address"),  # TEST-NET-2
+        ("203.0.113.1", "address"),  # TEST-NET-3
+        ("2001:db8::1", "address"),  # IPv6 documentation
+        ("255.255.255.255", "address"),
     ],
 )
 def test_forbidden_addresses(ip: str, expected_fragment: str) -> None:
     reason = address_is_forbidden(ip)
     assert reason is not None and expected_fragment in reason
+
+
+def test_every_non_global_address_is_refused() -> None:
+    """The decision is ``is_global``; the named checks only shape the message.
+
+    Walks one representative of every IANA special-purpose block the
+    stdlib knows about and asserts that nothing non-global reaches
+    ``None`` -- so a future Python that adds a block is covered, and a
+    future named check that misses one cannot reopen the hole.
+    """
+    import ipaddress
+
+    samples = [
+        "0.0.0.1",
+        "10.0.0.1",
+        "100.64.0.1",
+        "127.0.0.1",
+        "169.254.1.1",
+        "172.16.0.1",
+        "192.0.0.1",
+        "192.0.2.1",
+        "192.168.0.1",
+        "198.18.0.1",
+        "198.51.100.1",
+        "203.0.113.1",
+        "224.0.0.1",
+        "240.0.0.1",
+        "255.255.255.255",
+        "::",
+        "::1",
+        "::ffff:10.0.0.1",
+        "64:ff9b:1::1",
+        "100::1",
+        "2001::1",
+        "2001:db8::1",
+        "fc00::1",
+        "fe80::1",
+        "ff02::1",
+    ]
+    for text in samples:
+        addr = ipaddress.ip_address(text)
+        # ``ipaddress`` files multicast under its own column (224.0.0.1
+        # reports ``is_global``), which is why the policy keeps a named
+        # multicast check ahead of the catch-all.
+        assert addr.is_multicast or not addr.is_global, text
+        assert address_is_forbidden(text) is not None, text
 
 
 @pytest.mark.parametrize("ip", [_PUBLIC, "8.8.8.8", "2606:4700::1111"])

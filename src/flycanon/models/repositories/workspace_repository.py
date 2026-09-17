@@ -167,6 +167,36 @@ class WorkspaceRepository:
             rowcount = getattr(result, "rowcount", 0) or 0
             return rowcount > 0
 
+    async def close_if_open(self, tenant_id: str, workspace_id: str) -> bool:
+        """Close the workspace only if it is not already ``closed``.
+
+        Returns ``True`` only when THIS call performed the transition.
+        This is the variant the purge uses: :meth:`close` rewrites
+        ``closed_at`` / ``updated_at`` on every call and reports
+        ``True`` each time, which made a repeated purge of an
+        already-purged workspace answer ``closed: true``, republish
+        ``WorkspaceDeleted`` and write a fresh ``workspace.purged`` audit
+        row -- three side effects for an operation whose contract is
+        "every counter is what this call erased". Guarding on
+        ``status != 'closed'`` in the statement itself keeps it a single
+        atomic UPDATE; two concurrent purges cannot both report the
+        transition.
+        """
+        now = datetime.now(UTC)
+        async with self._session_factory() as session, session.begin():
+            stmt = (
+                sa_update(Workspace)
+                .where(
+                    Workspace.tenant_id == tenant_id,
+                    Workspace.id == workspace_id,
+                    Workspace.status != "closed",
+                )
+                .values(status="closed", closed_at=now, updated_at=now)
+            )
+            result = await session.execute(stmt)
+            rowcount = getattr(result, "rowcount", 0) or 0
+            return rowcount > 0
+
     # ------------------------------------------------------------------
     # Reads
     # ------------------------------------------------------------------

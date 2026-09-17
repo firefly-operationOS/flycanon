@@ -56,8 +56,10 @@ three `securitySchemes`, so a generated client sends them.
 ### Request -- `POST /api/v1/sources`
 
 JSON only. Bytes travel in `content_base64`; alternatively `uri`
-names an `http`/`https` origin the service fetches (private, loopback
-and link-local hosts are refused with `400 url_fetch_forbidden_host`).
+names an `http`/`https` origin the service fetches (any host that is
+not globally routable -- private, loopback, link-local, shared address
+space `100.64.0.0/10`, reserved -- is refused with
+`400 url_fetch_forbidden_host`).
 Query parameters: `mode=sync` (default, returns the `SourceRecord`) or
 `mode=async` (returns an `IngestJob`, see below) and `callback_url`
 (async only; same host policy, refused with `400 callback_url_not_allowed`).
@@ -503,8 +505,14 @@ Audit rows are kept; a `workspace.purged` row records the counts.
 }
 ```
 
-Idempotent: a repeat returns zero counts; `closed` is `false` when no
-`canon_workspaces` row exists (an implicit workspace that only held data).
+Idempotent: a repeat returns zero counts and `closed: false` (the row
+was already closed; `closed_at` is not restamped, no second
+`WorkspaceDeleted` event and no second `workspace.purged` audit row are
+written). `closed` is also `false` when no `canon_workspaces` row exists
+(an implicit workspace that only held data). `originals_deleted` counts
+objects the removal actually found and deleted in the object store;
+a row whose key is not in this process's store is logged and not
+counted (its per-source audit row says `original_deleted: false`).
 
 ## Quality scans
 

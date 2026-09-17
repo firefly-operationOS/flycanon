@@ -87,7 +87,12 @@ class TestApplyWireContract:
         spec = apply_wire_contract(_sample_spec())
         delete = spec["paths"]["/api/v1/agent/sources/{source_id}"]["delete"]
         get = spec["paths"]["/api/v1/agent/sources/{source_id}"]["get"]
-        assert delete["security"][0] == {"AgentToken": []}
+        # The agent token is the ONLY alternative: a platform key never
+        # satisfies an agent operation (the route answers
+        # ``401 missing_agent_token``), so listing it would mislead a
+        # generated client.
+        assert delete["security"] == [{"AgentToken": []}]
+        assert get["security"] == [{"AgentToken": []}]
         assert _refs(delete) == _TENANT_REFS | {_IDEMPOTENCY_REF}
         assert _refs(get) == _TENANT_REFS
 
@@ -112,11 +117,15 @@ class TestCommittedSnapshot:
                 assert op.get("security"), f"{method.upper()} {path} has no security requirement"
                 assert _refs(op) >= _TENANT_REFS, f"{method.upper()} {path} misses tenant headers"
                 if path.startswith("/api/v1/agent/"):
-                    assert op["security"][0] == {"AgentToken": []}, f"{method.upper()} {path}"
+                    assert op["security"] == [{"AgentToken": []}], f"{method.upper()} {path}"
                     if method in {"post", "put", "delete"}:
                         assert _IDEMPOTENCY_REF in _refs(op), (
                             f"{method.upper()} {path} misses Idempotency-Key"
                         )
+                else:
+                    assert op["security"] == [{"ApiKeyHeader": []}, {"ApiKeyAuthorization": []}], (
+                        f"{method.upper()} {path}"
+                    )
 
     def test_snapshot_carries_the_new_verbs(self) -> None:
         spec = self._spec()

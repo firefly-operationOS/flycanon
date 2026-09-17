@@ -53,19 +53,44 @@ def _configure_logging(level: str) -> None:
     )
 
 
+#: What the worker process exports for pyfly's ``server_started`` line.
+#: There is no HTTP listener in that process, and pyfly casts the port
+#: to ``int`` and logs unconditionally, so the honest values are a
+#: server type nothing resolves a version for, a host that is not an
+#: address, and port 0 ("no socket").
+WORKER_SERVER_CONTRACT: dict[str, str] = {
+    "_PYFLY_SERVER_TYPE": "none",
+    "_PYFLY_SERVER_HOST": "-",
+    "_PYFLY_SERVER_PORT": "0",
+}
+
+
+def export_server_contract(*, server_type: str, host: str, port: int | str) -> None:
+    """Tell pyfly what this process listens on (or that it does not).
+
+    pyfly v26.09 writes its ``server_started`` boot line from the
+    ``_PYFLY_SERVER_*`` variables that ``pyfly run`` exports, and writes
+    it in EVERY process that boots a :class:`PyFlyApplication`, with
+    ``0.0.0.0:8080`` as the fallback. Both flycanon entry points start
+    pyfly themselves: ``serve`` runs uvicorn on ``FLYCANON_PORT`` and
+    ``worker`` runs no server at all. Without this export the API's
+    log claimed ``port=8080`` while the socket was on 8500, and -- the
+    skeptic's finding -- the worker's log claimed the same listener
+    while it held no socket, which is the kind of line an operator
+    reads during an incident and acts on. ``setdefault`` keeps an
+    explicit environment (a supervisor that knows better) in charge.
+    """
+    os.environ.setdefault("_PYFLY_SERVER_TYPE", server_type)
+    os.environ.setdefault("_PYFLY_SERVER_HOST", host)
+    os.environ.setdefault("_PYFLY_SERVER_PORT", str(port))
+
+
 def cmd_serve(_: argparse.Namespace) -> int:
     """Boot the PyFly application and serve the FastAPI app via uvicorn."""
     import uvicorn
 
     settings = get_settings()
-    # pyfly v26.09 writes its ``server_started`` line from the
-    # ``_PYFLY_SERVER_*`` variables that ``pyfly run`` exports; we start
-    # uvicorn ourselves, so without these the boot log claimed
-    # ``port=8080`` while the socket was on ``settings.port``. Export the
-    # same contract so the log tells the truth an operator will act on.
-    os.environ.setdefault("_PYFLY_SERVER_TYPE", "uvicorn")
-    os.environ.setdefault("_PYFLY_SERVER_HOST", "0.0.0.0")
-    os.environ.setdefault("_PYFLY_SERVER_PORT", str(settings.port))
+    export_server_contract(server_type="uvicorn", host="0.0.0.0", port=settings.port)
     uvicorn.run(
         "flycanon.main:app",
         host="0.0.0.0",
@@ -92,9 +117,27 @@ def ensure_worker_eda_group() -> str:
     return os.environ.setdefault("FLYCANON_EDA_GROUP", WORKER_EDA_GROUP)
 
 
+def ensure_worker_server_contract() -> None:
+    """Export the "no listener" server contract for the worker process.
+
+    Must run BEFORE :class:`PyFlyApplication.startup`, which is where
+    pyfly reads the variables and logs ``server_started``.
+    """
+    export_server_contract(
+        server_type=WORKER_SERVER_CONTRACT["_PYFLY_SERVER_TYPE"],
+        host=WORKER_SERVER_CONTRACT["_PYFLY_SERVER_HOST"],
+        port=WORKER_SERVER_CONTRACT["_PYFLY_SERVER_PORT"],
+    )
+
+
 def cmd_worker(_: argparse.Namespace) -> int:
     """Boot pyfly, resolve :class:`IngestWorker`, run forever."""
     ensure_worker_eda_group()
+    ensure_worker_server_contract()
+    logger.info(
+        "flycanon worker: no HTTP listener in this process "
+        "(pyfly's server_started line reports server=none port=0)"
+    )
 
     async def _run() -> None:
         from pyfly.core import PyFlyApplication

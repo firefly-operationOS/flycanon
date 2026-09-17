@@ -188,8 +188,10 @@ class TestIngestJobAtomicClaim:
             )
         )
         # 600s lease: fresh-1 stays, stale-1 + stale-2 demoted to queued.
-        ids = await jobs.reclaim_stuck(lease_seconds=600)
-        assert sorted(ids) == ["stale-1", "stale-2"]
+        # Each reclaimed entry carries the scope the republish needs.
+        reclaimed = await jobs.reclaim_stuck(lease_seconds=600)
+        assert sorted(job.job_id for job in reclaimed) == ["stale-1", "stale-2"]
+        assert {(job.tenant_id, job.workspace_id) for job in reclaimed} == {("default", "default")}
         # The reclaimed rows are visible at status=queued for another
         # worker to pick up via mark_running.
         fresh_row = await jobs.get("fresh-1", **_SCOPE)

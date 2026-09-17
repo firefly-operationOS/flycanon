@@ -235,41 +235,74 @@ def _intake(existing: SourceRow, *, object_store: Any) -> tuple[IntakeService, M
     return service, audit, publisher
 
 
+def _store(*, exists: bool = True, delete_effect: Any = None) -> MagicMock:
+    store = MagicMock()
+    store.exists = AsyncMock(return_value=exists)
+    store.delete = AsyncMock(side_effect=delete_effect) if delete_effect else AsyncMock(return_value=None)
+    return store
+
+
 class TestRemoveDeletesOriginal:
     @pytest.mark.asyncio
     async def test_original_deleted_and_reported(self) -> None:
-        store = MagicMock()
-        store.delete = AsyncMock(return_value=None)
+        store = _store()
         key = f"flycanon/{_TENANT}/{_WORKSPACE}/sources/src-1.txt"
         service, audit, publisher = _intake(_row(object_store_key=key), object_store=store)
 
-        await service.remove(source_id="src-1", tenant_id=_TENANT, workspace_id=_WORKSPACE)
+        removal = await service.remove(source_id="src-1", tenant_id=_TENANT, workspace_id=_WORKSPACE)
 
+        store.exists.assert_awaited_once_with(key)
         store.delete.assert_awaited_once_with(key)
+        assert removal.source_id == "src-1" and removal.original_deleted is True
         assert audit.record.await_args.kwargs["payload"]["original_deleted"] is True
         payload = publisher.publish.await_args.kwargs["payload"]
         assert payload["original_deleted"] is True
         assert (payload["tenant_id"], payload["workspace_id"]) == (_TENANT, _WORKSPACE)
 
     @pytest.mark.asyncio
+    async def test_object_not_in_this_store_is_reported_not_claimed(self, caplog) -> None:
+        """The port's ``delete`` is a silent no-op on a missing key.
+
+        localfs unlinks with ``missing_ok`` and S3's DeleteObject never
+        complains, so without the existence check a row whose bytes sit
+        in ANOTHER store (the worker's volume, not the API's) would be
+        reported as erased. The skeptic reproduced exactly that against
+        the first 26.7.1 build: ``originals_deleted: 2`` with both files
+        still on disk.
+        """
+        store = _store(exists=False)
+        service, audit, publisher = _intake(_row(object_store_key="k"), object_store=store)
+
+        with caplog.at_level("WARNING"):
+            removal = await service.remove(source_id="src-1", tenant_id=_TENANT, workspace_id=_WORKSPACE)
+
+        store.delete.assert_not_awaited()
+        assert removal.original_deleted is False
+        assert audit.record.await_args.kwargs["payload"]["original_deleted"] is False
+        assert publisher.publish.await_args.kwargs["payload"]["original_deleted"] is False
+        assert any("not in the object store" in rec.message for rec in caplog.records)
+
+    @pytest.mark.asyncio
     async def test_missing_object_is_tolerated(self) -> None:
-        store = MagicMock()
-        store.delete = AsyncMock(side_effect=FileNotFoundError("gone"))
+        # exists() said yes, delete() raced with someone else: still not an error.
+        store = _store(delete_effect=FileNotFoundError("gone"))
         service, audit, _ = _intake(_row(object_store_key="k"), object_store=store)
 
-        await service.remove(source_id="src-1", tenant_id=_TENANT, workspace_id=_WORKSPACE)
+        removal = await service.remove(source_id="src-1", tenant_id=_TENANT, workspace_id=_WORKSPACE)
 
+        assert removal.original_deleted is False
         assert audit.record.await_args.kwargs["payload"]["original_deleted"] is False
 
     @pytest.mark.asyncio
     async def test_row_without_key_skips_the_store(self) -> None:
-        store = MagicMock()
-        store.delete = AsyncMock()
+        store = _store()
         service, audit, _ = _intake(_row(object_store_key=None), object_store=store)
 
-        await service.remove(source_id="src-1", tenant_id=_TENANT, workspace_id=_WORKSPACE)
+        removal = await service.remove(source_id="src-1", tenant_id=_TENANT, workspace_id=_WORKSPACE)
 
+        store.exists.assert_not_awaited()
         store.delete.assert_not_awaited()
+        assert removal.original_deleted is False
         assert audit.record.await_args.kwargs["payload"]["original_deleted"] is False
 
     @pytest.mark.asyncio
@@ -278,8 +311,7 @@ class TestRemoveDeletesOriginal:
         # the source still points at its object and a retry can finish
         # the job -- an orphaned object nobody references is the worse
         # outcome.
-        store = MagicMock()
-        store.delete = AsyncMock(side_effect=OSError("bucket unreachable"))
+        store = _store(delete_effect=OSError("bucket unreachable"))
         service, _, _ = _intake(_row(object_store_key="k"), object_store=store)
         sources = service._sources  # type: ignore[attr-defined]
 
@@ -361,6 +393,36 @@ class TestAsyncIngestScopeAndWebhook:
         )
         payload = publisher.publish.await_args.kwargs["payload"]
         assert payload == {"job_id": "job-1", "tenant_id": _TENANT, "workspace_id": _WORKSPACE}
+
+    @pytest.mark.asyncio
+    async def test_stuck_job_republish_carries_scope(self) -> None:
+        """The sweep's republish is scoped like the submit-time event.
+
+        The first 26.7.1 build republished ``{job_id}`` only from the
+        sweep, so the events for jobs that had already gone wrong once
+        were the unscoped ones. ``reclaim_stuck`` now hands the scope
+        back with the id and the service has no unscoped publish path.
+        """
+        from flycanon.models.repositories.ingest_job_repository import ReclaimedJob
+
+        service, repository, publisher = _async_service(CanonSettings())
+        repository.reclaim_stuck = AsyncMock(
+            return_value=[
+                ReclaimedJob(job_id="job-1", tenant_id=_TENANT, workspace_id=_WORKSPACE),
+                ReclaimedJob(job_id="job-2", tenant_id="t-other", workspace_id="r-other"),
+            ]
+        )
+
+        await service.sweep_stuck_jobs()
+
+        payloads = [call.kwargs["payload"] for call in publisher.publish.await_args_list]
+        assert payloads == [
+            {"job_id": "job-1", "tenant_id": _TENANT, "workspace_id": _WORKSPACE},
+            {"job_id": "job-2", "tenant_id": "t-other", "workspace_id": "r-other"},
+        ]
+        assert all(
+            call.kwargs["event_type"] == "IngestSourceRequested" for call in publisher.publish.await_args_list
+        )
 
     @pytest.mark.asyncio
     @respx.mock

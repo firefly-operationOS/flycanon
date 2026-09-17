@@ -170,7 +170,7 @@ purge scope by `X-Tenant-Id`.
 | `GET`  | `/api/v1/workspaces/{id}` | Fetch one. 404 → `resource_not_found`. |
 | `PATCH` | `/api/v1/workspaces/{id}` | Sparse update. Body: `WorkspaceUpdate`. |
 | `POST` | `/api/v1/workspaces/{id}:close` | Close (idempotent; sets `status=closed` + `closed_at`). Data stays. |
-| `POST` | `/api/v1/workspaces/{id}:purge` | Erase everything the workspace holds, then close it: every source through the full removal pipeline (vectors, chunks, stored originals, audit + event each), then knowledge items / versions / citations / relations, candidates, conversations / turns, ingest jobs / events and cost events in one transaction; emits `WorkspaceDeleted`; audit rows are kept and a `workspace.purged` row records the counts. `X-Workspace-Id` must equal the path id (`400 workspace_scope_mismatch`). Returns `WorkspacePurgeResult`; idempotent. (26.7.1) |
+| `POST` | `/api/v1/workspaces/{id}:purge` | Erase everything the workspace holds, then close it: every source through the full removal pipeline (vectors, chunks, stored originals, audit + event each), then knowledge items / versions / citations / relations, candidates, conversations / turns, ingest jobs / events and cost events in one transaction; emits `WorkspaceDeleted`; audit rows are kept and a `workspace.purged` row records the counts. `X-Workspace-Id` must equal the path id (`400 workspace_scope_mismatch`). Returns `WorkspacePurgeResult` -- every counter is what this call erased, `originals_deleted` only objects actually found in the store, `closed` only when this call closed the row; a repeat is all zeros, `closed: false`, no event, no audit row. (26.7.1) |
 
 `GET /api/v1/workspaces` is a tenant-wide read and runs on the
 BYPASSRLS engine named by `FLYCANON_ADMIN_DATABASE_URL`; under the
@@ -237,9 +237,13 @@ callers (whose actor begins with `agent:`) are refused with
 Every agent route requires three headers together: `X-Tenant-Id`,
 `X-Workspace-Id`, and `X-Agent-Token: <secret>` (the raw token as
 returned by the mint endpoint, shape: `agt_<8hex>_<32hex>`). A request
-carrying `X-Agent-Token` is exempt from the platform API key. When an
-`Authorization: Bearer` JWT is also present its `sub` wins as the
-`actor` label and the agent token is still verified for authorisation.
+carrying `X-Agent-Token` is exempt from the platform API key, and the
+platform key is not accepted in the token's place (a platform-key-only
+call to an agent route is `401 missing_agent_token`); the OpenAPI
+document lists `AgentToken` as the sole security requirement on these
+operations. When an `Authorization: Bearer` JWT is also present its
+`sub` wins as the `actor` label and the agent token is still verified
+for authorisation.
 
 `Idempotency-Key` is **mandatory** on every agent-tier POST, PUT and
 DELETE. Missing -> `400 missing_idempotency_key`. (The user-tier
@@ -338,7 +342,7 @@ Field-level validation details land under `errors[]`.
 |--------|-----------|------|
 | 400 | `missing_tenant_context` | `X-Tenant-Id` / `X-Workspace-Id` header missing or malformed. |
 | 401 | `missing_api_key` / `invalid_api_key` | `FLYCANON_API_KEYS` is set and the request carried no key / an unknown key (`X-API-Key` or `Authorization: ApiKey`). |
-| 400 | `callback_url_not_allowed` | `callback_url` targets a private, loopback, link-local or non-http host. |
+| 400 | `callback_url_not_allowed` | `callback_url` targets a non-globally-routable host (private, loopback, link-local, shared address space `100.64.0.0/10`, reserved) or a non-http scheme. |
 | 400 | `url_fetch_forbidden_host` / `url_fetch_unsupported_scheme` | `uri` targets a refused host / a non-http scheme. |
 | 413 | `url_fetch_too_large` | The origin's document exceeds `FLYCANON_MAX_BYTES`. |
 | 502 | `url_fetch_http_error` / `url_fetch_failed` / `url_fetch_too_many_redirects` | The origin answered 4xx/5xx, could not be reached, or redirected more than five times. |

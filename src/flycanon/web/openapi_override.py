@@ -164,8 +164,10 @@ SECURITY_SCHEMES: dict[str, dict[str, Any]] = {
             "``POST /api/v1/agent-tokens``. The credential of the "
             "``/api/v1/agent/*`` tier: verified per request against the "
             "tenant in ``X-Tenant-Id``, the workspace allowlist and the "
-            "route scope. An agent-tier request carrying it does not need "
-            "the platform key."
+            "route scope. It is the only credential that satisfies an "
+            "agent-tier operation: the platform key is neither required "
+            "nor accepted in its place (a platform-key-only call to "
+            "``/api/v1/agent/*`` fails with ``401 missing_agent_token``)."
         ),
     },
 }
@@ -224,18 +226,24 @@ def _security_for(method: str, path: str) -> list[dict[str, list[str]]]:
     """Security requirement alternatives for one operation.
 
     * public operations: none;
-    * agent tier: the agent token, or either platform-key form;
+    * agent tier: the agent token, and only the agent token;
     * everything else: either platform-key form.
 
     Each entry is one alternative (OpenAPI ``security`` is an OR list),
-    which is exactly how :class:`ApiKeyMiddleware` treats them.
+    and the list describes what satisfies the *operation*, not what the
+    middleware lets through. The distinction bit once: the first cut
+    listed the platform key as an alternative on ``/api/v1/agent/*``
+    because :class:`ApiKeyMiddleware` accepts it there -- but the route
+    then fails with ``401 missing_agent_token``, so a client generated
+    from the document that authenticated agent calls with the platform
+    key would have been misled by the spec. The platform key never
+    satisfies an agent operation; the agent token is the whole story.
     """
     if (method, path) in PUBLIC_OPERATIONS:
         return []
-    platform = [{"ApiKeyHeader": []}, {"ApiKeyAuthorization": []}]
     if path.startswith(AGENT_PREFIX):
-        return [{"AgentToken": []}, *platform]
-    return platform
+        return [{"AgentToken": []}]
+    return [{"ApiKeyHeader": []}, {"ApiKeyAuthorization": []}]
 
 
 def _header_parameters_for(method: str, path: str) -> list[dict[str, str]]:
