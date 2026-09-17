@@ -33,10 +33,14 @@ from pyfly.web.adapters.fastapi.app import create_app
 
 from flycanon import __version__
 from flycanon.app import CanonApplication
+from flycanon.config import get_settings
 from flycanon.web.conventions import (
+    ApiKeyMiddleware,
     TenantContextMiddleware,
+    log_api_key_mode,
     register_exception_handlers,
 )
+from flycanon.web.conventions.webhook_signature import log_webhook_signing_mode
 from flycanon.web.openapi_override import install_openapi
 
 _TITLE = "flycanon"
@@ -71,6 +75,12 @@ async def _lifespan(app: Any):
     setattr(_pyfly, "_host", str(_pyfly.config.get("pyfly.web.host", "0.0.0.0")))  # noqa: B010
     setattr(_pyfly, "_port", int(_pyfly.config.get("pyfly.server.port", 8500)))  # noqa: B010
     await _pyfly.startup()
+    # Two boot-time statements every operator must be able to find in
+    # the log: is the user tier gated, and are outbound webhooks signed.
+    # Both settings were silent no-ops in earlier releases; saying the
+    # mode out loud is part of the fix.
+    log_api_key_mode(get_settings())
+    log_webhook_signing_mode(get_settings())
     # Re-scan HealthIndicator beans now that the container has built
     # every singleton (the eager scan inside ``create_app`` runs BEFORE
     # context startup and would otherwise miss every indicator wired
@@ -118,6 +128,16 @@ register_exception_handlers(app)
 # register_exception_handlers so the conventions ProblemDetail
 # response shape covers anything the middleware leaks.
 app.add_middleware(TenantContextMiddleware)
+# The API-key gate is added LAST so Starlette makes it the OUTERMOST
+# layer: an unauthenticated request is refused before the tenant
+# context is bound and before any route or DB session runs. It renders
+# its own RFC 7807 body (see the module docstring for why it cannot
+# raise). The admin path is read from pyfly.yaml so a relocated
+# dashboard stays gated.
+app.add_middleware(
+    ApiKeyMiddleware,
+    admin_path=str(_pyfly.config.get("pyfly.admin.path", "/admin")),
+)
 # The W3C correlation surface (X-Correlation-Id / X-Request-Id /
 # X-Tenant-Id / traceparent / tracestate) is wired into pyfly's default
 # WebFilter chain via

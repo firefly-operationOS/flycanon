@@ -24,18 +24,19 @@ Knowledge Repository service.
 
 ## Wire-contract compatibility
 
-Compatible with **flycanon service version `26.5.x`**.
+Compatible with **flycanon service version `26.7.x`**.
 
 | SDK | Service |
 |-----|---------|
+| `26.7.1` | `26.7.x` (routes realigned: `?mode=async`, `/query/stream`, `/conversations/{id}/turn`, `/query/suggest`, `?after_id=`; `X-API-Key`; `delete_source`, `purge_workspace`) |
 | `26.5.7` | `26.5.x` |
 
 ## Install
 
 ```bash
-uv add flycanon-sdk==26.5.7
+uv add flycanon-sdk==26.7.1
 # or
-pip install flycanon-sdk==26.5.7
+pip install flycanon-sdk==26.7.1
 ```
 
 ## Quick start
@@ -43,6 +44,7 @@ pip install flycanon-sdk==26.5.7
 ```python
 import asyncio
 from flycanon_sdk import AnswerRequest, CanonClient
+
 
 async def main() -> None:
     async with CanonClient(
@@ -56,6 +58,7 @@ async def main() -> None:
             idempotency_key="example-001",
         )
         print(result.answer)
+
 
 asyncio.run(main())
 ```
@@ -89,7 +92,7 @@ boundary.
 
 | kwarg | type | description |
 |-------|------|-------------|
-| `api_key` | `str \| None` | Bearer token sent as `Authorization: Bearer ...`. |
+| `api_key` | `str \| None` | Platform key (`FLYCANON_API_KEYS`) sent as `X-API-Key`. Not needed on `/api/v1/agent/*` calls that carry `agent_token`. |
 | `timeout` | `float` | httpx timeout in seconds (default `60`). |
 | `client` | `httpx.AsyncClient \| None` | Caller-supplied client to reuse. When provided, the SDK does not close it on exit. |
 | `headers` | `dict[str, str] \| None` | Extra headers merged into every request. |
@@ -150,29 +153,46 @@ await client.replace_source(source_id, new_payload)
 # Knowledge graph + diff
 diff = await client.get_diff(item_id, from_version=1, to_version=2)
 relations = await client.list_relations(item_id)
-await client.add_relation(item_id, CreateRelationRequest(
-    to_item_id=other_id, kind="depends_on",
-))
+await client.add_relation(
+    item_id,
+    CreateRelationRequest(
+        to_item_id=other_id,
+        kind="depends_on",
+    ),
+)
 graph = await client.get_graph(domain="compliance")
 mermaid_str = await client.get_graph_mermaid(domain="compliance")
 
-# Conversations -- pydantic-ai message_history wired underneath
+# Conversations -- same answer engine as ``answer()``, prior turns as history
 conv = await client.create_conversation(CreateConversationRequest(title="t"))
-turn = await client.add_turn(conv.id, CreateConversationTurnRequest(
-    query="What about scope?",
-))
-suggestions = await client.suggest_questions(conv.id)
+turn = await client.add_turn(
+    conv.id,
+    CreateConversationTurnRequest(question="What about scope?"),
+)
+suggestions = await client.suggest_questions(SuggestRequest(question="What about scope?", answer=turn.answer))
 
-# Streamed user-tier answer (token-by-token SSE)
+# Streamed user-tier answer (SSE: status / hit frames, then one final)
 async for frame in client.stream_answer("Summarise the scope section."):
-    if frame.event == "token":
-        print(frame.data.get("text"), end="", flush=True)
+    if frame.event == "final":
+        print(frame.data["answer"], frame.data["citations"])
+
+# Async ingest with a signed webhook + resumable progress stream
+job = await client.submit_source_async(payload, callback_url="https://hooks.example.com/flycanon")
+async for frame in client.stream_job(job.id):  # reconnect: stream_job(job.id, after_id=last_id)
+    print(frame.event, frame.data)
+
+# Removal + off-boarding (originals in the object store go too)
+await client.delete_source(record.id)
+report = await client.purge_workspace("ws-demo")  # client.workspace_id must equal "ws-demo"
 
 # Quality scans
 stale = await client.scan_stale()
-report = await client.detect_conflicts(ConflictScanRequest(
-    domain="compliance", min_similarity=0.85,
-))
+report = await client.detect_conflicts(
+    ConflictScanRequest(
+        domain="compliance",
+        min_similarity=0.85,
+    )
+)
 
 # Billing + corpus inventory
 summary = await client.billing_summary()
@@ -268,6 +288,7 @@ from flycanon_sdk import (
 )
 
 assert CANON_WORKSPACES_TOPIC == "canon.workspaces.v1"
+
 
 # Inside your EDA consumer:
 def handle(raw_payload: dict) -> None:

@@ -37,9 +37,30 @@ human-readable label and `detail` is the free-form message. The
 table of codes (and the HTTP status they map to) lives in
 [`web/conventions/exceptions.py`](../src/flycanon/web/conventions/exceptions.py).
 
+## Headers every tenant route carries
+
+| Header | Required | Meaning |
+|--------|----------|---------|
+| `X-Tenant-Id` | yes | Tenant slug `^[a-z0-9][a-z0-9_-]{0,63}$`. Scopes every row. Missing / malformed -> `400 missing_tenant_context`. |
+| `X-Workspace-Id` | yes | Workspace slug within the tenant, same shape. |
+| `X-API-Key` **or** `Authorization: ApiKey <key>` | when `FLYCANON_API_KEYS` is set | Platform key for the user tier and the admin dashboard. Missing -> `401 missing_api_key`; unknown -> `401 invalid_api_key`. Not needed on `GET /api/v1/version`, nor on `/api/v1/agent/*` requests that carry `X-Agent-Token`. |
+| `X-Agent-Token` | agent tier | `agt_<8hex>_<32hex>` from `POST /api/v1/agent-tokens`. |
+| `Idempotency-Key` | agent-tier POST / PUT / DELETE | Replay key, namespaced per `(tenant, route scope)`. |
+| `X-Correlation-Id` | no | Echoed into audit rows, cost events and the async-ingest webhook; generated when absent. |
+
+`openapi.json` declares all of them (`components.parameters`) plus the
+three `securitySchemes`, so a generated client sends them.
+
 ## Source intake
 
 ### Request -- `POST /api/v1/sources`
+
+JSON only. Bytes travel in `content_base64`; alternatively `uri`
+names an `http`/`https` origin the service fetches (private, loopback
+and link-local hosts are refused with `400 url_fetch_forbidden_host`).
+Query parameters: `mode=sync` (default, returns the `SourceRecord`) or
+`mode=async` (returns an `IngestJob`, see below) and `callback_url`
+(async only; same host policy, refused with `400 callback_url_not_allowed`).
 
 ```json
 {
@@ -59,7 +80,7 @@ table of codes (and the HTTP status they map to) lives in
 }
 ```
 
-### Response -- 201 `SourceRecord`
+### Response -- 201 `SourceRecord` (also `GET /api/v1/sources/{id}`)
 
 ```json
 {
@@ -77,6 +98,15 @@ table of codes (and the HTTP status they map to) lives in
   "updated_at": "2026-05-18T17:00:02Z"
 }
 ```
+
+### `DELETE /api/v1/sources/{id}` -- 204
+
+No body. Purges the BM25 rows, dense vectors and chunk rows, deletes
+the stored original from the object store, deletes the row, writes a
+`source.removed` audit entry and publishes `SourceRemoved`. Unknown id
+(including an id from another workspace) -> `404 source_not_found`.
+The agent-tier `DELETE /api/v1/agent/sources/{id}` is the same
+operation behind `X-Agent-Token` + `Idempotency-Key`.
 
 ## Knowledge lifecycle
 
@@ -336,22 +366,46 @@ Query: `domain`, `kind`, `include_sources=true|false`.
 
 ## Conversations
 
-### `POST /api/v1/conversations/{id}/turns`
+### `POST /api/v1/conversations` -- 201 `Conversation`
 
 ```json
-{ "query": "What about the finance domain?", "max_chunks": 8 }
+{ "title": "onboarding", "model": null, "metadata": {} }
+```
+
+### `POST /api/v1/conversations/{id}/turn` -- 201 `TurnResponse`
+
+```json
+{ "question": "What about the finance domain?", "top_k": 8, "instructions": null }
 ```
 
 ```json
 {
-  "turn_id": "trn-...",
-  "answer": "...",
-  "citations": [ /* same Hit shape as /query */ ],
-  "model": "anthropic:claude-sonnet-4-6"
+  "conversation_id": "conv-...",
+  "turn": {
+    "id": 3,
+    "conversation_id": "conv-...",
+    "turn_index": 2,
+    "question": "What about the finance domain?",
+    "answer": "...",
+    "citations": [ /* same Hit shape as /query */ ],
+    "model": "anthropic:claude-sonnet-4-6",
+    "elapsed_ms": 1840,
+    "no_answer": false,
+    "created_at": "2026-09-17T16:00:00Z"
+  }
 }
 ```
 
-### `POST /api/v1/conversations/{id}/suggest`
+Turns run on the same engine as `POST /api/v1/query` (RLM by default);
+when `FLYCANON_ANSWER_MODE=rag` the response carries the
+`X-Flycanon-Deprecation` header exactly like `/query`.
+
+### `GET /api/v1/conversations/{id}` -- `Conversation`
+
+Header fields plus `turns[]` (each a `ConversationTurn` as above) and
+the derived rolling `summary`.
+
+### `POST /api/v1/query/suggest` -- `SuggestResponse`
 
 ```json
 { "questions": ["What changed in v2?", "Who approved this?", "..."] }
@@ -359,34 +413,98 @@ Query: `domain`, `kind`, `include_sources=true|false`.
 
 ## Async ingest jobs
 
-### `POST /api/v1/sources:async`
+### `POST /api/v1/sources?mode=async[&callback_url=...]` -- 201 `IngestJob`
 
 Same body as `POST /api/v1/sources`. Response:
 
 ```json
-{ "job_id": "job-...", "status": "queued" }
+{
+  "id": "job-...",
+  "status": "queued",
+  "source_id": null,
+  "attempts": 0,
+  "filename": "big.pdf",
+  "content_type": "application/pdf",
+  "uri": null,
+  "actor": "user:...",
+  "correlation_id": "01HV...",
+  "callback_url": "https://hooks.example.com/flycanon",
+  "error_code": null,
+  "error_message": null,
+  "created_at": "2026-09-17T12:00:00Z",
+  "started_at": null,
+  "finished_at": null,
+  "updated_at": "2026-09-17T12:00:00Z"
+}
 ```
 
-### `GET /api/v1/ingest-jobs/{id}`
+`status` is `queued | running | succeeded | failed`. When the job
+reaches a terminal state and `callback_url` was given, the service
+POSTs (see [async-ingest.md](async-ingest.md#webhook)):
 
 ```json
 {
-  "id": "job-...",
-  "status": "running",
-  "progress": 0.42,
-  "stage": "embedding",
-  "source_id": null,
+  "job_id": "job-...",
+  "tenant_id": "acme",
+  "workspace_id": "ws-demo",
+  "status": "succeeded",
+  "source_id": "src-...",
   "error_code": null,
   "error_message": null,
-  "created_at": "2026-05-18T12:00:00Z",
-  "updated_at": "2026-05-18T12:00:18Z"
+  "occurred_at": "2026-09-17T12:00:18+00:00"
 }
 ```
+
+with `X-Correlation-Id` and, when `FLYCANON_WEBHOOK_SECRET` is set,
+`X-Flycanon-Signature: t=<unix>,v1=<hex HMAC-SHA256>` over the raw body.
+
+### `GET /api/v1/ingest-jobs/{id}` -- `IngestJob`
+
+Same shape as above; `GET /api/v1/ingest-jobs?status=&limit=&offset=`
+returns `{ "items": [...], "total": n, "limit": n, "offset": n }`.
 
 ### `GET /api/v1/ingest-jobs/{id}/stream`
 
 Server-Sent Events. See [async-ingest.md](async-ingest.md) for the
-frame format. Reconnect with `?cursor=N` to resume.
+frame format. Every `event` frame carries an `id:` line; reconnect
+with `?after_id=<id>` or the standard `Last-Event-ID` header to resume
+after the last frame seen instead of replaying the history.
+
+## Workspaces
+
+### `POST /api/v1/workspaces/{id}:purge` -- `WorkspacePurgeResult`
+
+`X-Workspace-Id` must equal the path id (`400 workspace_scope_mismatch`
+otherwise). No body. Removes every source through the full pipeline
+(vectors, chunks, stored originals, rows, audit + event each), then
+knowledge items / versions / citations / relations, candidates,
+conversations / turns, ingest jobs / events and cost events in one
+transaction, closes the workspace row and emits `WorkspaceDeleted`.
+Audit rows are kept; a `workspace.purged` row records the counts.
+
+```json
+{
+  "tenant_id": "acme",
+  "workspace_id": "ws-demo",
+  "sources_removed": 3,
+  "originals_deleted": 3,
+  "chunks_removed": 0,
+  "knowledge_items_removed": 0,
+  "knowledge_versions_removed": 0,
+  "citations_removed": 0,
+  "knowledge_relations_removed": 0,
+  "candidates_removed": 0,
+  "conversations_removed": 0,
+  "conversation_turns_removed": 0,
+  "ingest_jobs_removed": 3,
+  "ingest_job_events_removed": 9,
+  "cost_events_removed": 1,
+  "closed": true
+}
+```
+
+Idempotent: a repeat returns zero counts; `closed` is `false` when no
+`canon_workspaces` row exists (an implicit workspace that only held data).
 
 ## Quality scans
 

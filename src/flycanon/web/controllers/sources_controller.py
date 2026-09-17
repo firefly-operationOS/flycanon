@@ -37,6 +37,7 @@ import logging
 from pydantic import BaseModel, Field
 from pyfly.container import rest_controller
 from pyfly.cqrs import DefaultCommandBus, DefaultQueryBus
+from pyfly.cqrs.exceptions import CommandProcessingException
 from pyfly.kernel import ResourceNotFoundException
 from pyfly.observability.correlation import get_correlation_id
 from pyfly.web import (
@@ -44,6 +45,7 @@ from pyfly.web import (
     PathVar,
     QueryParam,
     Valid,
+    delete_mapping,
     get_mapping,
     post_mapping,
     put_mapping,
@@ -54,11 +56,13 @@ from starlette.requests import Request
 from flycanon.core.services.sources import (
     GetSourceQuery,
     ListSourcesQuery,
+    RemoveSourceCommand,
     ReplaceSourceCommand,
     SubmitSourceCommand,
 )
 from flycanon.core.services.sources.async_ingest_service import AsyncIngestService
-from flycanon.core.services.sources.url_fetcher import UrlFetcher
+from flycanon.core.services.sources.errors import SourceNotFound as ServiceSourceNotFound
+from flycanon.core.services.sources.url_fetcher import UrlFetcher, UrlFetchError
 from flycanon.interfaces.dtos.job import IngestJob
 from flycanon.interfaces.dtos.source import (
     BulkSourceResult,
@@ -69,6 +73,7 @@ from flycanon.interfaces.dtos.source import (
 )
 from flycanon.interfaces.enums import SourceKind, SourceStatus
 from flycanon.web.conventions import TenantContext, tenant_context_from_request
+from flycanon.web.conventions.exceptions import CallbackUrlNotAllowed, SourceNotFound
 
 logger = logging.getLogger(__name__)
 
@@ -195,6 +200,13 @@ class SourcesController:
         ``error_message`` so callers can inspect and re-submit.
         """
         ctx: TenantContext = tenant_context_from_request(http_request)
+        if callback_url:
+            # The callback is an outbound POST the service makes on the
+            # caller's behalf; it goes through the same host policy as a
+            # ``uri`` fetch so a tenant cannot aim it at loopback, RFC 1918
+            # space or the instance-metadata endpoint. Checked before the
+            # bytes are decoded so a refused URL costs nothing.
+            await self._vet_callback_url(callback_url)
         content, content_type, filename = await self._resolve_payload_content(payload)
         correlation_id = get_correlation_id()
         if mode.lower() == "async":
@@ -226,6 +238,13 @@ class SourcesController:
                 workspace_id=ctx.workspace_id,
             )
         )
+
+    async def _vet_callback_url(self, callback_url: str) -> None:
+        """Refuse a ``callback_url`` the outbound host policy would not dial."""
+        try:
+            await self._url_fetcher.check_url(callback_url)
+        except UrlFetchError as exc:
+            raise CallbackUrlNotAllowed(str(exc)) from exc
 
     async def _resolve_payload_content(
         self,
@@ -435,6 +454,48 @@ class SourcesController:
                 workspace_id=ctx.workspace_id,
             )
         )
+
+    @delete_mapping("/{source_id}", status_code=204)
+    async def remove_source(
+        self,
+        http_request: Request,
+        source_id: PathVar[str],
+    ) -> None:
+        """Remove a source, its indexed projections and its stored original.
+
+        The user-tier sibling of ``DELETE /api/v1/agent/sources/{id}``,
+        added in 26.7.1 because a control plane that provisions
+        workspaces and retention policies over the user tier had no way
+        to delete a document without minting itself an agent token.
+        Dispatches the same :class:`RemoveSourceCommand`: BM25 rows and
+        dense vectors are purged, chunk rows deleted, the original
+        removed from the object store (so an erased document is gone
+        from the RLM corpus too, not only from search), the row
+        deleted, an audit row written and ``SourceRemoved`` published.
+
+        Unknown ids -- including ids that exist in another workspace of
+        the same tenant -- return ``404 source_not_found``. The verb is
+        not idempotent on the wire (a second call is a 404); callers
+        that retry should treat 404 after a 204 as success.
+        """
+        ctx: TenantContext = tenant_context_from_request(http_request)
+        try:
+            await self._commands.send(
+                RemoveSourceCommand(
+                    source_id=source_id,
+                    tenant_id=ctx.tenant_id,
+                    workspace_id=ctx.workspace_id,
+                    actor=ctx.actor,
+                    correlation_id=get_correlation_id(),
+                )
+            )
+        except CommandProcessingException as exc:
+            # DefaultCommandBus wraps every handler error; unwrap the
+            # unknown-id case so it renders as the documented 404.
+            if isinstance(exc.cause, ServiceSourceNotFound):
+                raise SourceNotFound(str(exc.cause)) from exc
+            raise
+        return None
 
     @get_mapping("")
     async def list_sources(

@@ -15,12 +15,26 @@ backed by the durable Postgres outbox by default
 
 ## flycanon.ingest
 
+Since 26.7.1 every payload on this topic carries `tenant_id` and
+`workspace_id`, so a consumer on a shared broker can route by tenant
+without a database lookup (before, only the audit topic did).
+
 | Event type | Payload |
 |------------|---------|
-| `SourceIngested`         | `source_id`, `kind`, `content_sha256`, `n_chunks` |
-| `SourceReplaced`         | `source_id`, `kind`, `content_sha256`, `n_chunks` (emitted by `PUT /api/v1/sources/{id}`) |
-| `SourceIngestionFailed`  | `source_id`, `kind`, `code`, `message` |
-| `IngestRequested`        | `job_id`, `payload` (consumed by the async-ingest worker -- see [async-ingest.md](async-ingest.md)) |
+| `SourceIngested`         | `source_id`, `tenant_id`, `workspace_id`, `kind`, `content_sha256`, `n_chunks` |
+| `SourceReplaced`         | `source_id`, `tenant_id`, `workspace_id`, `kind`, `content_sha256`, `n_chunks` (emitted by `PUT /api/v1/sources/{id}`) |
+| `SourceRemoved`          | `source_id`, `tenant_id`, `workspace_id`, `kind`, `content_sha256`, `original_deleted` (emitted by `DELETE /api/v1/sources/{id}`, the agent-tier DELETE and `:purge`) |
+| `SourceIngestionFailed`  | `source_id`, `tenant_id`, `workspace_id`, `kind`, `code`, `message` |
+| `IngestSourceRequested`  | `job_id`, `tenant_id`, `workspace_id` (consumed by the async-ingest worker -- see [async-ingest.md](async-ingest.md)) |
+| `IngestSourceFinished`   | `job_id`, `source_id`, `n_chunks`, `tenant_id`, `workspace_id` |
+| `IngestSourceFailed`     | `job_id`, `code`, `message`, `tenant_id`, `workspace_id` |
+
+Consumer groups: the API process runs on `flycanon-api` and the
+worker on `flycanon-workers` by default. pyfly subscribes a
+cache-invalidation bridge on `*` in every process, so two processes on
+one group would race for one cursor and the worker would miss jobs --
+keep them apart (`FLYCANON_EDA_GROUP` only to scale replicas of the
+same role).
 
 ## flycanon.knowledge
 

@@ -20,10 +20,13 @@ Three endpoints:
 * ``GET /api/v1/ingest-jobs`` -- paginated listing, optionally filtered
   by status.
 * ``GET /api/v1/ingest-jobs/{id}/stream`` -- Server-Sent Events stream of
-  per-stage progress events. Each frame is ``data:`` + a JSON
-  blob carrying ``{id, stage, message, payload, occurred_at}``.
-  The stream closes when the job hits a terminal status
-  (``succeeded`` / ``failed``).
+  per-stage progress events. Each ``event`` frame carries an SSE
+  ``id:`` line (the monotonic event id) and a ``data:`` JSON blob
+  ``{id, stage, message, payload, occurred_at}``. The stream closes
+  when the job hits a terminal status (``succeeded`` / ``failed``).
+  A reconnecting client resumes after the last event it saw with
+  ``?after_id=<id>`` or the standard ``Last-Event-ID`` request header
+  (``EventSource`` sends the latter automatically on reconnect).
 """
 
 from __future__ import annotations
@@ -105,18 +108,30 @@ class JobsController:
         http_request: Request,
         job_id: PathVar[str],
         poll_interval_ms: QueryParam[int] = 500,
+        after_id: QueryParam[int] = 0,
     ) -> StreamingResponse:
         """SSE stream of progress events.
 
-        Each ``data:`` frame is a JSON blob. The stream closes when
-        the job reaches a terminal state. Implementation polls the
+        Each ``event`` frame carries ``id:`` + ``data:``; ``status``
+        frames carry ``data:`` only. The stream closes when the job
+        reaches a terminal state. Implementation polls the
         ``canon_ingest_job_events`` table (cursor = max event id
         seen) and the ``canon_ingest_jobs.status`` column at
         ``poll_interval_ms`` cadence -- this avoids holding a
         long-lived DB connection per stream and works under
         pgbouncer transaction-mode pooling.
+
+        Resume: ``after_id`` (query) or ``Last-Event-ID`` (header)
+        seeds the cursor so a reconnect replays only events with a
+        greater id. Without it the cursor started at ``None`` and every
+        reconnect replayed the whole history, which is what
+        ``docs/api-reference.md`` promised ``after_id`` would prevent
+        long before the parameter existed (26.7.1 closes that gap). The
+        query parameter wins when both are present; a value of ``0``
+        (the default) means "from the beginning".
         """
         ctx: TenantContext = tenant_context_from_request(http_request)
+        resume_from = resolve_resume_cursor(after_id, http_request.headers.get("Last-Event-ID"))
         # First check the job exists -- 404 propagates as a proper
         # HTTP error before the streaming response body opens.
         job = await self._queries.query(
@@ -130,7 +145,7 @@ class JobsController:
             raise ResourceNotFoundException(f"ingest job {job_id!r} not found")
 
         async def _stream() -> AsyncIterator[bytes]:
-            cursor: int | None = None
+            cursor: int | None = resume_from
             interval = max(0.05, min(5.0, poll_interval_ms / 1000.0))
             terminal = {"succeeded", "failed"}
             # Open with a snapshot of the current state so the
@@ -171,6 +186,7 @@ class JobsController:
                             "payload": event.payload,
                             "occurred_at": event.occurred_at.isoformat() if event.occurred_at else None,
                         },
+                        event_id=event.id,
                     )
                 current = await self._queries.query(
                     GetIngestJobQuery(
@@ -207,12 +223,38 @@ class JobsController:
         )
 
 
-def _sse_event(event_type: str, data: dict) -> bytes:
+def resolve_resume_cursor(after_id: int, last_event_id: str | None) -> int | None:
+    """Pick the resume cursor from ``?after_id=`` or ``Last-Event-ID``.
+
+    ``after_id > 0`` wins. Otherwise a parseable, positive
+    ``Last-Event-ID`` is used -- browsers' ``EventSource`` sends the
+    ``id:`` of the last frame it received on automatic reconnect, so
+    honouring it gives resume-for-free to every browser client without
+    any URL rewriting. Anything else (absent, ``0``, negative, not an
+    integer) means "from the beginning" and returns ``None``.
+    """
+    if after_id and after_id > 0:
+        return int(after_id)
+    if last_event_id:
+        try:
+            parsed = int(last_event_id.strip())
+        except ValueError:
+            return None
+        if parsed > 0:
+            return parsed
+    return None
+
+
+def _sse_event(event_type: str, data: dict, *, event_id: int | None = None) -> bytes:
     """Format a single SSE frame.
 
     The ``event:`` line lets EventSource consumers route distinct
     frame types to separate handlers
-    (``es.addEventListener('status', ...)``); the ``data:`` line
-    carries the JSON payload.
+    (``es.addEventListener('status', ...)``); the optional ``id:`` line
+    is what the browser echoes back as ``Last-Event-ID`` on reconnect;
+    the ``data:`` line carries the JSON payload.
     """
-    return f"event: {event_type}\ndata: {json.dumps(data)}\n\n".encode()
+    head = f"event: {event_type}\n"
+    if event_id is not None:
+        head += f"id: {event_id}\n"
+    return f"{head}data: {json.dumps(data)}\n\n".encode()

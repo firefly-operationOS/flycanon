@@ -106,7 +106,13 @@ required for production:
 | Provider API keys | `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `VOYAGEAI_API_KEY`, `COHERE_API_KEY`, ... -- read by `fireflyframework-agentic` from env at boot. **`ANTHROPIC_API_KEY` is required at runtime in the default RLM mode** (the RLM engine calls the Anthropic Messages API directly). | As needed for your provider mix. |
 | `FLYCANON_VECTOR_STORE` | Dense backend: `pgvector` (default), `qdrant` (`--extra qdrant`), or `chroma` (`--extra chroma`). | Defaults to `pgvector`. |
 | `FLYCANON_EDA_ADAPTER` | `postgres` (default -- durable outbox + LISTEN/NOTIFY), `memory`, `redis`, `kafka`. | Defaults to `postgres`. |
-| `FLYCANON_API_KEYS` | Comma-separated static API keys. When set, every `/api/v1/*` request requires `Authorization: Bearer <key>`. | Optional. |
+| `FLYCANON_API_KEYS` | Comma-separated static API keys. When set, every `/api/v1/*` request (except `GET /api/v1/version`) and the admin dashboard require `X-API-Key: <key>` or `Authorization: ApiKey <key>`; agent-tier requests carrying `X-Agent-Token` are exempt. Empty = open user tier (logged at boot). | **Yes in production.** |
+| `FLYCANON_ADMIN_DATABASE_URL` | DSN of the BYPASSRLS role (`flycanon_admin`) used for the tenant-wide `GET /api/v1/workspaces` listing. Empty = reuse `FLYCANON_DATABASE_URL`, which under the `flycanon_app` role collapses the listing to the caller's own workspace. | Yes when the API runs as `flycanon_app`. |
+| `FLYCANON_WEBHOOK_SECRET` | HMAC-SHA256 secret for the `X-Flycanon-Signature` header on async-ingest callbacks (`?callback_url=`). Empty = unsigned callbacks (logged at boot). Same value on api and worker. | Yes when `callback_url` is used. |
+| `FLYCANON_URL_FETCH_ALLOW_PRIVATE` | `true` disables the outbound host denylist (loopback / private / link-local) for `uri` fetches and `callback_url`. Only for dev stacks whose origins live on the same private network. | Defaults to `false`; keep it there. |
+| `FLYCANON_ADMIN_REQUIRE_AUTH` | `false` opens the admin dashboard API without a key (loopback dev only). | Defaults to `true`. |
+| `FLYCANON_EDA_GROUP` | Postgres-outbox consumer group. The API defaults to `flycanon-api`, `flycanon worker` to `flycanon-workers`; they must never share one (see [async-ingest.md](async-ingest.md)). | Leave unset. |
+| `FLYCANON_OBJECT_STORE_LOCALFS_ROOT` | Directory for stored originals with the `localfs` backend. The image sets `/app/canon-data/objects` (volume-backed, writable by the `canon` user); the checkout default `./var/objects` is relative to the working directory. | Set only to relocate. |
 | `FLYCANON_CORS_ORIGINS` | Comma-separated origins for `Access-Control-Allow-Origin`. | Optional. |
 
 For a complete list with defaults and inline docs, run:
@@ -120,7 +126,7 @@ docker run --rm ghcr.io/firefly-operationos/flycanon:latest cat /app/env_templat
 ## Answer mode (RLM default / RAG deprecated)
 
 `FLYCANON_ANSWER_MODE` selects the engine for the non-streaming answer
-path (`/api/v1/query`, `/api/v1/query:stream`, and the agent-tier
+path (`/api/v1/query`, `/api/v1/query/stream`, `/api/v1/conversations/{id}/turn`, and the agent-tier
 equivalents). `rlm` is the default; `rag` is opt-in and deprecated. Any
 value other than `rag` is normalised to `rlm`.
 
@@ -333,7 +339,11 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA public
 ```
 
 Wire `FLYCANON_DATABASE_URL` at `flycanon_app` for the `serve` role
-and at `flycanon_admin` for the `migrate` + `worker` roles. See
+and at `flycanon_admin` for the `migrate` + `worker` roles, and give
+the `serve` role `FLYCANON_ADMIN_DATABASE_URL` at `flycanon_admin` as
+well: the tenant-wide `GET /api/v1/workspaces` listing runs on that
+second engine because the `canon_workspaces` policy limits the request
+engine to the caller's own workspace. See
 [architecture.md -> Row-level security](architecture.md#deployment-requirement)
 for the rationale; the integration suite
 (`tests/integration/test_rls_isolation.py`) exercises the
@@ -408,15 +418,21 @@ swap.
 
 ## Authentication
 
-flycanon ships two complementary auth modes; both come from pyfly:
+Three credentials, enforced by flycanon itself (since 26.7.1;
+earlier releases parsed `FLYCANON_API_KEYS` and enforced nothing):
 
-| Mode | When | Config |
-|------|------|--------|
-| **Static API keys** | The simplest production gate. | `FLYCANON_API_KEYS=key1,key2,...` -- callers send `Authorization: Bearer <key>`. |
-| **OAuth2 resource server** | Integrating with an existing IdP (Keycloak / Auth0 / Cognito / ...). | Set `pyfly.security.oauth2.resource-server.enabled=true` plus the provider's issuer URI in `pyfly.yaml`. |
+| Credential | Where | Gate |
+|------------|-------|------|
+| **Platform API key** -- `FLYCANON_API_KEYS=key1,key2,...` | `X-API-Key: <key>` or `Authorization: ApiKey <key>` | `ApiKeyMiddleware` on every `/api/v1/*` route except `GET /api/v1/version`, and on the admin dashboard. Missing -> `401 missing_api_key`, unknown -> `401 invalid_api_key`, both RFC 7807. Constant-time comparison; several keys allow rotation without downtime. |
+| **Agent token** -- minted by `POST /api/v1/agent-tokens` | `X-Agent-Token: agt_...` | Verified per request on `/api/v1/agent/*` (tenant, allowlist, scope, expiry, rate limit). A request carrying it does not need the platform key. |
+| **Operator JWT** -- `Authorization: Bearer <jwt>` | optional | Decoded without signature verification for the `actor` label and the `tenant` claim cross-check only. Not a gate: terminate and verify JWTs at a gateway if you need identity-based auth. |
 
-Default deployment: both off (open). Production deployments **must**
-enable at least one before exposing `/api/v1/*` to the network.
+Default deployment: no key (open user tier). The boot log states the
+mode (`api-key gate ENABLED: n key(s)` / `api-key gate DISABLED`).
+Production deployments **must** set `FLYCANON_API_KEYS` (or front the
+service with a verifying gateway) before exposing `/api/v1/*` to any
+network other tenants can reach, and should set
+`FLYCANON_WEBHOOK_SECRET` if `callback_url` is used.
 
 ---
 

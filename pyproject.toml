@@ -2,7 +2,7 @@
 name = "flycanon"
 # CalVer YY.MM.PP -- bumped per release. Note that PEP 440 normalises
 # ``26.05.04`` -> ``26.5.4`` in the built wheel filename.
-version = "26.7.0"
+version = "26.7.1"
 description = "Operational Knowledge Repository -- versioned, provenance-tracked canonical knowledge with hybrid retrieval and RAG, exposed as a standalone HTTP microservice over fireflyframework-pyfly and -agentic. Part of Firefly OperationOS, platform-agnostic by design."
 readme = "README.md"
 requires-python = ">=3.13,<3.14"
@@ -17,7 +17,7 @@ dependencies = [
     # Firefly Framework runtime (DI, CQRS, EDA, web, observability, resilience,
     # actuator, data-relational, security). Pulled in with the extras we use
     # so a fresh ``uv sync`` is enough to boot the full stack.
-    "pyfly[fastapi,observability,security,data-relational,postgresql,eda,redis,client,scheduling,cli]>=26.6.113",
+    "pyfly[fastapi,observability,security,data-relational,postgresql,eda,redis,client,scheduling,cli]>=26.9.4",
 
     # GenAI metaframework -- FireflyAgent over pydantic-ai, the binary
     # normalisation stack (``[binary]`` -> ``content.binary``) and the
@@ -25,7 +25,7 @@ dependencies = [
     # ChunkHit / HybridRetriever / reciprocal_rank_fusion -- lives in
     # ``core/services/retrieval/fusion.py``. Document intake runs on
     # flycanon's own per-format SourceLoaders.
-    "fireflyframework-agentic[rest,security,redis,openai-embeddings,binary,vectorstores-pgvector]>=26.5.32",
+    "fireflyframework-agentic[rest,security,redis,openai-embeddings,binary,vectorstores-pgvector]>=26.6.14",
 
     # Source intake -- the high-fidelity per-format SourceLoaders. Binary
     # normalisation (HEIC / SVG / TIFF rasterisation, archive + email
@@ -159,11 +159,14 @@ override-dependencies = [
 
 [tool.uv.sources]
 # Both framework deps are consumed from their published git tags so fresh
-# clones / CI resolve them without any sibling path. agentic v26.05.32 adds the
-# pgvector adapter + tenant-scoped vector-store layer flycanon's multi-backend
-# retrieval depends on.
-pyfly = { git = "https://github.com/fireflyframework/fireflyframework-pyfly.git", tag = "v26.06.113" }
-fireflyframework-agentic = { git = "https://github.com/fireflyframework/fireflyframework-agentic.git", tag = "v26.05.32" }
+# clones / CI resolve them without any sibling path; uv.lock pins the exact
+# commits behind the tags. 26.7.1 moved to pyfly v26.09.04 / agentic
+# v26.06.14 (the pins the dworkers programme runs on); the suite passed
+# unchanged on them. Note pyfly v26.09 subscribes a CQRS cache-invalidation
+# bridge on the EDA bus in every process -- see the ``pyfly.eda.group``
+# comment in pyfly.yaml for the consumer-group split that requires.
+pyfly = { git = "https://github.com/fireflyframework/fireflyframework-pyfly.git", tag = "v26.09.04" }
+fireflyframework-agentic = { git = "https://github.com/fireflyframework/fireflyframework-agentic.git", tag = "v26.06.14" }
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/flycanon"]

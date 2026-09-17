@@ -101,6 +101,7 @@ from flycanon_sdk._models import (
     SubjectCostRow,
     SubmitSourceJsonPayload,
     SuggestionsResponse,
+    SuggestRequest,
     SupersedeKnowledgeRequest,
     TaxonomyNode,
     TaxonomyTree,
@@ -111,13 +112,14 @@ from flycanon_sdk._models import (
     WorkspaceCreate,
     WorkspaceCreated,
     WorkspaceDeleted,
+    WorkspacePurgeResult,
     WorkspaceSpec,
     WorkspaceSummary,
     WorkspaceUpdate,
     WorkspaceUpdated,
 )
 
-__version__ = "26.5.7"
+__version__ = "26.7.1"
 
 __all__ = [
     "CANON_WORKSPACES_TOPIC",
@@ -201,6 +203,7 @@ __all__ = [
     "SubjectCostRow",
     "SubmitSourceJsonPayload",
     "SuggestionsResponse",
+    "SuggestRequest",
     "SupersedeKnowledgeRequest",
     "TaxonomyNode",
     "TaxonomyTree",
@@ -212,6 +215,7 @@ __all__ = [
     "WorkspaceCreate",
     "WorkspaceCreated",
     "WorkspaceDeleted",
+    "WorkspacePurgeResult",
     "WorkspaceSpec",
     "WorkspaceSummary",
     "WorkspaceUpdate",

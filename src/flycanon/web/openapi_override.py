@@ -29,6 +29,16 @@ a custom ``app.openapi`` callable that:
 3. Enriches the result with rich global tags (with business +
    technical descriptions) and the OpenAPI ``info`` block we want
    Swagger / ReDoc to display.
+4. Declares the wire contract pyfly's introspector cannot see because
+   it lives in ``Request.headers`` reads rather than in signatures:
+   the ``securitySchemes`` (platform API key in two header forms,
+   agent token) and the mandatory / optional headers (``X-Tenant-Id``,
+   ``X-Workspace-Id``, ``X-Correlation-Id``, ``Idempotency-Key``,
+   ``X-Agent-Token``) attached per operation. Until 26.7.1 the
+   document listed none of them, so a client generated from it
+   (a PHP control plane, for instance) sent bare requests and got
+   ``400 missing_tenant_context`` on its first call. The rules are
+   in :func:`_security_for` / :func:`_header_parameters_for`.
 """
 
 from __future__ import annotations
@@ -117,6 +127,162 @@ TAG_DESCRIPTIONS: dict[str, str] = {
 }
 
 
+#: Operations that need neither tenant headers nor a credential.
+PUBLIC_OPERATIONS: frozenset[tuple[str, str]] = frozenset({("get", "/api/v1/version")})
+AGENT_PREFIX = "/api/v1/agent/"
+_MUTATING = frozenset({"post", "put", "patch", "delete"})
+
+SECURITY_SCHEMES: dict[str, dict[str, Any]] = {
+    "ApiKeyHeader": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "X-API-Key",
+        "description": (
+            "Platform API key from ``FLYCANON_API_KEYS``. Required on every "
+            "``/api/v1/*`` route (except ``GET /api/v1/version``) and on the "
+            "admin dashboard whenever at least one key is configured; when "
+            "the setting is empty the user tier is open and the header is "
+            "ignored. Missing -> ``401 missing_api_key``; unknown -> "
+            "``401 invalid_api_key``."
+        ),
+    },
+    "ApiKeyAuthorization": {
+        "type": "http",
+        "scheme": "ApiKey",
+        "description": (
+            "The same platform key carried as ``Authorization: ApiKey <key>`` "
+            "for clients that can only set the Authorization header. "
+            "``X-API-Key`` wins when both are present."
+        ),
+    },
+    "AgentToken": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "X-Agent-Token",
+        "description": (
+            "Tenant-scoped agent token (``agt_<8hex>_<32hex>``) minted by "
+            "``POST /api/v1/agent-tokens``. The credential of the "
+            "``/api/v1/agent/*`` tier: verified per request against the "
+            "tenant in ``X-Tenant-Id``, the workspace allowlist and the "
+            "route scope. An agent-tier request carrying it does not need "
+            "the platform key."
+        ),
+    },
+}
+
+#: Reusable header parameters (``#/components/parameters/<name>``).
+HEADER_PARAMETERS: dict[str, dict[str, Any]] = {
+    "XTenantId": {
+        "name": "X-Tenant-Id",
+        "in": "header",
+        "required": True,
+        "schema": {"type": "string", "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$"},
+        "description": (
+            "Tenant slug that scopes every row the request may see or write. "
+            "Missing or malformed -> ``400 missing_tenant_context``."
+        ),
+    },
+    "XWorkspaceId": {
+        "name": "X-Workspace-Id",
+        "in": "header",
+        "required": True,
+        "schema": {"type": "string", "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$"},
+        "description": (
+            "Workspace slug within the tenant. Required on every tenant route "
+            "for header uniformity, including the workspace CRUD routes where "
+            "the path id is authoritative (``:purge`` demands they agree)."
+        ),
+    },
+    "XCorrelationId": {
+        "name": "X-Correlation-Id",
+        "in": "header",
+        "required": False,
+        "schema": {"type": "string"},
+        "description": (
+            "Caller-supplied correlation id echoed into audit rows, cost "
+            "events and the async-ingest webhook. A uuid4 hex is generated "
+            "when absent."
+        ),
+    },
+    "IdempotencyKey": {
+        "name": "Idempotency-Key",
+        "in": "header",
+        "required": True,
+        "schema": {"type": "string", "maxLength": 255},
+        "description": (
+            "Mandatory on every agent-tier POST / PUT / DELETE "
+            "(``400 missing_idempotency_key`` otherwise). A replay with the "
+            "same key within the store TTL returns the original response "
+            "without re-dispatching; keys are namespaced per "
+            "``(tenant, route scope)``."
+        ),
+    },
+}
+
+
+def _security_for(method: str, path: str) -> list[dict[str, list[str]]]:
+    """Security requirement alternatives for one operation.
+
+    * public operations: none;
+    * agent tier: the agent token, or either platform-key form;
+    * everything else: either platform-key form.
+
+    Each entry is one alternative (OpenAPI ``security`` is an OR list),
+    which is exactly how :class:`ApiKeyMiddleware` treats them.
+    """
+    if (method, path) in PUBLIC_OPERATIONS:
+        return []
+    platform = [{"ApiKeyHeader": []}, {"ApiKeyAuthorization": []}]
+    if path.startswith(AGENT_PREFIX):
+        return [{"AgentToken": []}, *platform]
+    return platform
+
+
+def _header_parameters_for(method: str, path: str) -> list[dict[str, str]]:
+    """``$ref`` list of the header parameters one operation reads."""
+    if (method, path) in PUBLIC_OPERATIONS:
+        return []
+    refs = ["XTenantId", "XWorkspaceId", "XCorrelationId"]
+    if path.startswith(AGENT_PREFIX) and method in _MUTATING:
+        refs.append("IdempotencyKey")
+    return [{"$ref": f"#/components/parameters/{name}"} for name in refs]
+
+
+def apply_wire_contract(spec: dict[str, Any]) -> dict[str, Any]:
+    """Add ``securitySchemes``, reusable header parameters and per-operation refs.
+
+    Idempotent: a header already listed on an operation (by name) is
+    not added twice, so re-running over a cached spec is safe.
+    """
+    components = spec.setdefault("components", {})
+    components.setdefault("securitySchemes", {}).update(SECURITY_SCHEMES)
+    components.setdefault("parameters", {}).update(HEADER_PARAMETERS)
+    for path, operations in spec.get("paths", {}).items():
+        for method, operation in operations.items():
+            if not isinstance(operation, dict) or method.lower() not in {
+                "get",
+                "post",
+                "put",
+                "patch",
+                "delete",
+                "head",
+                "options",
+            }:
+                continue
+            verb = method.lower()
+            security = _security_for(verb, path)
+            if security:
+                operation["security"] = security
+            params: list[dict[str, Any]] = operation.setdefault("parameters", [])
+            present = {p.get("$ref") for p in params if isinstance(p, dict)}
+            for ref in _header_parameters_for(verb, path):
+                if ref["$ref"] not in present:
+                    params.append(ref)
+            if not params:
+                operation.pop("parameters", None)
+    return spec
+
+
 def install_openapi(
     app: FastAPI,
     context: ApplicationContext,
@@ -174,6 +340,10 @@ def install_openapi(
                 {"url": "/", "description": "This service"},
             ],
         )
+
+        # Headers + credentials the introspector cannot see (they are
+        # read off ``Request.headers`` inside the controllers).
+        apply_wire_contract(spec)
 
         app.openapi_schema = spec
         logger.info(

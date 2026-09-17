@@ -33,9 +33,9 @@ user-tier :class:`SourcesController` dispatches
 (:class:`SubmitSourceCommand`, :class:`ReplaceSourceCommand`,
 :class:`GetSourceQuery`) -- the only delta is the auth layer
 (``X-Agent-Token`` replaces the operator JWT) and the mandatory
-idempotency key on the mutating verbs. ``DELETE`` has no user-tier
-sibling: removal is an agent-tier (control-plane) capability only,
-dispatched via :class:`RemoveSourceCommand`.
+idempotency key on the mutating verbs. ``DELETE`` dispatches
+:class:`RemoveSourceCommand`, the same command behind the user-tier
+``DELETE /api/v1/sources/{source_id}`` added in 26.7.1.
 
 Pyfly's ``@rest_controller`` does NOT resolve FastAPI ``Depends()``
 defaults, so we inject the raw Starlette ``Request`` and run
@@ -292,9 +292,11 @@ class AgentSourcesController:
         ``400 missing_idempotency_key``. Dispatches
         :class:`RemoveSourceCommand` -> ``IntakeService.remove``:
         the BM25 rows + dense vectors are purged, the chunk rows are
-        deleted, and the source row is removed within the verified
-        tenant/workspace scope. Object-store originals are NOT
-        touched. Unknown ids return ``404 source_not_found``.
+        deleted, the stored original is removed from the object store
+        (since 26.7.1 -- before that an "erased" document stayed
+        readable by the RLM corpus), and the source row is removed
+        within the verified tenant/workspace scope. Unknown ids return
+        ``404 source_not_found``.
 
         Replays dedup under the route-specific
         ``agent.sources:delete`` scope: a retried DELETE with the

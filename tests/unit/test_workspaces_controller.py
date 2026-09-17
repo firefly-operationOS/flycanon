@@ -107,12 +107,63 @@ def event_publisher(
     return pub
 
 
+class _RecordingIntake:
+    """Stand-in for :class:`IntakeService` -- records removals and deletes the row.
+
+    The purge service must drive every source through the real removal
+    pipeline (vectors, chunks, original, row, audit, event). Here the
+    pipeline is the unit under test's collaborator, so the stub only
+    proves the service called it once per source with the right scope
+    and mimics the one side effect the service relies on -- the row
+    disappearing -- by deleting it through the repository.
+    """
+
+    def __init__(self, source_repo) -> None:
+        self._sources = source_repo
+        self.removed: list[tuple[str, str, str]] = []
+
+    async def remove(self, *, source_id, tenant_id, workspace_id, actor=None, correlation_id=None):
+        self.removed.append((source_id, tenant_id, workspace_id))
+        row = await self._sources.get(source_id, tenant_id=tenant_id, workspace_id=workspace_id)
+        assert row is not None
+        await self._sources.delete(row)
+
+
+class _RecordingAudit:
+    def __init__(self) -> None:
+        self.records: list[dict[str, Any]] = []
+
+    async def record(self, **kwargs: Any) -> None:
+        self.records.append(kwargs)
+
+
+@pytest.fixture
+def purge_parts(engine, session_factory, workspace_repo, event_publisher):
+    from flycanon.core.services.workspaces import WorkspacePurgeService
+    from flycanon.models.repositories.scope_purge_repository import ScopePurgeRepository
+    from flycanon.models.repositories.source_repository import SourceRepository
+
+    source_repo = SourceRepository(session_factory, engine=engine)
+    intake = _RecordingIntake(source_repo)
+    audit = _RecordingAudit()
+    service = WorkspacePurgeService(
+        intake=intake,  # type: ignore[arg-type]
+        source_repository=source_repo,
+        purge_repository=ScopePurgeRepository(session_factory, engine=engine),
+        workspace_repository=workspace_repo,
+        audit=audit,  # type: ignore[arg-type]
+        event_publisher=event_publisher,
+    )
+    return SimpleNamespace(service=service, intake=intake, audit=audit, source_repo=source_repo)
+
+
 @pytest.fixture
 def controller(
     workspace_repo: WorkspaceRepository,
     event_publisher: WorkspaceEventPublisher,
+    purge_parts,
 ) -> WorkspacesController:
-    return WorkspacesController(workspace_repo, event_publisher)
+    return WorkspacesController(workspace_repo, event_publisher, purge_parts.service)
 
 
 def _request(tenant_id: str = "acme", workspace_id: str = "default") -> object:
@@ -371,3 +422,264 @@ class TestLifecycleEvents:
         with pytest.raises(WorkspaceNotFound):
             await controller.close(_request(tenant_id="acme"), "ws-missing")
         assert captured_events == []
+
+
+# ---------------------------------------------------------------------------
+# POST /{id}:purge (26.7.1)
+# ---------------------------------------------------------------------------
+
+
+async def _seed_scope(session_factory, *, tenant_id: str, workspace_id: str, suffix: str) -> None:
+    """Populate one scope with a row in every table the purge sweeps."""
+    from flycanon.models.entities.candidate import CandidateRow
+    from flycanon.models.entities.conversation import ConversationRow, ConversationTurnRow
+    from flycanon.models.entities.cost_event import CostEventRow
+    from flycanon.models.entities.ingest_job import IngestJobEventRow, IngestJobRow
+    from flycanon.models.entities.knowledge_chunk import KnowledgeChunkRow
+    from flycanon.models.entities.knowledge_item import KnowledgeItemRow
+    from flycanon.models.entities.knowledge_version import KnowledgeVersionRow
+    from flycanon.models.entities.source import SourceRow
+
+    scope = {"tenant_id": tenant_id, "workspace_id": workspace_id}
+    async with session_factory() as session:
+        session.add(
+            SourceRow(
+                id=f"src-{suffix}",
+                kind="markdown",
+                status="ingested",
+                filename="f.md",
+                content_type="text/markdown",
+                content_sha256=suffix.ljust(64, "0"),
+                content_bytes=10,
+                n_chunks=1,
+                metadata_json={},
+                object_store_key=f"flycanon/{tenant_id}/{workspace_id}/sources/src-{suffix}.md",
+                **scope,
+            )
+        )
+        session.add(
+            KnowledgeChunkRow(
+                id=f"chunk-{suffix}",
+                source_id=f"src-{suffix}",
+                index_in_source=0,
+                total_chunks=1,
+                content="hello",
+                **scope,
+            )
+        )
+        session.add(
+            KnowledgeItemRow(
+                id=f"ki-{suffix}",
+                status="published",
+                current_version=1,
+                title="t",
+                domain="legal",
+                jurisdiction="ES",
+                tags_json=[],
+                **scope,
+            )
+        )
+        session.add(
+            KnowledgeVersionRow(
+                id=f"kv-{suffix}",
+                knowledge_item_id=f"ki-{suffix}",
+                version=1,
+                status="published",
+                title="t",
+                summary="s",
+                body="b",
+                domain="legal",
+                jurisdiction="ES",
+                tags_json=[],
+                **scope,
+            )
+        )
+        session.add(
+            CandidateRow(
+                id=f"cand-{suffix}",
+                status="proposed",
+                source_id=f"src-{suffix}",
+                title="c",
+                summary="s",
+                body="b",
+                domain="legal",
+                jurisdiction="ES",
+                tags_json=[],
+                citations_json=[],
+                score=0.5,
+                rationale=None,
+                actor=None,
+                **scope,
+            )
+        )
+        session.add(
+            ConversationRow(
+                id=f"conv-{suffix}",
+                title="conv",
+                actor=None,
+                model="anthropic:claude-sonnet-4-6",
+                metadata_json={},
+                **scope,
+            )
+        )
+        session.add(
+            ConversationTurnRow(
+                conversation_id=f"conv-{suffix}",
+                turn_index=0,
+                question="q",
+                answer="a",
+                citations_json=[],
+                model="m",
+                elapsed_ms=1,
+                no_answer=False,
+                **scope,
+            )
+        )
+        session.add(
+            IngestJobRow(
+                id=f"job-{suffix}",
+                status="succeeded",
+                source_id=f"src-{suffix}",
+                attempts=1,
+                filename="f.md",
+                content_type="text/markdown",
+                uri=None,
+                content_sha256=None,
+                actor=None,
+                correlation_id=None,
+                callback_url=None,
+                metadata_json={},
+                error_code=None,
+                error_message=None,
+                **scope,
+            )
+        )
+        session.add(
+            IngestJobEventRow(
+                job_id=f"job-{suffix}",
+                stage="queued",
+                message="m",
+                payload_json={},
+                **scope,
+            )
+        )
+        session.add(
+            CostEventRow(
+                agent_name="flycanon-rlm-answerer",
+                model="m",
+                input_tokens=1,
+                output_tokens=1,
+                total_tokens=2,
+                latency_ms=1,
+                subject_kind="answer",
+                subject_id=f"conv-{suffix}",
+                **scope,
+            )
+        )
+        await session.commit()
+
+
+async def _count_rows(session_factory, mapped, *, tenant_id: str, workspace_id: str) -> int:
+    from sqlalchemy import func, select
+
+    async with session_factory() as session:
+        stmt = (
+            select(func.count())
+            .select_from(mapped)
+            .where(mapped.tenant_id == tenant_id, mapped.workspace_id == workspace_id)
+        )
+        return int((await session.execute(stmt)).scalar() or 0)
+
+
+class TestPurge:
+    @pytest.mark.asyncio
+    async def test_purge_erases_every_scoped_table_and_closes(
+        self,
+        controller: WorkspacesController,
+        purge_parts,
+        session_factory,
+        captured_events: list[WorkspaceEventBase],
+    ) -> None:
+        """Every table in the scope is emptied, the neighbour scope is untouched."""
+        from flycanon.models.entities.candidate import CandidateRow
+        from flycanon.models.entities.conversation import ConversationRow
+        from flycanon.models.entities.knowledge_item import KnowledgeItemRow
+        from flycanon.models.entities.source import SourceRow
+
+        await controller.create(
+            _request(tenant_id="acme", workspace_id="ws-a"),
+            WorkspaceCreate(id="ws-a", name="A", status=WorkspaceStatus.active),
+        )
+        await _seed_scope(session_factory, tenant_id="acme", workspace_id="ws-a", suffix="a1")
+        await _seed_scope(session_factory, tenant_id="acme", workspace_id="ws-b", suffix="b1")
+        captured_events.clear()
+
+        result = await controller.purge(_request(tenant_id="acme", workspace_id="ws-a"), "ws-a")
+
+        assert result.tenant_id == "acme" and result.workspace_id == "ws-a"
+        assert result.sources_removed == 1
+        assert result.originals_deleted == 1
+        assert result.knowledge_items_removed == 1
+        assert result.knowledge_versions_removed == 1
+        assert result.candidates_removed == 1
+        assert result.conversations_removed == 1
+        assert result.conversation_turns_removed == 1
+        assert result.ingest_jobs_removed == 1
+        assert result.ingest_job_events_removed == 1
+        assert result.cost_events_removed == 1
+        # The chunk was NOT removed by the stubbed intake, so the sweep
+        # must have caught it -- proving the sweep covers orphaned chunks.
+        assert result.chunks_removed == 1
+        assert result.closed is True
+
+        # Sources went through the removal pipeline with the right scope.
+        assert purge_parts.intake.removed == [("src-a1", "acme", "ws-a")]
+        # The neighbour workspace of the same tenant is intact.
+        for mapped in (SourceRow, KnowledgeItemRow, CandidateRow, ConversationRow):
+            assert await _count_rows(session_factory, mapped, tenant_id="acme", workspace_id="ws-a") == 0
+            assert await _count_rows(session_factory, mapped, tenant_id="acme", workspace_id="ws-b") == 1
+        # Closed + lifecycle event + audit trail.
+        row = await controller.get(_request(tenant_id="acme", workspace_id="ws-a"), "ws-a")
+        assert row.status == WorkspaceStatus.closed and row.closed_at is not None
+        assert [type(e) for e in captured_events] == [WorkspaceDeleted]
+        audit = purge_parts.audit.records[-1]
+        assert audit["event_type"] == "workspace.purged"
+        assert audit["payload"]["sources_removed"] == 1 and audit["payload"]["closed"] is True
+
+    @pytest.mark.asyncio
+    async def test_purge_is_idempotent_and_tolerates_implicit_workspace(
+        self,
+        controller: WorkspacesController,
+        session_factory,
+        purge_parts,
+    ) -> None:
+        """No canon_workspaces row: data is still purged, ``closed`` is False, and a repeat is all zeros."""
+        await _seed_scope(session_factory, tenant_id="acme", workspace_id="ws-implicit", suffix="i1")
+
+        first = await controller.purge(_request(tenant_id="acme", workspace_id="ws-implicit"), "ws-implicit")
+        assert first.sources_removed == 1 and first.closed is False
+
+        second = await controller.purge(_request(tenant_id="acme", workspace_id="ws-implicit"), "ws-implicit")
+        assert second.sources_removed == 0
+        assert second.chunks_removed == 0 and second.knowledge_items_removed == 0
+        assert second.closed is False
+        assert len(purge_parts.intake.removed) == 1
+
+    @pytest.mark.asyncio
+    async def test_purge_refuses_header_path_disagreement(
+        self,
+        controller: WorkspacesController,
+        session_factory,
+        purge_parts,
+    ) -> None:
+        """A path id that differs from X-Workspace-Id is a 400, and nothing is touched."""
+        from flycanon.web.conventions import WorkspaceScopeMismatch
+
+        await _seed_scope(session_factory, tenant_id="acme", workspace_id="ws-b", suffix="b2")
+        with pytest.raises(WorkspaceScopeMismatch) as exc_info:
+            await controller.purge(_request(tenant_id="acme", workspace_id="ws-a"), "ws-b")
+        assert exc_info.value.code == "workspace_scope_mismatch"
+        assert purge_parts.intake.removed == []
+        from flycanon.models.entities.source import SourceRow
+
+        assert await _count_rows(session_factory, SourceRow, tenant_id="acme", workspace_id="ws-b") == 1

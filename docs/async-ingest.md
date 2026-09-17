@@ -57,19 +57,74 @@ caller <--SSE on /api/v1/ingest-jobs/{id}/stream-- frames as they're written
 
 ## SSE frame format
 
-Each event is a `canon_ingest_job_events` row serialised as an SSE
-frame:
+The stream opens with a `status` frame (the job header), then one
+`event` frame per `canon_ingest_job_events` row, and closes with a
+final `status` frame once the job is terminal:
 
 ```
-event: stage
-data: {"id": 3, "stage": "normalising", "message": "binary normalise + load"}
+event: status
+data: {"id": "job-...", "status": "running", "attempts": 1}
 
-event: stage
-data: {"id": 4, "stage": "finished", "payload": {"source_id": "...", "n_chunks": 187}}
+event: event
+id: 3
+data: {"id": 3, "stage": "normalising", "message": "binary normalise + load", "payload": {}, "occurred_at": "..."}
+
+event: event
+id: 4
+data: {"id": 4, "stage": "finished", "message": "...", "payload": {"source_id": "...", "n_chunks": 187}, "occurred_at": "..."}
+
+event: status
+data: {"id": "job-...", "status": "succeeded", "source_id": "...", "error_code": null, "error_message": null}
 ```
 
-`id` is monotonic; reconnect with `?after_id=4` to skip events the
-client has already processed.
+`id` is monotonic and is also emitted as the SSE `id:` line, so a
+browser `EventSource` sends it back as `Last-Event-ID` on automatic
+reconnect. Resume explicitly with `?after_id=4` or with that header;
+either skips the events the client has already processed (before
+26.7.1 every reconnect replayed the whole history).
+
+## Webhook
+
+With `?callback_url=<https url>` the worker POSTs the terminal outcome
+once (single attempt, 10 s timeout; the durable truth is the job row
+and the audit log, so poll `GET /api/v1/ingest-jobs/{id}` if a delivery
+is missed):
+
+```json
+{
+  "job_id": "job-...",
+  "tenant_id": "acme",
+  "workspace_id": "ws-demo",
+  "status": "succeeded",
+  "source_id": "src-...",
+  "error_code": null,
+  "error_message": null,
+  "occurred_at": "2026-09-17T12:00:18+00:00"
+}
+```
+
+Headers: `Content-Type: application/json`, `X-Correlation-Id` (the
+submitting request's id) and, when `FLYCANON_WEBHOOK_SECRET` is set,
+`X-Flycanon-Signature: t=<unix seconds>,v1=<hex>` where
+
+```
+v1 = HMAC-SHA256(secret, f"{t}." + raw_request_body_bytes)
+```
+
+Verify against the **raw bytes exactly as received** (not a re-serialised
+parse), compare in constant time, and reject when `|now - t|` exceeds
+your tolerance (five minutes is the convention). Python receivers can
+import `flycanon.web.conventions.webhook_signature.verify_signature`;
+any language can reproduce the two lines above. Without the secret the
+request goes out unsigned and the service logs a boot-time warning --
+never trust an unsigned callback in production.
+
+The callback host is vetted at submit time by the same policy as
+`uri` fetches: loopback, private, link-local and non-`http(s)` targets
+are refused with `400 callback_url_not_allowed` so a tenant cannot
+turn the webhook into a probe of the operator's network
+(`FLYCANON_URL_FETCH_ALLOW_PRIVATE=true` lifts this for private dev
+stacks only).
 
 ## Concurrency safety
 

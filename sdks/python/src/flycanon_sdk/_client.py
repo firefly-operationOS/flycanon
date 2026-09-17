@@ -20,13 +20,20 @@ manager to get clean connection lifecycle:
     async with CanonClient(base_url="http://localhost:8500") as client:
         ...
 
-The 26.5.7 unification adds four firefly wire-contract headers
+The 26.5.7 unification added four firefly wire-contract headers
 (``X-Tenant-Id``, ``X-Workspace-Id``, ``X-Correlation-Id``,
 ``X-Agent-Token``) on the constructor; every outbound request
-sends whichever of those four are configured. All four are
-optional on the SDK side -- the service rejects missing
-tenant/workspace headers at the boundary; the SDK just forwards
-what it has.
+sends whichever of those are configured. All are optional on the
+SDK side -- the service rejects missing tenant/workspace headers
+at the boundary; the SDK just forwards what it has.
+
+26.7.1 realigns the client with the routes the server actually
+serves (``?mode=async`` instead of ``sources:async``,
+``/query/stream``, ``/conversations/{id}/turn``,
+``/query/suggest``, ``?after_id=`` on the job stream), sends the
+platform key as ``X-API-Key`` (the server treats
+``Authorization: Bearer`` as an operator JWT, not as the key), and
+adds the user-tier ``delete_source`` and ``purge_workspace`` verbs.
 
 The agent-tier surface is exposed via :attr:`CanonClient.agent`:
 
@@ -101,6 +108,7 @@ from flycanon_sdk._models import (
     SubjectCostReport,
     SubmitSourceJsonPayload,
     SuggestionsResponse,
+    SuggestRequest,
     SupersedeKnowledgeRequest,
     TaxonomyNode,
     TaxonomyTree,
@@ -108,6 +116,7 @@ from flycanon_sdk._models import (
     UpdateKnowledgeRequest,
     VersionInfo,
     WorkspaceCreate,
+    WorkspacePurgeResult,
     WorkspaceSpec,
     WorkspaceSummary,
     WorkspaceUpdate,
@@ -122,6 +131,7 @@ _HEADER_WORKSPACE_ID = "X-Workspace-Id"
 _HEADER_CORRELATION_ID = "X-Correlation-Id"
 _HEADER_AGENT_TOKEN = "X-Agent-Token"
 _HEADER_IDEMPOTENCY_KEY = "Idempotency-Key"
+_HEADER_API_KEY = "X-API-Key"
 
 
 class CanonClient:
@@ -143,7 +153,8 @@ class CanonClient:
         """Construct a client.
 
         :param base_url: Service base URL (``http://localhost:8500``).
-        :param api_key: Optional bearer token sent as ``Authorization``.
+        :param api_key: Optional platform key (``FLYCANON_API_KEYS``) sent
+            as ``X-API-Key`` on every request.
         :param tenant_id: Optional ``X-Tenant-Id`` value sent on every
             request.
         :param workspace_id: Optional ``X-Workspace-Id`` value sent on
@@ -160,10 +171,10 @@ class CanonClient:
         """
         merged_headers: dict[str, str] = {
             "Accept": "application/json",
-            "User-Agent": "flycanon-sdk-python/26.5.7",
+            "User-Agent": "flycanon-sdk-python/26.7.1",
         }
         if api_key:
-            merged_headers["Authorization"] = f"Bearer {api_key}"
+            merged_headers[_HEADER_API_KEY] = api_key
         if tenant_id:
             merged_headers[_HEADER_TENANT_ID] = tenant_id
         if workspace_id:
@@ -260,21 +271,38 @@ class CanonClient:
         body = await self._request(
             "POST",
             "/api/v1/sources:bulk",
-            json={"items": [p.model_dump(exclude_none=True) for p in payloads]},
+            json={"sources": [p.model_dump(exclude_none=True) for p in payloads]},
         )
         return BulkSourcesResponse.model_validate(body)
 
     async def submit_source_async(
         self,
         payload: SubmitSourceJsonPayload,
+        *,
+        callback_url: str | None = None,
     ) -> IngestJob:
-        """Enqueue an async ingest job. Stream progress on ``stream_job``."""
+        """Enqueue an async ingest job (``POST /api/v1/sources?mode=async``).
+
+        Stream progress on :meth:`stream_job` or poll :meth:`get_job`.
+        ``callback_url`` makes the worker POST the terminal outcome,
+        signed with ``X-Flycanon-Signature`` when the server has
+        ``FLYCANON_WEBHOOK_SECRET``; private / loopback hosts are
+        refused with ``callback_url_not_allowed``.
+        """
         body = await self._request(
             "POST",
-            "/api/v1/sources:async",
+            "/api/v1/sources",
             json=payload.model_dump(exclude_none=True),
+            params={"mode": "async", "callback_url": callback_url},
         )
         return IngestJob.model_validate(body)
+
+    async def delete_source(self, source_id: str) -> None:
+        """Remove a source, its index projections and its stored original (204).
+
+        Unknown ids raise ``CanonAPIError(code="source_not_found")``.
+        """
+        await self._request("DELETE", f"/api/v1/sources/{source_id}")
 
     async def replace_source(
         self,
@@ -297,22 +325,23 @@ class CanonClient:
         body = await self._request("GET", f"/api/v1/ingest-jobs/{job_id}")
         return IngestJob.model_validate(body)
 
-    async def cancel_job(self, job_id: str) -> IngestJob:
-        body = await self._request("POST", f"/api/v1/ingest-jobs/{job_id}:cancel")
-        return IngestJob.model_validate(body)
-
     def stream_job(
         self,
         job_id: str,
         *,
-        cursor: int = 0,
+        after_id: int = 0,
     ) -> AsyncIterator[IngestJobEvent]:
-        """Stream Server-Sent Events for a job. Reconnect with ``cursor``.
+        """Stream Server-Sent Events for a job. Reconnect with ``after_id``.
 
-        Returns an async iterator directly -- use as
-        ``async for ev in client.stream_job(job_id): ...``.
+        ``after_id`` is the ``id`` of the last ``event`` frame already
+        processed (the server also honours ``Last-Event-ID``); ``0``
+        replays from the beginning. Returns an async iterator directly
+        -- use as ``async for ev in client.stream_job(job_id): ...``.
         """
-        return self._sse(f"/api/v1/ingest-jobs/{job_id}/stream", params={"cursor": cursor})
+        return self._sse(
+            f"/api/v1/ingest-jobs/{job_id}/stream",
+            params={"after_id": after_id or None},
+        )
 
     # ------------------------------------------------------------------
     # Knowledge
@@ -425,8 +454,8 @@ class CanonClient:
         )
         return KnowledgeRelation.model_validate(body)
 
-    async def remove_relation(self, relation_id: str) -> None:
-        await self._request("DELETE", f"/api/v1/knowledge/relations/{relation_id}")
+    async def remove_relation(self, item_id: str, relation_id: str) -> None:
+        await self._request("DELETE", f"/api/v1/knowledge/{item_id}/relations/{relation_id}")
 
     async def get_graph(
         self,
@@ -593,13 +622,13 @@ class CanonClient:
         instructions: str | None = None,
         model: str | None = None,
     ) -> AsyncIterator[IngestJobEvent]:
-        """Stream the answer endpoint as Server-Sent Events.
+        """Stream the answer endpoint (``POST /api/v1/query/stream``) as SSE.
 
         Each yielded ``IngestJobEvent`` re-uses the generic frame shape
-        ``(cursor, event, data)``. The ``token`` events carry
-        ``{"text": "..."}``; the final ``complete`` event carries
-        ``{"answer": "...", "citations": [...]}``. Returns an async
-        iterator directly -- use as
+        ``(cursor, event, data)``. Frames are ``status`` (RLM reasoning
+        turns) or ``hit`` (RAG retrieval), then one ``final`` carrying
+        ``{"answer", "citations", "model", "elapsed_ms", "no_answer"}``,
+        or ``error``. Returns an async iterator directly -- use as
         ``async for frame in client.stream_answer(question): ...``.
         """
         request = AnswerRequest(
@@ -609,7 +638,7 @@ class CanonClient:
             model=model,
         )
         return self._sse(
-            "/api/v1/query:stream",
+            "/api/v1/query/stream",
             json=request.model_dump(exclude_none=True),
             method="POST",
         )
@@ -635,33 +664,33 @@ class CanonClient:
         conversation_id: str,
         request: CreateConversationTurnRequest,
     ) -> ConversationTurn:
+        """Append a turn (``POST /api/v1/conversations/{id}/turn``) and return it.
+
+        Turns run on the same answer engine as :meth:`answer`. The
+        server wraps the turn as ``{"conversation_id", "turn"}``; the
+        SDK unwraps it.
+        """
         body = await self._request(
             "POST",
-            f"/api/v1/conversations/{conversation_id}/turns",
+            f"/api/v1/conversations/{conversation_id}/turn",
             json=request.model_dump(exclude_none=True),
         )
-        return ConversationTurn.model_validate(body)
+        return ConversationTurn.model_validate(body.get("turn", body))
 
-    async def list_turns(
-        self,
-        conversation_id: str,
-        *,
-        limit: int = 50,
-        offset: int = 0,
-    ) -> list[ConversationTurn]:
-        body = await self._request(
-            "GET",
-            f"/api/v1/conversations/{conversation_id}/turns",
-            params={"limit": str(limit), "offset": str(offset)},
-        )
-        rows = body.get("items", body) if isinstance(body, dict) else body
-        return [ConversationTurn.model_validate(r) for r in rows]
+    async def list_turns(self, conversation_id: str) -> list[ConversationTurn]:
+        """The conversation's turn history (from ``GET /api/v1/conversations/{id}``)."""
+        return (await self.get_conversation(conversation_id)).turns
 
     async def suggest_questions(
         self,
-        conversation_id: str,
+        request: SuggestRequest,
     ) -> SuggestionsResponse:
-        body = await self._request("POST", f"/api/v1/conversations/{conversation_id}/suggest")
+        """Suggested follow-up questions (``POST /api/v1/query/suggest``)."""
+        body = await self._request(
+            "POST",
+            "/api/v1/query/suggest",
+            json=request.model_dump(exclude_none=True),
+        )
         return SuggestionsResponse.model_validate(body)
 
     # ------------------------------------------------------------------
@@ -890,6 +919,16 @@ class CanonClient:
             json=patch.model_dump(exclude_unset=True, exclude_none=True),
         )
         return WorkspaceSpec.model_validate(body)
+
+    async def purge_workspace(self, workspace_id: str) -> WorkspacePurgeResult:
+        """Erase everything the workspace holds, then close it.
+
+        ``POST /api/v1/workspaces/{id}:purge``. The client's
+        ``workspace_id`` header must equal ``workspace_id`` (the server
+        answers ``workspace_scope_mismatch`` otherwise). Idempotent.
+        """
+        body = await self._request("POST", f"/api/v1/workspaces/{workspace_id}:purge")
+        return WorkspacePurgeResult.model_validate(body)
 
     async def close_workspace(self, workspace_id: str) -> WorkspaceSpec:
         """Close a workspace (status='closed' + closed_at=now()).

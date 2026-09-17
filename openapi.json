@@ -1,5 +1,46 @@
 {
   "components": {
+    "parameters": {
+      "IdempotencyKey": {
+        "description": "Mandatory on every agent-tier POST / PUT / DELETE (``400 missing_idempotency_key`` otherwise). A replay with the same key within the store TTL returns the original response without re-dispatching; keys are namespaced per ``(tenant, route scope)``.",
+        "in": "header",
+        "name": "Idempotency-Key",
+        "required": true,
+        "schema": {
+          "maxLength": 255,
+          "type": "string"
+        }
+      },
+      "XCorrelationId": {
+        "description": "Caller-supplied correlation id echoed into audit rows, cost events and the async-ingest webhook. A uuid4 hex is generated when absent.",
+        "in": "header",
+        "name": "X-Correlation-Id",
+        "required": false,
+        "schema": {
+          "type": "string"
+        }
+      },
+      "XTenantId": {
+        "description": "Tenant slug that scopes every row the request may see or write. Missing or malformed -> ``400 missing_tenant_context``.",
+        "in": "header",
+        "name": "X-Tenant-Id",
+        "required": true,
+        "schema": {
+          "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$",
+          "type": "string"
+        }
+      },
+      "XWorkspaceId": {
+        "description": "Workspace slug within the tenant. Required on every tenant route for header uniformity, including the workspace CRUD routes where the path id is authoritative (``:purge`` demands they agree).",
+        "in": "header",
+        "name": "X-Workspace-Id",
+        "required": true,
+        "schema": {
+          "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$",
+          "type": "string"
+        }
+      }
+    },
     "schemas": {
       "AcceptCandidateRequest": {
         "description": "Materialise the candidate as a new knowledge version.\n\n``target_item_id`` is optional. If set, the candidate is appended\nas a new version on the existing item; if omitted, a new\nknowledge item is created.",
@@ -4644,6 +4685,110 @@
         "title": "WorkspaceCreate",
         "type": "object"
       },
+      "WorkspacePurgeResult": {
+        "description": "Wire shape of ``POST /api/v1/workspaces/{workspace_id}:purge``.\n\nEvery counter is the number of rows (or objects) erased by THIS\ncall; a repeated purge reports zeros. ``closed`` is ``False`` when\nno ``canon_workspaces`` row existed for the id -- an implicit\nworkspace that only ever held data -- and the data was still\npurged. Audit rows are never counted because they are never\ndeleted.",
+        "properties": {
+          "candidates_removed": {
+            "minimum": 0,
+            "title": "Candidates Removed",
+            "type": "integer"
+          },
+          "chunks_removed": {
+            "minimum": 0,
+            "title": "Chunks Removed",
+            "type": "integer"
+          },
+          "citations_removed": {
+            "minimum": 0,
+            "title": "Citations Removed",
+            "type": "integer"
+          },
+          "closed": {
+            "description": "Whether a workspace row existed and was moved to ``closed``.",
+            "title": "Closed",
+            "type": "boolean"
+          },
+          "conversation_turns_removed": {
+            "minimum": 0,
+            "title": "Conversation Turns Removed",
+            "type": "integer"
+          },
+          "conversations_removed": {
+            "minimum": 0,
+            "title": "Conversations Removed",
+            "type": "integer"
+          },
+          "cost_events_removed": {
+            "minimum": 0,
+            "title": "Cost Events Removed",
+            "type": "integer"
+          },
+          "ingest_job_events_removed": {
+            "minimum": 0,
+            "title": "Ingest Job Events Removed",
+            "type": "integer"
+          },
+          "ingest_jobs_removed": {
+            "minimum": 0,
+            "title": "Ingest Jobs Removed",
+            "type": "integer"
+          },
+          "knowledge_items_removed": {
+            "minimum": 0,
+            "title": "Knowledge Items Removed",
+            "type": "integer"
+          },
+          "knowledge_relations_removed": {
+            "minimum": 0,
+            "title": "Knowledge Relations Removed",
+            "type": "integer"
+          },
+          "knowledge_versions_removed": {
+            "minimum": 0,
+            "title": "Knowledge Versions Removed",
+            "type": "integer"
+          },
+          "originals_deleted": {
+            "description": "Stored originals removed from the object store.",
+            "minimum": 0,
+            "title": "Originals Deleted",
+            "type": "integer"
+          },
+          "sources_removed": {
+            "minimum": 0,
+            "title": "Sources Removed",
+            "type": "integer"
+          },
+          "tenant_id": {
+            "title": "Tenant Id",
+            "type": "string"
+          },
+          "workspace_id": {
+            "title": "Workspace Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "tenant_id",
+          "workspace_id",
+          "sources_removed",
+          "originals_deleted",
+          "chunks_removed",
+          "knowledge_items_removed",
+          "knowledge_versions_removed",
+          "citations_removed",
+          "knowledge_relations_removed",
+          "candidates_removed",
+          "conversations_removed",
+          "conversation_turns_removed",
+          "ingest_jobs_removed",
+          "ingest_job_events_removed",
+          "cost_events_removed",
+          "closed"
+        ],
+        "title": "WorkspacePurgeResult",
+        "type": "object"
+      },
       "WorkspaceSpec": {
         "description": "The canonical Workspace shape returned by GET / referenced by other DTOs.",
         "properties": {
@@ -4918,6 +5063,25 @@
         "title": "WorkspaceUpdate",
         "type": "object"
       }
+    },
+    "securitySchemes": {
+      "AgentToken": {
+        "description": "Tenant-scoped agent token (``agt_<8hex>_<32hex>``) minted by ``POST /api/v1/agent-tokens``. The credential of the ``/api/v1/agent/*`` tier: verified per request against the tenant in ``X-Tenant-Id``, the workspace allowlist and the route scope. An agent-tier request carrying it does not need the platform key.",
+        "in": "header",
+        "name": "X-Agent-Token",
+        "type": "apiKey"
+      },
+      "ApiKeyAuthorization": {
+        "description": "The same platform key carried as ``Authorization: ApiKey <key>`` for clients that can only set the Authorization header. ``X-API-Key`` wins when both are present.",
+        "scheme": "ApiKey",
+        "type": "http"
+      },
+      "ApiKeyHeader": {
+        "description": "Platform API key from ``FLYCANON_API_KEYS``. Required on every ``/api/v1/*`` route (except ``GET /api/v1/version``) and on the admin dashboard whenever at least one key is configured; when the setting is empty the user tier is open and the header is ignored. Missing -> ``401 missing_api_key``; unknown -> ``401 invalid_api_key``.",
+        "in": "header",
+        "name": "X-API-Key",
+        "type": "apiKey"
+      }
     }
   },
   "info": {
@@ -4931,7 +5095,7 @@
       "url": "https://github.com/firefly-operationOS/flycanon/blob/main/LICENSE"
     },
     "title": "flycanon",
-    "version": "26.7.0"
+    "version": "26.7.1"
   },
   "openapi": "3.1.0",
   "paths": {
@@ -4939,6 +5103,17 @@
       "get": {
         "description": "Returns the summary shape only -- the secret is never\nround-tripped on this endpoint.",
         "operationId": "list_tokens",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/XTenantId"
+          },
+          {
+            "$ref": "#/components/parameters/XWorkspaceId"
+          },
+          {
+            "$ref": "#/components/parameters/XCorrelationId"
+          }
+        ],
         "responses": {
           "200": {
             "content": {
@@ -4954,6 +5129,14 @@
             "description": "Successful response"
           }
         },
+        "security": [
+          {
+            "ApiKeyHeader": []
+          },
+          {
+            "ApiKeyAuthorization": []
+          }
+        ],
         "summary": "List tokens for the current tenant (newest first).",
         "tags": [
           "AgentTokens"
@@ -4962,6 +5145,17 @@
       "post": {
         "description": "Returns 201 with the full ``token`` populated. The token is\nonly returned this once -- subsequent reads expose only\n``prefix``. Refuses agent-tier callers with\n``403 agent_cannot_mint``.",
         "operationId": "mint",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/XTenantId"
+          },
+          {
+            "$ref": "#/components/parameters/XWorkspaceId"
+          },
+          {
+            "$ref": "#/components/parameters/XCorrelationId"
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -4994,6 +5188,14 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "ApiKeyHeader": []
+          },
+          {
+            "ApiKeyAuthorization": []
+          }
+        ],
         "summary": "Mint a new agent token.",
         "tags": [
           "AgentTokens"
@@ -5012,6 +5214,15 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "$ref": "#/components/parameters/XTenantId"
+          },
+          {
+            "$ref": "#/components/parameters/XWorkspaceId"
+          },
+          {
+            "$ref": "#/components/parameters/XCorrelationId"
           }
         ],
         "responses": {
@@ -5019,6 +5230,14 @@
             "description": "No Content"
           }
         },
+        "security": [
+          {
+            "ApiKeyHeader": []
+          },
+          {
+            "ApiKeyAuthorization": []
+          }
+        ],
         "summary": "Revoke a token. Idempotent -- already-revoked is a no-op (204).",
         "tags": [
           "AgentTokens"
@@ -5029,6 +5248,20 @@
       "post": {
         "description": "Scope: ``agent.candidates:propose``. Mandatory\n``Idempotency-Key`` header -- missing key returns\n``400 missing_idempotency_key``. Wire shape and 4xx\nmapping mirror the user-tier\n``POST /api/v1/candidates:propose`` byte-for-byte.\n\nA replayed POST (same ``Idempotency-Key`` + same tenant\nwithin the store TTL) returns the cached candidate list\nre-hydrated from the stored JSON body, without re-running\nthe consolidator. This is critical for the flyradar\nhandoff path: a retried discovery must not produce\nduplicate candidate rows in the canon.",
         "operationId": "propose",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/XTenantId"
+          },
+          {
+            "$ref": "#/components/parameters/XWorkspaceId"
+          },
+          {
+            "$ref": "#/components/parameters/XCorrelationId"
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -5064,6 +5297,17 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "AgentToken": []
+          },
+          {
+            "ApiKeyHeader": []
+          },
+          {
+            "ApiKeyAuthorization": []
+          }
+        ],
         "summary": "Propose candidates from an existing source (agent tier).",
         "tags": [
           "AgentCandidates"
@@ -5082,6 +5326,15 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "$ref": "#/components/parameters/XTenantId"
+          },
+          {
+            "$ref": "#/components/parameters/XWorkspaceId"
+          },
+          {
+            "$ref": "#/components/parameters/XCorrelationId"
           }
         ],
         "responses": {
@@ -5096,6 +5349,17 @@
             "description": "Successful response"
           }
         },
+        "security": [
+          {
+            "AgentToken": []
+          },
+          {
+            "ApiKeyHeader": []
+          },
+          {
+            "ApiKeyAuthorization": []
+          }
+        ],
         "summary": "Fetch a single knowledge item by id (agent tier).",
         "tags": [
           "AgentKnowledge"
@@ -5123,6 +5387,15 @@
               "default": 0,
               "type": "integer"
             }
+          },
+          {
+            "$ref": "#/components/parameters/XTenantId"
+          },
+          {
+            "$ref": "#/components/parameters/XWorkspaceId"
+          },
+          {
+            "$ref": "#/components/parameters/XCorrelationId"
           }
         ],
         "responses": {
@@ -5137,6 +5410,17 @@
             "description": "Successful response"
           }
         },
+        "security": [
+          {
+            "AgentToken": []
+          },
+          {
+            "ApiKeyHeader": []
+          },
+          {
+            "ApiKeyAuthorization": []
+          }
+        ],
         "summary": "Resolve the citation graph for ``(item_id, version)``.",
         "tags": [
           "AgentKnowledge"
@@ -5147,6 +5431,20 @@
       "post": {
         "description": "Scope: ``agent.query:run``. Mandatory ``Idempotency-Key``.\nIdentical wire shape to the user-tier\n``POST /api/v1/query`` -- the only differences are the\nauth gate and the required idempotency key.\n\nA replayed POST (same ``Idempotency-Key`` + same tenant\nwithin the store TTL) returns the cached\n:class:`AnswerResponse` re-hydrated from the stored JSON\nbody, without re-running retrieval + the LLM call.",
         "operationId": "answer",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/XTenantId"
+          },
+          {
+            "$ref": "#/components/parameters/XWorkspaceId"
+          },
+          {
+            "$ref": "#/components/parameters/XCorrelationId"
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -5179,6 +5477,17 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "AgentToken": []
+          },
+          {
+            "ApiKeyHeader": []
+          },
+          {
+            "ApiKeyAuthorization": []
+          }
+        ],
         "summary": "Grounded RAG answer with explicit citations (agent tier).",
         "tags": [
           "AgentQuery"
@@ -5189,6 +5498,20 @@
       "post": {
         "description": "Scope: ``agent.query:run``. Mandatory ``Idempotency-Key``.\nWire format matches the user-tier\n``POST /api/v1/query/stream`` byte-for-byte and is routed\nthrough the same :class:`AnswerDispatcher`:\n\n* RAG mode -- ``event: hit`` per retrieved citation, then\n``event: final`` with the full answer.\n* RLM mode (default) -- one ``event: status`` (``reasoning``)\nframe per REPL turn, then ``event: final``.\n\nThe generator mirrors the user-tier\niterator. Token verification + idempotency-header check\nhappen synchronously before the streaming response is\nreturned, so authentication failures surface as a normal\n4xx response (not as an in-stream ``error`` frame).\n\nReplay dedup is **intentionally skipped** for the SSE\nendpoint -- streaming responses cannot be replayed\ndeterministically (frame ordering, hit ranking, and LLM\nnon-determinism would all need to be captured), and the\nclient is expected to handle a partial stream by reading\nthe terminal ``final`` / ``error`` frame. Only the\n``Idempotency-Key`` header *presence* is enforced; no\nstore interaction occurs.",
         "operationId": "stream_answer",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/XTenantId"
+          },
+          {
+            "$ref": "#/components/parameters/XWorkspaceId"
+          },
+          {
+            "$ref": "#/components/parameters/XCorrelationId"
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -5214,6 +5537,17 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "AgentToken": []
+          },
+          {
+            "ApiKeyHeader": []
+          },
+          {
+            "ApiKeyAuthorization": []
+          }
+        ],
         "summary": "SSE answer stream (agent tier).",
         "tags": [
           "AgentQuery"
@@ -5224,6 +5558,20 @@
       "post": {
         "description": "Scope: ``agent.query:run``. Mandatory ``Idempotency-Key``.\nIdentical wire shape to the user-tier\n``POST /api/v1/search`` -- no LLM call, just BM25 + dense\nretrieval fused via RRF.\n\nReplays under the same ``(tenant, scope, key)`` triple are\ncached for the store TTL -- the retrieval pipeline is not\nre-run. The replay-dedup ``scope`` is the route-specific\n``agent.search:run`` so a key reused on ``/query`` and\n``/search`` does **not** collide, even though both routes\nshare the same auth scope ``agent.query:run``.",
         "operationId": "search",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/XTenantId"
+          },
+          {
+            "$ref": "#/components/parameters/XWorkspaceId"
+          },
+          {
+            "$ref": "#/components/parameters/XCorrelationId"
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -5256,6 +5604,17 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "AgentToken": []
+          },
+          {
+            "ApiKeyHeader": []
+          },
+          {
+            "ApiKeyAuthorization": []
+          }
+        ],
         "summary": "Hybrid retrieval over the canon corpus (agent tier).",
         "tags": [
           "AgentQuery"
@@ -5266,6 +5625,20 @@
       "post": {
         "description": "Scope: ``agent.sources:ingest``. Mandatory\n``Idempotency-Key`` header -- missing key returns\n``400 missing_idempotency_key``. Always synchronous: the\nagent surface deliberately omits the user-tier\n``mode=async`` / ``callback_url`` toggles to keep the\ncontract minimal. Wire shape and 4xx mapping mirror the\nuser-tier ``POST /api/v1/sources`` byte-for-byte.\n\nA replayed POST (same ``Idempotency-Key`` + same tenant\nwithin the store TTL) short-circuits the command bus and\nreturns the cached :class:`SourceRecord` re-hydrated from\nthe stored JSON body. The wire response is identical to\nthe original ``201`` so flyradar's canon handoff can retry\nsafely without creating duplicate sources.",
         "operationId": "submit",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/XTenantId"
+          },
+          {
+            "$ref": "#/components/parameters/XWorkspaceId"
+          },
+          {
+            "$ref": "#/components/parameters/XCorrelationId"
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -5298,6 +5671,17 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "AgentToken": []
+          },
+          {
+            "ApiKeyHeader": []
+          },
+          {
+            "ApiKeyAuthorization": []
+          }
+        ],
         "summary": "Submit a source for intake (agent tier).",
         "tags": [
           "AgentSources"
@@ -5306,7 +5690,7 @@
     },
     "/api/v1/agent/sources/{source_id}": {
       "delete": {
-        "description": "Scope: ``agent.sources:ingest``. Mandatory\n``Idempotency-Key`` header -- missing key returns\n``400 missing_idempotency_key``. Dispatches\n:class:`RemoveSourceCommand` -> ``IntakeService.remove``:\nthe BM25 rows + dense vectors are purged, the chunk rows are\ndeleted, and the source row is removed within the verified\ntenant/workspace scope. Object-store originals are NOT\ntouched. Unknown ids return ``404 source_not_found``.\n\nReplays dedup under the route-specific\n``agent.sources:delete`` scope: a retried DELETE with the\nsame key returns the original ``204`` without re-dispatching\n(so a retry after a successful delete does not surface a\nspurious 404).",
+        "description": "Scope: ``agent.sources:ingest``. Mandatory\n``Idempotency-Key`` header -- missing key returns\n``400 missing_idempotency_key``. Dispatches\n:class:`RemoveSourceCommand` -> ``IntakeService.remove``:\nthe BM25 rows + dense vectors are purged, the chunk rows are\ndeleted, the stored original is removed from the object store\n(since 26.7.1 -- before that an \"erased\" document stayed\nreadable by the RLM corpus), and the source row is removed\nwithin the verified tenant/workspace scope. Unknown ids return\n``404 source_not_found``.\n\nReplays dedup under the route-specific\n``agent.sources:delete`` scope: a retried DELETE with the\nsame key returns the original ``204`` without re-dispatching\n(so a retry after a successful delete does not surface a\nspurious 404).",
         "operationId": "remove",
         "parameters": [
           {
@@ -5316,6 +5700,18 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "$ref": "#/components/parameters/XTenantId"
+          },
+          {
+            "$ref": "#/components/parameters/XWorkspaceId"
+          },
+          {
+            "$ref": "#/components/parameters/XCorrelationId"
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
           }
         ],
         "responses": {
@@ -5323,6 +5719,17 @@
             "description": "No Content"
           }
         },
+        "security": [
+          {
+            "AgentToken": []
+          },
+          {
+            "ApiKeyHeader": []
+          },
+          {
+            "ApiKeyAuthorization": []
+          }
+        ],
         "summary": "Remove a source and its indexed projections (agent tier).",
         "tags": [
           "AgentSources"
@@ -5339,6 +5746,15 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "$ref": "#/components/parameters/XTenantId"
+          },
+          {
+            "$ref": "#/components/parameters/XWorkspaceId"
+          },
+          {
+            "$ref": "#/components/parameters/XCorrelationId"
           }
         ],
         "responses": {
@@ -5353,6 +5769,17 @@
             "description": "Successful response"
           }
         },
+        "security": [
+          {
+            "AgentToken": []
+          },
+          {
+            "ApiKeyHeader": []
+          },
+          {
+            "ApiKeyAuthorization": []
+          }
+        ],
         "summary": "Read a single source record (agent tier).",
         "tags": [
           "AgentSources"
@@ -5369,6 +5796,18 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "$ref": "#/components/parameters/XTenantId"
+          },
+          {
+            "$ref": "#/components/parameters/XWorkspaceId"
+          },
+          {
+            "$ref": "#/components/parameters/XCorrelationId"
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
           }
         ],
         "requestBody": {
@@ -5403,6 +5842,17 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "AgentToken": []
+          },
+          {
+            "ApiKeyHeader": []
+          },
+          {
+            "ApiKeyAuthorization": []
+          }
+        ],
         "summary": "Replace an existing source in place (agent tier).",
         "tags": [
           "AgentSources"
@@ -5458,6 +5908,15 @@
               "default": 0,
               "type": "integer"
             }
+          },
+          {
+            "$ref": "#/components/parameters/XTenantId"
+          },
+          {
+            "$ref": "#/components/parameters/XWorkspaceId"
+          },
+          {
+            "$ref": "#/components/parameters/XCorrelationId"
           }
         ],
         "responses": {
@@ -5472,6 +5931,14 @@
             "description": "Successful response"
           }
         },
+        "security": [
+          {
+            "ApiKeyHeader": []
+          },
+          {
+            "ApiKeyAuthorization": []
+          }
+        ],
         "summary": "Paginated audit-log view -- filters compose with AND.",
         "tags": [
           "Audit"
@@ -5509,6 +5976,15 @@
               "default": "",
               "type": "string"
             }
+          },
+          {
+            "$ref": "#/components/parameters/XTenantId"
+          },
+          {
+            "$ref": "#/components/parameters/XWorkspaceId"
+          },
+          {
+            "$ref": "#/components/parameters/XCorrelationId"
           }
         ],
         "responses": {
@@ -5523,6 +5999,14 @@
             "description": "Successful response"
           }
         },
+        "security": [
+          {
+            "ApiKeyHeader": []
+          },
+          {
+            "ApiKeyAuthorization": []
+          }
+        ],
         "summary": "Aggregated cost report.",
         "tags": [
           "Billing"
@@ -5569,6 +6053,15 @@
               "default": 20,
               "type": "integer"
             }
+          },
+          {
+            "$ref": "#/components/parameters/XTenantId"
+          },
+          {
+            "$ref": "#/components/parameters/XWorkspaceId"
+          },
+          {
+            "$ref": "#/components/parameters/XCorrelationId"
           }
         ],
         "responses": {
@@ -5583,6 +6076,14 @@
             "description": "Successful response"
           }
         },
+        "security": [
+          {
+            "ApiKeyHeader": []
+          },
+          {
+            "ApiKeyAuthorization": []
+          }
+        ],
         "summary": "Cost attribution per ``(subject_kind, subject_id)``.",
         "tags": [
           "Billing"
@@ -5638,6 +6139,15 @@
               "default": 0,
               "type": "integer"
             }
+          },
+          {
+            "$ref": "#/components/parameters/XTenantId"
+          },
+          {
+            "$ref": "#/components/parameters/XWorkspaceId"
+          },
+          {
+            "$ref": "#/components/parameters/XCorrelationId"
           }
         ],
         "responses": {
@@ -5652,6 +6162,14 @@
             "description": "Successful response"
           }
         },
+        "security": [
+          {
+            "ApiKeyHeader": []
+          },
+          {
+            "ApiKeyAuthorization": []
+          }
+        ],
         "summary": "Per-call drill-down view.",
         "tags": [
           "Billing"
@@ -5689,6 +6207,15 @@
               "default": "",
               "type": "string"
             }
+          },
+          {
+            "$ref": "#/components/parameters/XTenantId"
+          },
+          {
+            "$ref": "#/components/parameters/XWorkspaceId"
+          },
+          {
+            "$ref": "#/components/parameters/XCorrelationId"
           }
         ],
         "responses": {
@@ -5703,6 +6230,14 @@
             "description": "Successful response"
           }
         },
+        "security": [
+          {
+            "ApiKeyHeader": []
+          },
+          {
+            "ApiKeyAuthorization": []
+          }
+        ],
         "summary": "Latency percentiles -- p50 / p95 / p99 -- per group bucket.",
         "tags": [
           "Billing"
@@ -5713,6 +6248,17 @@
       "get": {
         "description": "Three windows -- ``last_24h``, ``last_7d``, ``last_30d`` --\nare always populated. The top model inside each window lands\nin the same envelope so a dashboard can render a single\nbanner without a follow-up query.",
         "operationId": "summary",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/XTenantId"
+          },
+          {
+            "$ref": "#/components/parameters/XWorkspaceId"
+          },
+          {
+            "$ref": "#/components/parameters/XCorrelationId"
+          }
+        ],
         "responses": {
           "200": {
             "content": {
@@ -5725,6 +6271,14 @@
             "description": "Successful response"
           }
         },
+        "security": [
+          {
+            "ApiKeyHeader": []
+          },
+          {
+            "ApiKeyAuthorization": []
+          }
+        ],
         "summary": "Rolling-window cost snapshot.",
         "tags": [
           "Billing"
@@ -5771,6 +6325,15 @@
               "default": 10,
               "type": "integer"
             }
+          },
+          {
+            "$ref": "#/components/parameters/XTenantId"
+          },
+          {
+            "$ref": "#/components/parameters/XWorkspaceId"
+          },
+          {
+            "$ref": "#/components/parameters/XCorrelationId"
           }
         ],
         "responses": {
@@ -5785,6 +6348,14 @@
             "description": "Successful response"
           }
         },
+        "security": [
+          {
+            "ApiKeyHeader": []
+          },
+          {
+            "ApiKeyAuthorization": []
+          }
+        ],
         "summary": "Top-N consumers by cost on a single dimension.",
         "tags": [
           "Billing"
@@ -5839,6 +6410,15 @@
               "default": 0,
               "type": "integer"
             }
+          },
+          {
+            "$ref": "#/components/parameters/XTenantId"
+          },
+          {
+            "$ref": "#/components/parameters/XWorkspaceId"
+          },
+          {
+            "$ref": "#/components/parameters/XCorrelationId"
           }
         ],
         "responses": {
@@ -5853,6 +6433,14 @@
             "description": "Successful response"
           }
         },
+        "security": [
+          {
+            "ApiKeyHeader": []
+          },
+          {
+            "ApiKeyAuthorization": []
+          }
+        ],
         "tags": [
           "Candidates"
         ]
@@ -5869,6 +6457,15 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "$ref": "#/components/parameters/XTenantId"
+          },
+          {
+            "$ref": "#/components/parameters/XWorkspaceId"
+          },
+          {
+            "$ref": "#/components/parameters/XCorrelationId"
           }
         ],
         "responses": {
@@ -5883,6 +6480,14 @@
             "description": "Successful response"
           }
         },
+        "security": [
+          {
+            "ApiKeyHeader": []
+          },
+          {
+            "ApiKeyAuthorization": []
+          }
+        ],
         "tags": [
           "Candidates"
         ]
@@ -5899,6 +6504,15 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "$ref": "#/components/parameters/XTenantId"
+          },
+          {
+            "$ref": "#/components/parameters/XWorkspaceId"
+          },
+          {
+            "$ref": "#/components/parameters/XCorrelationId"
           }
         ],
         "requestBody": {
@@ -5933,6 +6547,14 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "ApiKeyHeader": []
+          },
+          {
+            "ApiKeyAuthorization": []
+          }
+        ],
         "summary": "Materialise the candidate as a knowledge version.",
         "tags": [
           "Candidates"
@@ -5950,6 +6572,15 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "$ref": "#/components/parameters/XTenantId"
+          },
+          {
+            "$ref": "#/components/parameters/XWorkspaceId"
+          },
+          {
+            "$ref": "#/components/parameters/XCorrelationId"
           }
         ],
         "requestBody": {
@@ -5984,6 +6615,14 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "ApiKeyHeader": []
+          },
+          {
+            "ApiKeyAuthorization": []
+          }
+        ],
         "tags": [
           "Candidates"
         ]
@@ -5992,6 +6631,17 @@
     "/api/v1/candidates:propose": {
       "post": {
         "operationId": "propose",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/XTenantId"
+          },
+          {
+            "$ref": "#/components/parameters/XWorkspaceId"
+          },
+          {
+            "$ref": "#/components/parameters/XCorrelationId"
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -6027,6 +6677,14 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "ApiKeyHeader": []
+          },
+          {
+            "ApiKeyAuthorization": []
+          }
+        ],
         "summary": "Run the consolidation stage against a source and persist",
         "tags": [
           "Candidates"
@@ -6036,6 +6694,17 @@
     "/api/v1/conversations": {
       "post": {
         "operationId": "create_conversation",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/XTenantId"
+          },
+          {
+            "$ref": "#/components/parameters/XWorkspaceId"
+          },
+          {
+            "$ref": "#/components/parameters/XCorrelationId"
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -6068,6 +6737,14 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "ApiKeyHeader": []
+          },
+          {
+            "ApiKeyAuthorization": []
+          }
+        ],
         "summary": "Open a fresh conversation -- returns the empty session.",
         "tags": [
           "Conversations"
@@ -6086,6 +6763,15 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "$ref": "#/components/parameters/XTenantId"
+          },
+          {
+            "$ref": "#/components/parameters/XWorkspaceId"
+          },
+          {
+            "$ref": "#/components/parameters/XCorrelationId"
           }
         ],
         "responses": {
@@ -6100,6 +6786,14 @@
             "description": "Successful response"
           }
         },
+        "security": [
+          {
+            "ApiKeyHeader": []
+          },
+          {
+            "ApiKeyAuthorization": []
+          }
+        ],
         "summary": "Return the full session + turn history.",
         "tags": [
           "Conversations"
@@ -6117,6 +6811,15 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "$ref": "#/components/parameters/XTenantId"
+          },
+          {
+            "$ref": "#/components/parameters/XWorkspaceId"
+          },
+          {
+            "$ref": "#/components/parameters/XCorrelationId"
           }
         ],
         "requestBody": {
@@ -6151,6 +6854,14 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "ApiKeyHeader": []
+          },
+          {
+            "ApiKeyAuthorization": []
+          }
+        ],
         "summary": "Run the next turn and return the answer + citations.",
         "tags": [
           "Conversations"
@@ -6187,6 +6898,15 @@
               "default": 0,
               "type": "integer"
             }
+          },
+          {
+            "$ref": "#/components/parameters/XTenantId"
+          },
+          {
+            "$ref": "#/components/parameters/XWorkspaceId"
+          },
+          {
+            "$ref": "#/components/parameters/XCorrelationId"
           }
         ],
         "responses": {
@@ -6201,6 +6921,14 @@
             "description": "Successful response"
           }
         },
+        "security": [
+          {
+            "ApiKeyHeader": []
+          },
+          {
+            "ApiKeyAuthorization": []
+          }
+        ],
         "summary": "Paginated listing of async ingest jobs.",
         "tags": [
           "Jobs"
@@ -6218,6 +6946,15 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "$ref": "#/components/parameters/XTenantId"
+          },
+          {
+            "$ref": "#/components/parameters/XWorkspaceId"
+          },
+          {
+            "$ref": "#/components/parameters/XCorrelationId"
           }
         ],
         "responses": {
@@ -6232,6 +6969,14 @@
             "description": "Successful response"
           }
         },
+        "security": [
+          {
+            "ApiKeyHeader": []
+          },
+          {
+            "ApiKeyAuthorization": []
+          }
+        ],
         "summary": "Single-shot lookup. Polling target for callers that",
         "tags": [
           "Jobs"
@@ -6240,7 +6985,7 @@
     },
     "/api/v1/ingest-jobs/{job_id}/stream": {
       "get": {
-        "description": "Each ``data:`` frame is a JSON blob. The stream closes when\nthe job reaches a terminal state. Implementation polls the\n``canon_ingest_job_events`` table (cursor = max event id\nseen) and the ``canon_ingest_jobs.status`` column at\n``poll_interval_ms`` cadence -- this avoids holding a\nlong-lived DB connection per stream and works under\npgbouncer transaction-mode pooling.",
+        "description": "Each ``event`` frame carries ``id:`` + ``data:``; ``status``\nframes carry ``data:`` only. The stream closes when the job\nreaches a terminal state. Implementation polls the\n``canon_ingest_job_events`` table (cursor = max event id\nseen) and the ``canon_ingest_jobs.status`` column at\n``poll_interval_ms`` cadence -- this avoids holding a\nlong-lived DB connection per stream and works under\npgbouncer transaction-mode pooling.\n\nResume: ``after_id`` (query) or ``Last-Event-ID`` (header)\nseeds the cursor so a reconnect replays only events with a\ngreater id. Without it the cursor started at ``None`` and every\nreconnect replayed the whole history, which is what\n``docs/api-reference.md`` promised ``after_id`` would prevent\nlong before the parameter existed (26.7.1 closes that gap). The\nquery parameter wins when both are present; a value of ``0``\n(the default) means \"from the beginning\".",
         "operationId": "stream_job",
         "parameters": [
           {
@@ -6259,6 +7004,24 @@
               "default": 500,
               "type": "integer"
             }
+          },
+          {
+            "in": "query",
+            "name": "after_id",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "type": "integer"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/XTenantId"
+          },
+          {
+            "$ref": "#/components/parameters/XWorkspaceId"
+          },
+          {
+            "$ref": "#/components/parameters/XCorrelationId"
           }
         ],
         "responses": {
@@ -6266,6 +7029,14 @@
             "description": "Successful response"
           }
         },
+        "security": [
+          {
+            "ApiKeyHeader": []
+          },
+          {
+            "ApiKeyAuthorization": []
+          }
+        ],
         "summary": "SSE stream of progress events.",
         "tags": [
           "Jobs"
@@ -6320,6 +7091,15 @@
               "default": 0,
               "type": "integer"
             }
+          },
+          {
+            "$ref": "#/components/parameters/XTenantId"
+          },
+          {
+            "$ref": "#/components/parameters/XWorkspaceId"
+          },
+          {
+            "$ref": "#/components/parameters/XCorrelationId"
           }
         ],
         "responses": {
@@ -6334,6 +7114,14 @@
             "description": "Successful response"
           }
         },
+        "security": [
+          {
+            "ApiKeyHeader": []
+          },
+          {
+            "ApiKeyAuthorization": []
+          }
+        ],
         "summary": "Paginated, filterable list of knowledge items.",
         "tags": [
           "Knowledge"
@@ -6341,6 +7129,17 @@
       },
       "post": {
         "operationId": "create_knowledge",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/XTenantId"
+          },
+          {
+            "$ref": "#/components/parameters/XWorkspaceId"
+          },
+          {
+            "$ref": "#/components/parameters/XCorrelationId"
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -6373,6 +7172,14 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "ApiKeyHeader": []
+          },
+          {
+            "ApiKeyAuthorization": []
+          }
+        ],
         "summary": "Create a fresh knowledge item + version=1.",
         "tags": [
           "Knowledge"
@@ -6390,6 +7197,15 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "$ref": "#/components/parameters/XTenantId"
+          },
+          {
+            "$ref": "#/components/parameters/XWorkspaceId"
+          },
+          {
+            "$ref": "#/components/parameters/XCorrelationId"
           }
         ],
         "responses": {
@@ -6404,6 +7220,14 @@
             "description": "Successful response"
           }
         },
+        "security": [
+          {
+            "ApiKeyHeader": []
+          },
+          {
+            "ApiKeyAuthorization": []
+          }
+        ],
         "summary": "Fetch a single knowledge item by id (returns the pointer",
         "tags": [
           "Knowledge"
@@ -6419,6 +7243,15 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "$ref": "#/components/parameters/XTenantId"
+          },
+          {
+            "$ref": "#/components/parameters/XWorkspaceId"
+          },
+          {
+            "$ref": "#/components/parameters/XCorrelationId"
           }
         ],
         "requestBody": {
@@ -6453,6 +7286,14 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "ApiKeyHeader": []
+          },
+          {
+            "ApiKeyAuthorization": []
+          }
+        ],
         "summary": "Append a new version to the item (the previous version",
         "tags": [
           "Knowledge"
@@ -6489,6 +7330,15 @@
               "default": 0,
               "type": "integer"
             }
+          },
+          {
+            "$ref": "#/components/parameters/XTenantId"
+          },
+          {
+            "$ref": "#/components/parameters/XWorkspaceId"
+          },
+          {
+            "$ref": "#/components/parameters/XCorrelationId"
           }
         ],
         "responses": {
@@ -6503,6 +7353,14 @@
             "description": "Successful response"
           }
         },
+        "security": [
+          {
+            "ApiKeyHeader": []
+          },
+          {
+            "ApiKeyAuthorization": []
+          }
+        ],
         "summary": "Diff two versions of a knowledge item.",
         "tags": [
           "Knowledge"
@@ -6520,6 +7378,15 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "$ref": "#/components/parameters/XTenantId"
+          },
+          {
+            "$ref": "#/components/parameters/XWorkspaceId"
+          },
+          {
+            "$ref": "#/components/parameters/XCorrelationId"
           }
         ],
         "responses": {
@@ -6537,6 +7404,14 @@
             "description": "Successful response"
           }
         },
+        "security": [
+          {
+            "ApiKeyHeader": []
+          },
+          {
+            "ApiKeyAuthorization": []
+          }
+        ],
         "summary": "Full version history (oldest first).",
         "tags": [
           "Knowledge"
@@ -6563,6 +7438,15 @@
               "default": 0,
               "type": "integer"
             }
+          },
+          {
+            "$ref": "#/components/parameters/XTenantId"
+          },
+          {
+            "$ref": "#/components/parameters/XWorkspaceId"
+          },
+          {
+            "$ref": "#/components/parameters/XCorrelationId"
           }
         ],
         "responses": {
@@ -6577,6 +7461,14 @@
             "description": "Successful response"
           }
         },
+        "security": [
+          {
+            "ApiKeyHeader": []
+          },
+          {
+            "ApiKeyAuthorization": []
+          }
+        ],
         "summary": "Resolve the citation graph for ``(item_id, version)``.",
         "tags": [
           "Knowledge"
@@ -6595,6 +7487,15 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "$ref": "#/components/parameters/XTenantId"
+          },
+          {
+            "$ref": "#/components/parameters/XWorkspaceId"
+          },
+          {
+            "$ref": "#/components/parameters/XCorrelationId"
           }
         ],
         "responses": {
@@ -6609,6 +7510,14 @@
             "description": "Successful response"
           }
         },
+        "security": [
+          {
+            "ApiKeyHeader": []
+          },
+          {
+            "ApiKeyAuthorization": []
+          }
+        ],
         "summary": "Outgoing + incoming relations for ``{item_id}``.",
         "tags": [
           "Knowledge"
@@ -6625,6 +7534,15 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "$ref": "#/components/parameters/XTenantId"
+          },
+          {
+            "$ref": "#/components/parameters/XWorkspaceId"
+          },
+          {
+            "$ref": "#/components/parameters/XCorrelationId"
           }
         ],
         "requestBody": {
@@ -6659,6 +7577,14 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "ApiKeyHeader": []
+          },
+          {
+            "ApiKeyAuthorization": []
+          }
+        ],
         "summary": "Attach a typed relation rooted at ``{item_id}``.",
         "tags": [
           "Knowledge"
@@ -6684,6 +7610,15 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "$ref": "#/components/parameters/XTenantId"
+          },
+          {
+            "$ref": "#/components/parameters/XWorkspaceId"
+          },
+          {
+            "$ref": "#/components/parameters/XCorrelationId"
           }
         ],
         "responses": {
@@ -6691,6 +7626,14 @@
             "description": "No Content"
           }
         },
+        "security": [
+          {
+            "ApiKeyHeader": []
+          },
+          {
+            "ApiKeyAuthorization": []
+          }
+        ],
         "summary": "Drop one relation by id.",
         "tags": [
           "Knowledge"
@@ -6708,6 +7651,15 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "$ref": "#/components/parameters/XTenantId"
+          },
+          {
+            "$ref": "#/components/parameters/XWorkspaceId"
+          },
+          {
+            "$ref": "#/components/parameters/XCorrelationId"
           }
         ],
         "requestBody": {
@@ -6742,6 +7694,14 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "ApiKeyHeader": []
+          },
+          {
+            "ApiKeyAuthorization": []
+          }
+        ],
         "summary": "Withdraw the item permanently.",
         "tags": [
           "Knowledge"
@@ -6759,6 +7719,15 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "$ref": "#/components/parameters/XTenantId"
+          },
+          {
+            "$ref": "#/components/parameters/XWorkspaceId"
+          },
+          {
+            "$ref": "#/components/parameters/XCorrelationId"
           }
         ],
         "requestBody": {
@@ -6793,6 +7762,14 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "ApiKeyHeader": []
+          },
+          {
+            "ApiKeyAuthorization": []
+          }
+        ],
         "summary": "Point the whole item at another canonical item.",
         "tags": [
           "Knowledge"
@@ -6803,6 +7780,17 @@
       "post": {
         "description": "Confirmed conflicts land as ``CandidateRow``s with\n``metadata.kind=conflict_detection`` so the inbox UI's\nexisting candidate queue surfaces them alongside ordinary\nproposals.",
         "operationId": "detect_conflicts",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/XTenantId"
+          },
+          {
+            "$ref": "#/components/parameters/XWorkspaceId"
+          },
+          {
+            "$ref": "#/components/parameters/XCorrelationId"
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -6835,6 +7823,14 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "ApiKeyHeader": []
+          },
+          {
+            "ApiKeyAuthorization": []
+          }
+        ],
         "summary": "Run the conflict-detection pass and queue any contradictions.",
         "tags": [
           "KnowledgeQuality"
@@ -6899,6 +7895,15 @@
               "default": 500,
               "type": "integer"
             }
+          },
+          {
+            "$ref": "#/components/parameters/XTenantId"
+          },
+          {
+            "$ref": "#/components/parameters/XWorkspaceId"
+          },
+          {
+            "$ref": "#/components/parameters/XCorrelationId"
           }
         ],
         "responses": {
@@ -6906,6 +7911,14 @@
             "description": "Successful response"
           }
         },
+        "security": [
+          {
+            "ApiKeyHeader": []
+          },
+          {
+            "ApiKeyAuthorization": []
+          }
+        ],
         "summary": "Render the knowledge graph.",
         "tags": [
           "KnowledgeGraph"
@@ -6916,6 +7929,17 @@
       "get": {
         "description": "Score is on-demand + cached on\n``KnowledgeItemRow.metadata_json.staleness`` (6h TTL). First\ncall populates; subsequent calls within the TTL return the\ncached value.\n\n``score = 1 - max(cosine(version_body, recent_source))``.\nHigh = the canon disagrees with fresh sources.",
         "operationId": "stale_report",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/XTenantId"
+          },
+          {
+            "$ref": "#/components/parameters/XWorkspaceId"
+          },
+          {
+            "$ref": "#/components/parameters/XCorrelationId"
+          }
+        ],
         "responses": {
           "200": {
             "content": {
@@ -6928,6 +7952,14 @@
             "description": "Successful response"
           }
         },
+        "security": [
+          {
+            "ApiKeyHeader": []
+          },
+          {
+            "ApiKeyAuthorization": []
+          }
+        ],
         "summary": "Return staleness scores for every published knowledge item.",
         "tags": [
           "KnowledgeQuality"
@@ -6938,6 +7970,17 @@
       "post": {
         "description": "Pipeline:\n\n1. Hybrid retrieval (same as ``/search``) over the\nconfigured filters; pulls ``top_k`` candidates (default 8).\n\n2. Renders the ``answer.yaml`` prompt with the question +\nthe retrieved chunks + the optional ``instructions``\nsteering, and calls :class:`FireflyAgent` against the\nconfigured answer model (``FLYCANON_ANSWER_MODEL`` or the\nper-request ``model`` override).\n\n3. On primary-model failure the answerer falls through to\n``FLYCANON_ANSWER_FALLBACK_MODEL`` when configured. Both\nsteps are wrapped in a circuit breaker so transient\nfailures don't cascade.\n\n4. The model returns a structured :class:`AnswerOutput`\n(Pydantic) carrying the answer text + the chunk_ids it\nexplicitly relied on. The handler hydrates those ids\nback to full :class:`Hit` rows so the caller gets one\nround-trip.\n\nResponse semantics:\n\n* ``no_answer=true`` -- the retrieval did not contain\nenough evidence; the answer text explains what is\nmissing. Callers should NOT display the answer verbatim\nin a high-stakes UI; surface \"no canonical answer yet\"\ninstead.\n* ``no_answer=false`` -- the answer is grounded in the\n``citations`` list. The citations are a *subset* of the\nretrieval (only the chunks the model actually cited).\n\nScope is fixed to the (tenant, workspace) carried by the\nrequest headers; the :class:`RetrievalService` fails closed\non missing values.\n\nUse this surface when:\n\n* you want a final user-facing answer with citation badges,\n* you don't want to operate a separate LLM call from your\nbackend,\n* you're prototyping a chatbot or a copilot integration.",
         "operationId": "answer",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/XTenantId"
+          },
+          {
+            "$ref": "#/components/parameters/XWorkspaceId"
+          },
+          {
+            "$ref": "#/components/parameters/XCorrelationId"
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -6970,6 +8013,14 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "ApiKeyHeader": []
+          },
+          {
+            "ApiKeyAuthorization": []
+          }
+        ],
         "summary": "Grounded RAG answer with explicit citations.",
         "tags": [
           "Query"
@@ -6980,6 +8031,17 @@
       "post": {
         "description": "Frames (RAG mode, ``FLYCANON_ANSWER_MODE=rag``):\n\n* ``event: hit`` -- one frame per retrieved citation\n(UI can render citation badges immediately).\n* ``event: final`` -- terminal frame with the full answer\n+ the cited subset + model + elapsed_ms + no_answer flag.\n\nFrames (RLM mode, the default):\n\n* ``event: status`` -- one ``reasoning`` frame per REPL turn\n(carrying the turn number + the latest document accessed);\nRLM has no pre-retrieval step so there are no ``hit`` frames.\n* ``event: final`` -- the same terminal frame shape.\n\nScope is fixed to the (tenant, workspace) carried by the\nrequest headers; the :class:`RetrievalService` fails closed\non missing values.",
         "operationId": "stream_answer",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/XTenantId"
+          },
+          {
+            "$ref": "#/components/parameters/XWorkspaceId"
+          },
+          {
+            "$ref": "#/components/parameters/XCorrelationId"
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -7005,6 +8067,14 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "ApiKeyHeader": []
+          },
+          {
+            "ApiKeyAuthorization": []
+          }
+        ],
         "summary": "SSE answer stream routed through the answer dispatcher.",
         "tags": [
           "QueryStream"
@@ -7014,6 +8084,17 @@
     "/api/v1/query/suggest": {
       "post": {
         "operationId": "suggest",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/XTenantId"
+          },
+          {
+            "$ref": "#/components/parameters/XWorkspaceId"
+          },
+          {
+            "$ref": "#/components/parameters/XCorrelationId"
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -7046,6 +8127,14 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "ApiKeyHeader": []
+          },
+          {
+            "ApiKeyAuthorization": []
+          }
+        ],
         "summary": "Suggested follow-up questions for chat UI chips.",
         "tags": [
           "QueryStream"
@@ -7056,6 +8145,17 @@
       "post": {
         "description": "BM25 (Postgres ``tsvector`` + GIN on ``canon_chunks``) is fused\nwith dense-vector search (pgvector) via Reciprocal Rank\nFusion::\n\nscore(chunk) = sum_over_modalities( 1 / (k + rank) )\n\nwith ``k`` from ``FLYCANON_RETRIEVAL_RRF_K`` (default 60).\nThe vector half uses the embedding provider configured in\n``FLYCANON_EMBEDDING_MODEL``; the BM25 half uses the\n``tsvector``-indexed chunk content.\n\nFilters in the request body compose with ``AND`` and are\napplied *post-retrieval*; the retriever widens internally by\n3x (so ``top_k=10`` actually fetches 30 candidates) before\ntrimming, but heavy filtering may still starve the result\nset -- raise ``per_query_k`` if so.\n\nScope is fixed to the (tenant, workspace) carried by the\nrequest headers; the :class:`RetrievalService` fails closed\non missing values.\n\nUse this surface when:\n\n* you want to power your own answer / summarisation step,\n* you need the raw evidence (chunk content + citation\nmetadata) without the answer-stage cost,\n* you're building a \"show citations\" UI that lets the user\nread the source verbatim.\n\nReturns :class:`SearchResponse` (always 200). Empty result\nsets return ``hits=[]``.",
         "operationId": "search",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/XTenantId"
+          },
+          {
+            "$ref": "#/components/parameters/XWorkspaceId"
+          },
+          {
+            "$ref": "#/components/parameters/XCorrelationId"
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -7088,6 +8188,14 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "ApiKeyHeader": []
+          },
+          {
+            "ApiKeyAuthorization": []
+          }
+        ],
         "summary": "Hybrid retrieval over the canon corpus.",
         "tags": [
           "Query"
@@ -7134,6 +8242,15 @@
               "default": 0,
               "type": "integer"
             }
+          },
+          {
+            "$ref": "#/components/parameters/XTenantId"
+          },
+          {
+            "$ref": "#/components/parameters/XWorkspaceId"
+          },
+          {
+            "$ref": "#/components/parameters/XCorrelationId"
           }
         ],
         "responses": {
@@ -7148,6 +8265,14 @@
             "description": "Successful response"
           }
         },
+        "security": [
+          {
+            "ApiKeyHeader": []
+          },
+          {
+            "ApiKeyAuthorization": []
+          }
+        ],
         "summary": "Paginated, filterable source list.",
         "tags": [
           "Sources"
@@ -7174,6 +8299,15 @@
               "default": "",
               "type": "string"
             }
+          },
+          {
+            "$ref": "#/components/parameters/XTenantId"
+          },
+          {
+            "$ref": "#/components/parameters/XWorkspaceId"
+          },
+          {
+            "$ref": "#/components/parameters/XCorrelationId"
           }
         ],
         "requestBody": {
@@ -7201,6 +8335,14 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "ApiKeyHeader": []
+          },
+          {
+            "ApiKeyAuthorization": []
+          }
+        ],
         "summary": "Submit a source for intake.",
         "tags": [
           "Sources"
@@ -7208,6 +8350,46 @@
       }
     },
     "/api/v1/sources/{source_id}": {
+      "delete": {
+        "description": "The user-tier sibling of ``DELETE /api/v1/agent/sources/{id}``,\nadded in 26.7.1 because a control plane that provisions\nworkspaces and retention policies over the user tier had no way\nto delete a document without minting itself an agent token.\nDispatches the same :class:`RemoveSourceCommand`: BM25 rows and\ndense vectors are purged, chunk rows deleted, the original\nremoved from the object store (so an erased document is gone\nfrom the RLM corpus too, not only from search), the row\ndeleted, an audit row written and ``SourceRemoved`` published.\n\nUnknown ids -- including ids that exist in another workspace of\nthe same tenant -- return ``404 source_not_found``. The verb is\nnot idempotent on the wire (a second call is a 404); callers\nthat retry should treat 404 after a 204 as success.",
+        "operationId": "remove_source",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "source_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/XTenantId"
+          },
+          {
+            "$ref": "#/components/parameters/XWorkspaceId"
+          },
+          {
+            "$ref": "#/components/parameters/XCorrelationId"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyHeader": []
+          },
+          {
+            "ApiKeyAuthorization": []
+          }
+        ],
+        "summary": "Remove a source, its indexed projections and its stored original.",
+        "tags": [
+          "Sources"
+        ]
+      },
       "get": {
         "description": "Returns the full :class:`SourceRecord`. The\n``content_sha256`` field doubles as the dedup anchor: two\n``SourceRecord`` rows with the same sha point at the same\ncanonical content.\n\nErrors:\n\n* ``404 source_not_found`` -- the id is unknown.",
         "operationId": "get_source",
@@ -7219,6 +8401,15 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "$ref": "#/components/parameters/XTenantId"
+          },
+          {
+            "$ref": "#/components/parameters/XWorkspaceId"
+          },
+          {
+            "$ref": "#/components/parameters/XCorrelationId"
           }
         ],
         "responses": {
@@ -7233,6 +8424,14 @@
             "description": "Successful response"
           }
         },
+        "security": [
+          {
+            "ApiKeyHeader": []
+          },
+          {
+            "ApiKeyAuthorization": []
+          }
+        ],
         "summary": "Fetch a single source by id.",
         "tags": [
           "Sources"
@@ -7249,6 +8448,15 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "$ref": "#/components/parameters/XTenantId"
+          },
+          {
+            "$ref": "#/components/parameters/XWorkspaceId"
+          },
+          {
+            "$ref": "#/components/parameters/XCorrelationId"
           }
         ],
         "requestBody": {
@@ -7283,6 +8491,14 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "ApiKeyHeader": []
+          },
+          {
+            "ApiKeyAuthorization": []
+          }
+        ],
         "summary": "Re-ingest an existing source under the same ``source_id``.",
         "tags": [
           "Sources"
@@ -7293,6 +8509,17 @@
       "post": {
         "description": "Each entry runs through the same intake pipeline as\n:meth:`submit_json` (binary normaliser -> loader -> chunker\n-> embedder -> indexer -> audit + event). Entries are\nprocessed **sequentially** (we don't fan out internally so\nthe binary normaliser's caps remain meaningful per-entry),\nbut a failure on any entry never aborts the batch.\n\nReturns :class:`BulkSourcesResponse` with one\n:class:`BulkSourceResult` per input entry carrying the\noutcome:\n\n* ``status=succeeded`` -- ``source`` is populated.\n* ``status=failed`` -- ``error_code`` + ``error_message``\ncarry the typed failure reason (same codes as the\nsingle-source endpoint).\n\nThe HTTP status is **always 200** regardless of per-entry\noutcomes; clients inspect each result's ``status`` to\ndecide what to retry. The wire shape mirrors the AWS\nSQS / S3 batch-API convention so an SDK retry helper can\noperate on the result list directly.",
         "operationId": "submit_bulk",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/XTenantId"
+          },
+          {
+            "$ref": "#/components/parameters/XWorkspaceId"
+          },
+          {
+            "$ref": "#/components/parameters/XCorrelationId"
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -7325,6 +8552,14 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "ApiKeyHeader": []
+          },
+          {
+            "ApiKeyAuthorization": []
+          }
+        ],
         "summary": "Submit up to 100 sources in one call.",
         "tags": [
           "Sources"
@@ -7334,6 +8569,17 @@
     "/api/v1/stats": {
       "get": {
         "operationId": "get",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/XTenantId"
+          },
+          {
+            "$ref": "#/components/parameters/XWorkspaceId"
+          },
+          {
+            "$ref": "#/components/parameters/XCorrelationId"
+          }
+        ],
         "responses": {
           "200": {
             "content": {
@@ -7346,6 +8592,14 @@
             "description": "Successful response"
           }
         },
+        "security": [
+          {
+            "ApiKeyHeader": []
+          },
+          {
+            "ApiKeyAuthorization": []
+          }
+        ],
         "tags": [
           "Stats"
         ]
@@ -7354,6 +8608,17 @@
     "/api/v1/taxonomy": {
       "get": {
         "operationId": "get_taxonomy",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/XTenantId"
+          },
+          {
+            "$ref": "#/components/parameters/XWorkspaceId"
+          },
+          {
+            "$ref": "#/components/parameters/XCorrelationId"
+          }
+        ],
         "responses": {
           "200": {
             "content": {
@@ -7366,6 +8631,14 @@
             "description": "Successful response"
           }
         },
+        "security": [
+          {
+            "ApiKeyHeader": []
+          },
+          {
+            "ApiKeyAuthorization": []
+          }
+        ],
         "summary": "Return the full taxonomy as a flat list ordered breadth-first.",
         "tags": [
           "Taxonomy"
@@ -7375,6 +8648,17 @@
     "/api/v1/taxonomy/nodes": {
       "post": {
         "operationId": "create_node",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/XTenantId"
+          },
+          {
+            "$ref": "#/components/parameters/XWorkspaceId"
+          },
+          {
+            "$ref": "#/components/parameters/XCorrelationId"
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -7407,6 +8691,14 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "ApiKeyHeader": []
+          },
+          {
+            "ApiKeyAuthorization": []
+          }
+        ],
         "summary": "Attach a new node to the tree.",
         "tags": [
           "Taxonomy"
@@ -7439,6 +8731,17 @@
       "get": {
         "description": "Ordered ``created_at DESC`` (the repository's contract) so the\nmost-recently-opened workspaces surface first.",
         "operationId": "list_workspaces",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/XTenantId"
+          },
+          {
+            "$ref": "#/components/parameters/XWorkspaceId"
+          },
+          {
+            "$ref": "#/components/parameters/XCorrelationId"
+          }
+        ],
         "responses": {
           "200": {
             "content": {
@@ -7454,6 +8757,14 @@
             "description": "Successful response"
           }
         },
+        "security": [
+          {
+            "ApiKeyHeader": []
+          },
+          {
+            "ApiKeyAuthorization": []
+          }
+        ],
         "summary": "Return every workspace owned by the caller's tenant.",
         "tags": [
           "Workspaces"
@@ -7462,6 +8773,17 @@
       "post": {
         "description": "The body carries the caller-chosen workspace id (slug,\n``<= 64`` chars). Tenant id comes from the ``X-Tenant-Id``\nheader -- the body intentionally does not accept it so a\ncaller cannot create workspaces under another tenant.\n\nReturns ``201 Created`` with the persisted :class:`WorkspaceSpec`.",
         "operationId": "create",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/XTenantId"
+          },
+          {
+            "$ref": "#/components/parameters/XWorkspaceId"
+          },
+          {
+            "$ref": "#/components/parameters/XCorrelationId"
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -7494,6 +8816,14 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "ApiKeyHeader": []
+          },
+          {
+            "ApiKeyAuthorization": []
+          }
+        ],
         "summary": "Create a workspace.",
         "tags": [
           "Workspaces"
@@ -7512,6 +8842,15 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "$ref": "#/components/parameters/XTenantId"
+          },
+          {
+            "$ref": "#/components/parameters/XWorkspaceId"
+          },
+          {
+            "$ref": "#/components/parameters/XCorrelationId"
           }
         ],
         "responses": {
@@ -7526,6 +8865,14 @@
             "description": "Successful response"
           }
         },
+        "security": [
+          {
+            "ApiKeyHeader": []
+          },
+          {
+            "ApiKeyAuthorization": []
+          }
+        ],
         "summary": "Fetch a single workspace by id within the caller's tenant.",
         "tags": [
           "Workspaces"
@@ -7542,6 +8889,15 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "$ref": "#/components/parameters/XTenantId"
+          },
+          {
+            "$ref": "#/components/parameters/XWorkspaceId"
+          },
+          {
+            "$ref": "#/components/parameters/XCorrelationId"
           }
         ],
         "requestBody": {
@@ -7576,6 +8932,14 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "ApiKeyHeader": []
+          },
+          {
+            "ApiKeyAuthorization": []
+          }
+        ],
         "summary": "Apply a sparse patch to a workspace row.",
         "tags": [
           "Workspaces"
@@ -7594,6 +8958,15 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "$ref": "#/components/parameters/XTenantId"
+          },
+          {
+            "$ref": "#/components/parameters/XWorkspaceId"
+          },
+          {
+            "$ref": "#/components/parameters/XCorrelationId"
           }
         ],
         "responses": {
@@ -7608,7 +8981,64 @@
             "description": "Successful response"
           }
         },
+        "security": [
+          {
+            "ApiKeyHeader": []
+          },
+          {
+            "ApiKeyAuthorization": []
+          }
+        ],
         "summary": "Close a workspace (status='closed' + closed_at=now()).",
+        "tags": [
+          "Workspaces"
+        ]
+      }
+    },
+    "/api/v1/workspaces/{workspace_id}:purge": {
+      "post": {
+        "description": "The destructive sibling of ``:close`` (which only flips the\nstatus). Every source is removed through the full pipeline --\ndense vectors, chunks, the stored original in the object store,\nthe row, an audit entry and a ``SourceRemoved`` event each --\nthen knowledge items with their versions, citations and\nrelations, candidates, conversations and turns, ingest jobs and\nevents, and cost events are deleted in one transaction, the\nworkspace row is moved to ``closed`` and a ``WorkspaceDeleted``\nevent is emitted. Audit rows are kept (the log is append-only)\nand a ``workspace.purged`` row records the counts.\n\n``X-Workspace-Id`` MUST equal the path id\n(``400 workspace_scope_mismatch`` otherwise): under the\nproduction RLS role the header is what scopes every row the\nrequest can see, so a purge aimed at a different path id would\nsilently do nothing -- or, on a BYPASSRLS dev role, hit the\nwrong workspace. Requiring agreement makes the verb mean the\nsame thing on both roles.\n\nIdempotent: a workspace with nothing left (or one that never had\na ``canon_workspaces`` row) returns ``200`` with zero counts and\n``closed=false``, so an off-boarding job can retry.",
+        "operationId": "purge",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/XTenantId"
+          },
+          {
+            "$ref": "#/components/parameters/XWorkspaceId"
+          },
+          {
+            "$ref": "#/components/parameters/XCorrelationId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspacePurgeResult"
+                }
+              }
+            },
+            "description": "Successful response"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyHeader": []
+          },
+          {
+            "ApiKeyAuthorization": []
+          }
+        ],
+        "summary": "Erase everything the workspace holds, then close it.",
         "tags": [
           "Workspaces"
         ]

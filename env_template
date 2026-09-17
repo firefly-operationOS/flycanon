@@ -332,7 +332,41 @@ FLYCANON_OCR_LANG=eng+spa
 # ANTHROPIC_API_KEY=
 
 # ----------------------------------------------------------------------------
-# Security (optional)
+# Security
 # ----------------------------------------------------------------------------
-# Static API keys that grant access. Comma-separated.
+# Static platform API keys, comma-separated. When set, every /api/v1/*
+# route (except GET /api/v1/version) and the admin dashboard require
+# ``X-API-Key: <key>`` or ``Authorization: ApiKey <key>``; agent-tier
+# requests carrying X-Agent-Token are exempt. EMPTY = the user tier is
+# OPEN to anyone who can reach the port (the boot log warns). Set it on
+# every deployment other tenants can reach. Several keys let you rotate.
 FLYCANON_API_KEYS=
+
+# Shared secret for the ``X-Flycanon-Signature`` HMAC-SHA256 header on
+# async-ingest callback webhooks (?callback_url=). Empty = unsigned
+# callbacks (the boot log warns). Same value on api and worker.
+FLYCANON_WEBHOOK_SECRET=
+
+# Outbound host policy for ``uri`` fetches and ``callback_url``:
+# loopback, private (RFC 1918 / ULA), link-local (169.254/16 -- the
+# cloud metadata range) and reserved addresses are refused, literal or
+# via DNS, on every redirect hop. ``true`` lifts the denylist for a dev
+# stack whose origins and hooks live on the same private network. Never
+# on a host tenants can reach.
+FLYCANON_URL_FETCH_ALLOW_PRIVATE=false
+
+# DSN of the BYPASSRLS role (flycanon_admin) for the tenant-wide
+# GET /api/v1/workspaces listing. Empty = reuse FLYCANON_DATABASE_URL,
+# which under the flycanon_app role limits the listing to the caller's
+# own workspace. See docs/deployment.md "RLS roles".
+FLYCANON_ADMIN_DATABASE_URL=
+
+# The admin dashboard API requires authentication (a valid platform
+# key). ``false`` opens it -- loopback development only.
+FLYCANON_ADMIN_REQUIRE_AUTH=true
+
+# Postgres-outbox consumer group. Leave unset: the API defaults to
+# ``flycanon-api`` and ``flycanon worker`` to ``flycanon-workers``. Both
+# processes on ONE group share -- and steal from -- one cursor, and
+# async ingest jobs stay queued forever.
+# FLYCANON_EDA_GROUP=

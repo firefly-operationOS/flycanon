@@ -91,3 +91,34 @@ class WorkspaceSummary(BaseModel):
     created_at: datetime
     updated_at: datetime
     closed_at: datetime | None = None
+
+
+class WorkspacePurgeResult(BaseModel):
+    """Wire shape of ``POST /api/v1/workspaces/{workspace_id}:purge``.
+
+    Every counter is the number of rows (or objects) erased by THIS
+    call; a repeated purge reports zeros. ``closed`` is ``False`` when
+    no ``canon_workspaces`` row existed for the id -- an implicit
+    workspace that only ever held data -- and the data was still
+    purged. Audit rows are never counted because they are never
+    deleted.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    tenant_id: str
+    workspace_id: str
+    sources_removed: int = Field(ge=0)
+    originals_deleted: int = Field(ge=0, description="Stored originals removed from the object store.")
+    chunks_removed: int = Field(ge=0)
+    knowledge_items_removed: int = Field(ge=0)
+    knowledge_versions_removed: int = Field(ge=0)
+    citations_removed: int = Field(ge=0)
+    knowledge_relations_removed: int = Field(ge=0)
+    candidates_removed: int = Field(ge=0)
+    conversations_removed: int = Field(ge=0)
+    conversation_turns_removed: int = Field(ge=0)
+    ingest_jobs_removed: int = Field(ge=0)
+    ingest_job_events_removed: int = Field(ge=0)
+    cost_events_removed: int = Field(ge=0)
+    closed: bool = Field(description="Whether a workspace row existed and was moved to ``closed``.")

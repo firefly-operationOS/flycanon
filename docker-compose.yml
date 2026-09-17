@@ -105,6 +105,10 @@ services:
       FLYCANON_ANSWER_MODEL: ${FLYCANON_ANSWER_MODEL:-anthropic:claude-sonnet-4-6}
       FLYCANON_OLLAMA_BASE_URL: ${FLYCANON_OLLAMA_BASE_URL:-http://ollama:11434}
       FLYCANON_CORPUS_PATH: /app/canon-data/corpus.db
+      # Platform key(s) + webhook secret: empty in a fresh checkout so the
+      # stack boots open on loopback; set both in .env before exposing it.
+      FLYCANON_API_KEYS: ${FLYCANON_API_KEYS:-}
+      FLYCANON_WEBHOOK_SECRET: ${FLYCANON_WEBHOOK_SECRET:-}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       AZURE_OPENAI_ENDPOINT: ${AZURE_OPENAI_ENDPOINT:-}
@@ -144,6 +148,11 @@ services:
       FLYCANON_ANSWER_MODEL: ${FLYCANON_ANSWER_MODEL:-anthropic:claude-sonnet-4-6}
       FLYCANON_OLLAMA_BASE_URL: ${FLYCANON_OLLAMA_BASE_URL:-http://ollama:11434}
       FLYCANON_CORPUS_PATH: /app/canon-data/corpus.db
+      FLYCANON_WEBHOOK_SECRET: ${FLYCANON_WEBHOOK_SECRET:-}
+      # No FLYCANON_EDA_GROUP here on purpose: ``flycanon worker`` defaults
+      # to ``flycanon-workers`` while the api runs on ``flycanon-api``; a
+      # shared group would let the api's no-op subscriber advance the
+      # cursor past the worker's jobs (see pyfly.yaml).
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       AZURE_OPENAI_ENDPOINT: ${AZURE_OPENAI_ENDPOINT:-}

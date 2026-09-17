@@ -103,7 +103,8 @@ POST /api/v1/search    (raw hybrid retrieval)
       → SearchResponse { hits, elapsed_ms }
 
 POST /api/v1/query     (grounded answer with citations)
-  → AnswerKnowledgeHandler → AnswerDispatcher.answer
+POST /api/v1/conversations/{id}/turn   (same dispatcher since 26.7.1)
+  → AnswerKnowledgeHandler / ConversationService → AnswerDispatcher.answer
       → FLYCANON_ANSWER_MODE selects the engine:
 
       rlm (default) → RLMAnswerService.answer

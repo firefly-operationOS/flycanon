@@ -70,7 +70,7 @@ def test_all_lists_every_export_and_size_locked() -> None:
     """
     import flycanon.web.conventions as c
 
-    assert len(c.__all__) == 38
+    assert len(c.__all__) == 48
     for name in c.__all__:
         assert hasattr(c, name), f"__all__ lists {name!r} but module has no such attribute"
     # Newest addition (2026-05-22): TenantContextMiddleware -- pyfly's
@@ -80,3 +80,30 @@ def test_all_lists_every_export_and_size_locked() -> None:
     # any DB session opens. See ``web/conventions/middleware.py``.
     assert "TenantContextMiddleware" in c.__all__
     assert c.TenantContextMiddleware.__name__ == "TenantContextMiddleware"
+    # 26.7.1 (multi-tenant hardening): the API-key gate + its admin
+    # bridge, the header constants for the key and the webhook
+    # signature, and the refusal classes the new verbs render.
+    for name in (
+        "ApiKeyMiddleware",
+        "ApiKeyPrincipalFilter",
+        "log_api_key_mode",
+        "API_KEY_AUTH_SCHEME",
+        "HEADER_API_KEY",
+        "HEADER_WEBHOOK_SIGNATURE",
+        "MissingApiKey",
+        "InvalidApiKey",
+        "CallbackUrlNotAllowed",
+        "WorkspaceScopeMismatch",
+    ):
+        assert name in c.__all__, name
+    assert c.HEADER_API_KEY == "X-API-Key"
+    assert c.HEADER_WEBHOOK_SIGNATURE == "X-Flycanon-Signature"
+    assert c.API_KEY_AUTH_SCHEME == "ApiKey"
+    assert c.MissingApiKey.status == 401 and c.MissingApiKey.code == "missing_api_key"
+    assert c.InvalidApiKey.status == 401 and c.InvalidApiKey.code == "invalid_api_key"
+    assert (
+        c.CallbackUrlNotAllowed.status == 400 and c.CallbackUrlNotAllowed.code == "callback_url_not_allowed"
+    )
+    assert (
+        c.WorkspaceScopeMismatch.status == 400 and c.WorkspaceScopeMismatch.code == "workspace_scope_mismatch"
+    )

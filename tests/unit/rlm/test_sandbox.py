@@ -307,7 +307,10 @@ def test_apply_rlimits_sets_fsize_zero_cpu_and_as():
         fsize_soft, _ = resource.getrlimit(resource.RLIMIT_FSIZE)
         cpu_soft, _ = resource.getrlimit(resource.RLIMIT_CPU)
         as_soft, _ = resource.getrlimit(resource.RLIMIT_AS)
-        ok = fsize_soft == 0 and cpu_soft == runner._CPU_SECONDS and as_soft == runner._ADDRESS_SPACE
+        # Darwin refuses every finite RLIMIT_AS value (EINVAL), so the runner
+        # keeps the inherited limit there and only Linux asserts the 1 GiB cap.
+        as_ok = as_soft == runner._ADDRESS_SPACE or sys.platform == "darwin"
+        ok = fsize_soft == 0 and cpu_soft == runner._CPU_SECONDS and as_ok
         os._exit(0 if ok else 1)
     _, status = os.waitpid(pid, 0)
     assert os.WIFEXITED(status) and os.WEXITSTATUS(status) == 0

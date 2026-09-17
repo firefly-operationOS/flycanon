@@ -469,6 +469,8 @@ class IntakeService:
                     event_type="SourceReplaced",
                     payload={
                         "source_id": updated_row.id,
+                        "tenant_id": tenant_id,
+                        "workspace_id": workspace_id,
                         "kind": updated_row.kind,
                         "content_sha256": updated_row.content_sha256,
                         "n_chunks": updated_row.n_chunks,
@@ -514,12 +516,20 @@ class IntakeService:
         3. Delete the chunk rows
            (:meth:`ChunkRepository.replace_for_source` with an empty
            set) and then the source row itself.
-        4. Audit ``source.removed`` + publish a ``SourceRemoved`` EDA
+        4. Delete the stored original from the object store when the
+           row carries an ``object_store_key``. Until 26.7.1 removal
+           left the bytes behind, which for a tenant's off-boarding or
+           a retention delete meant the document the caller asked to
+           erase stayed readable by the RLM answer path (it reads
+           originals, not chunks) and stayed on disk / in the bucket.
+           The delete is attempted BEFORE the row goes so a failure
+           leaves a row that still points at the object and can be
+           retried, rather than an orphaned object nobody references.
+           A missing object (``FileNotFoundError``) is not an error --
+           the store port defines delete as idempotent.
+        5. Audit ``source.removed`` + publish a ``SourceRemoved`` EDA
            event so downstream projections can re-sync, mirroring
            ``SourceIngested`` / ``SourceReplaced``.
-
-        Object-store originals are intentionally NOT touched --
-        removal only covers the searchable projections + the row.
         """
         existing = await self._sources.get(
             source_id,
@@ -535,6 +545,7 @@ class IntakeService:
             workspace_id=workspace_id,
         )
         await self._chunks.replace_for_source(source_id, [])
+        original_deleted = await self._delete_original(existing)
         await self._sources.delete(existing)
 
         await self._audit.record(
@@ -548,6 +559,7 @@ class IntakeService:
             payload={
                 "kind": existing.kind,
                 "content_sha256": existing.content_sha256,
+                "original_deleted": original_deleted,
             },
         )
         if self._publisher is not None:
@@ -557,8 +569,11 @@ class IntakeService:
                     event_type="SourceRemoved",
                     payload={
                         "source_id": source_id,
+                        "tenant_id": tenant_id,
+                        "workspace_id": workspace_id,
                         "kind": existing.kind,
                         "content_sha256": existing.content_sha256,
+                        "original_deleted": original_deleted,
                     },
                     headers={"correlation-id": correlation_id} if correlation_id else None,
                 )
@@ -569,6 +584,24 @@ class IntakeService:
                     exc,
                 )
         logger.info("intake removed id=%s kind=%s", source_id, existing.kind)
+
+    async def _delete_original(self, source: SourceRow) -> bool:
+        """Delete the stored original for ``source``; return whether one was removed.
+
+        ``False`` when the row never had a key (``store_originals`` was
+        off at ingest, or the put failed and the ingest continued) or
+        when the object was already gone. Any other store failure
+        propagates so the caller's row is left intact and the removal
+        can be retried -- see :meth:`remove`.
+        """
+        key = getattr(source, "object_store_key", None)
+        if not key:
+            return False
+        try:
+            await self._object_store.delete(key)
+        except FileNotFoundError:
+            return False
+        return True
 
     def _apply_pii_policy(
         self,
@@ -730,6 +763,8 @@ class IntakeService:
                 event_type=self._settings.source_ingested_event,
                 payload={
                     "source_id": source.id,
+                    "tenant_id": source.tenant_id,
+                    "workspace_id": source.workspace_id,
                     "kind": source.kind,
                     "content_sha256": source.content_sha256,
                     "n_chunks": source.n_chunks,
@@ -754,6 +789,8 @@ class IntakeService:
                 event_type=self._settings.source_ingestion_failed_event,
                 payload={
                     "source_id": source.id,
+                    "tenant_id": source.tenant_id,
+                    "workspace_id": source.workspace_id,
                     "kind": source.kind,
                     "code": getattr(exc, "code", "ingestion_failed"),
                     "message": str(exc),

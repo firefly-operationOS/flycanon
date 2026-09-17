@@ -4,6 +4,125 @@ All notable changes to **flycanon** are documented here.
 
 ## [Unreleased]
 
+## [26.7.1] - 2026-09-17
+
+Hardening for a multi-tenant caller (the dworkers control plane, which
+runs one shared flycanon for all its tenants). Every item below was
+found by wiring that caller against 26.7.0.
+
+### Security
+
+- **`FLYCANON_API_KEYS` is now enforced.** The setting existed since
+  the first release and was read by nothing: anyone who could reach
+  port 8500 could read or write any tenant and mint agent tokens for
+  it. `ApiKeyMiddleware` now requires `X-API-Key: <key>` or
+  `Authorization: ApiKey <key>` on every `/api/v1/*` route except
+  `GET /api/v1/version`, and on the admin dashboard, whenever at least
+  one key is configured (`401 missing_api_key` / `401 invalid_api_key`,
+  RFC 7807, constant-time comparison). `/api/v1/agent/*` requests that
+  carry `X-Agent-Token` are exempt -- the token is their credential.
+  With the setting empty the service stays open as before and the boot
+  log says so (`api-key gate DISABLED`); with keys it logs
+  `api-key gate ENABLED: n key(s)`.
+- **Admin dashboard requires authentication** (`pyfly.admin.require-auth`
+  defaults to `true`, overridable with `FLYCANON_ADMIN_REQUIRE_AUTH=false`
+  for loopback dev). A validated platform key is bridged into pyfly's
+  `SecurityContext` (`ApiKeyPrincipalFilter`) so the dashboard answers
+  to the key and refuses everything else.
+- **Outbound host policy (SSRF guard).** `uri` fetches and
+  `callback_url` webhooks refuse loopback, private (RFC 1918 / ULA),
+  link-local (instance metadata), multicast and reserved addresses --
+  literal, DNS-resolved, and on every redirect hop (redirects are now
+  followed by hand, at most five) -- with `400 url_fetch_forbidden_host`
+  / `400 callback_url_not_allowed`. `FLYCANON_URL_FETCH_ALLOW_PRIVATE=true`
+  lifts the denylist for private dev stacks. Fetcher failures now render
+  as problem+json (`url_fetch_*` codes, 400 / 413 / 502) instead of the
+  framework 500. Documented gap: DNS rebinding between check and dial.
+- **Signed webhooks.** Async-ingest callbacks carry
+  `X-Flycanon-Signature: t=<unix>,v1=<hex HMAC-SHA256 over the raw
+  body>` when `FLYCANON_WEBHOOK_SECRET` is set (unsigned + boot warning
+  otherwise), and the payload now carries `tenant_id` / `workspace_id`.
+  `verify_signature` ships in `flycanon.web.conventions.webhook_signature`.
+
+### Added
+
+- **User-tier `DELETE /api/v1/sources/{id}`** (204; `404
+  source_not_found`). Both it and the agent-tier DELETE now **delete the
+  stored original from the object store** as well as the index, chunks
+  and row -- before, an "erased" document stayed readable by the RLM
+  corpus. The audit payload and `SourceRemoved` event carry
+  `original_deleted`.
+- **`POST /api/v1/workspaces/{id}:purge`** -> `WorkspacePurgeResult`.
+  Removes every source through the full pipeline, then knowledge items
+  / versions / citations / relations, candidates, conversations /
+  turns, ingest jobs / events and cost events in one transaction,
+  closes the workspace and emits `WorkspaceDeleted`; audit rows are
+  kept and a `workspace.purged` row records the counts. `X-Workspace-Id`
+  must equal the path id (`400 workspace_scope_mismatch`). Idempotent.
+- **Job-stream resume.** `GET /api/v1/ingest-jobs/{id}/stream` accepts
+  `?after_id=<id>` and the standard `Last-Event-ID` header, and stamps
+  `id:` on every `event` frame, so a reconnect no longer replays the
+  whole history (the docs had promised `after_id` since 26.5).
+- **`FLYCANON_ADMIN_DATABASE_URL`.** `WorkspaceRepository.list_for_tenant`
+  (`GET /api/v1/workspaces`) runs on this BYPASSRLS engine; under the
+  production `flycanon_app` role the request engine could only ever
+  return the caller's own header workspace.
+- **OpenAPI wire contract.** `openapi.json` declares `securitySchemes`
+  (`ApiKeyHeader`, `ApiKeyAuthorization`, `AgentToken`) and reusable
+  header parameters (`X-Tenant-Id`, `X-Workspace-Id`, `X-Correlation-Id`,
+  `Idempotency-Key`) attached to every operation, so a generated client
+  sends the mandatory headers.
+- **Scope on ingest events.** Every `flycanon.ingest` payload
+  (`SourceIngested`, `SourceReplaced`, `SourceRemoved`,
+  `SourceIngestionFailed`, `IngestSourceRequested`, `IngestSourceFinished`,
+  `IngestSourceFailed`) carries `tenant_id` / `workspace_id`.
+
+### Changed
+
+- **Conversations use the same engine as `/query`.** `ConversationService`
+  is wired to `AnswerDispatcher`, so `POST /conversations/{id}/turn`
+  answers with RLM by default and only with the deprecated RAG engine
+  under `FLYCANON_ANSWER_MODE=rag` (then with the `X-Flycanon-Deprecation`
+  header, like `/query`).
+- **Framework pins moved** to pyfly `v26.09.04` and fireflyframework-agentic
+  `v26.06.14`; the unit suite, ruff and pyright pass unchanged on them.
+  **`uv.lock` is now committed** and CI / the Dockerfile run
+  `uv sync --locked`.
+- **API and worker no longer share a Postgres-outbox consumer group.**
+  pyfly's CQRS auto-configuration subscribes a cache-invalidation
+  bridge on `*` in every process, so an API on the worker's group
+  advanced the shared cursor past `IngestSourceRequested` events and
+  `?mode=async` jobs stayed `queued` forever. The API defaults to
+  `flycanon-api`, `flycanon worker` to `flycanon-workers`
+  (`FLYCANON_EDA_GROUP` overrides either).
+- **`flycanon serve` exports pyfly's `_PYFLY_SERVER_*` variables** so the
+  `server_started` log line reports the real port instead of `8080`.
+
+### Fixed
+
+- **The shipped image could not ingest.** The localfs object-store
+  default `./var/objects` resolved to the root-owned `/app/var` under the
+  `canon` user, so the first ingest failed with EACCES. The image now
+  exports `FLYCANON_OBJECT_STORE_LOCALFS_ROOT=/app/canon-data/objects`
+  (volume-backed) and pre-creates `/app/canon-data/objects` and
+  `/app/var/objects` with `canon` ownership.
+- **Sandbox child on macOS.** `RLIMIT_AS` is not settable on Darwin;
+  the RLM sandbox runner now tolerates that refusal there (CPU and
+  file-size caps still apply) instead of dying at startup, which had
+  failed 27 unit tests on every developer Mac.
+
+### Docs + SDK
+
+- README, QUICKSTART, `docs/payload-reference.md`, `docs/api-reference.md`,
+  `docs/async-ingest.md`, `docs/security-model.md`, `docs/deployment.md`,
+  `docs/eda-events.md`, `docs/conversations.md`, `docs/pipeline.md` and
+  `env_template` describe the routes that exist (JSON `content_base64`
+  intake, `?mode=async`, `/query/stream`, `/conversations/{id}/turn`,
+  `/query/suggest`, `/ingest-jobs/{id}/stream?after_id=`), the new
+  verbs, headers and settings, and the `no_answer` contract.
+- The Python SDK is realigned with the served routes and bumped to
+  `26.7.1` (see `sdks/python/CHANGELOG.md`).
+
 ## [26.7.0] - 2026-07-23
 
 ### Added

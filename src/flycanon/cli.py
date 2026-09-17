@@ -58,6 +58,14 @@ def cmd_serve(_: argparse.Namespace) -> int:
     import uvicorn
 
     settings = get_settings()
+    # pyfly v26.09 writes its ``server_started`` line from the
+    # ``_PYFLY_SERVER_*`` variables that ``pyfly run`` exports; we start
+    # uvicorn ourselves, so without these the boot log claimed
+    # ``port=8080`` while the socket was on ``settings.port``. Export the
+    # same contract so the log tells the truth an operator will act on.
+    os.environ.setdefault("_PYFLY_SERVER_TYPE", "uvicorn")
+    os.environ.setdefault("_PYFLY_SERVER_HOST", "0.0.0.0")
+    os.environ.setdefault("_PYFLY_SERVER_PORT", str(settings.port))
     uvicorn.run(
         "flycanon.main:app",
         host="0.0.0.0",
@@ -67,8 +75,26 @@ def cmd_serve(_: argparse.Namespace) -> int:
     return 0
 
 
+#: Consumer group the worker process drains. Distinct from the API's
+#: default (``flycanon-api`` in pyfly.yaml) on purpose -- see the
+#: ``pyfly.eda.group`` comment there for the outage this prevents.
+WORKER_EDA_GROUP = "flycanon-workers"
+
+
+def ensure_worker_eda_group() -> str:
+    """Default ``FLYCANON_EDA_GROUP`` for the worker process; return the value in force.
+
+    Must run BEFORE :class:`PyFlyApplication` reads ``pyfly.yaml``,
+    because that is where ``${FLYCANON_EDA_GROUP:...}`` is interpolated.
+    An explicit environment value always wins (an operator scaling
+    workers keeps them on one shared group deliberately).
+    """
+    return os.environ.setdefault("FLYCANON_EDA_GROUP", WORKER_EDA_GROUP)
+
+
 def cmd_worker(_: argparse.Namespace) -> int:
     """Boot pyfly, resolve :class:`IngestWorker`, run forever."""
+    ensure_worker_eda_group()
 
     async def _run() -> None:
         from pyfly.core import PyFlyApplication

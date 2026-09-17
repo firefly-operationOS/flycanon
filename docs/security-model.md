@@ -19,8 +19,10 @@ flycanon is designed against four classes of adversary.
 
 | Adversary | Capability | flycanon response |
 |---|---|---|
-| **External attacker, no credentials** | Hits any `/api/v1/*` endpoint without auth headers. | 401 / 403 at the first gate. The only unauthenticated route is `GET /api/v1/version` (and the `/actuator/health/*` probes). Every other path requires tenant headers + JWT (when `FLYCANON_API_KEYS` is set or `pyfly.security.oauth2.resource-server.enabled=true`) or `X-Agent-Token`. |
-| **Authenticated user in tenant A, trying to reach tenant B** | Holds a valid JWT for tenant A; hand-crafts a request with `X-Tenant-Id: B`. | `403 tenant_claim_mismatch` from the conventions layer (the JWT `tenant_id` claim is verified against `X-Tenant-Id`). Even if that gate were bypassed, Postgres RLS returns zero rows. |
+| **External attacker, no credentials** | Hits any `/api/v1/*` endpoint without auth headers. | `401 missing_api_key` at the first gate when `FLYCANON_API_KEYS` is set (the `ApiKeyMiddleware`, enforced since 26.7.1 -- before that the setting was parsed and read by nothing). The only unauthenticated routes are `GET /api/v1/version`, the `/actuator/health/*` probes and the OpenAPI docs. Every other path requires the platform key (`X-API-Key` or `Authorization: ApiKey`) plus tenant headers, or `X-Agent-Token` on the agent tier. With the setting EMPTY the user tier is open -- acceptable only on a private network -- and the boot log warns `api-key gate DISABLED`. |
+| **Tenant that can reach the service, aiming it at the operator's network** | Submits `uri` or `callback_url` pointing at `127.0.0.1`, RFC 1918 space or `169.254.169.254`. | Refused before any socket opens: the outbound host policy resolves the name, rejects loopback / private / link-local / multicast / reserved addresses (literal, via DNS, and on every redirect hop) with `400 url_fetch_forbidden_host` / `400 callback_url_not_allowed`. Known gap: DNS rebinding between the check and the dial (see § 8). |
+| **Party that learned a callback URL** | Forges or replays an async-ingest webhook to the receiver. | Every callback carries `X-Flycanon-Signature` (HMAC-SHA256 over the raw body, timestamp-bound) when `FLYCANON_WEBHOOK_SECRET` is set; receivers verify + reject stale timestamps. Unsigned mode is announced at boot. |
+| **Authenticated user in tenant A, trying to reach tenant B** | Holds a valid JWT for tenant A; hand-crafts a request with `X-Tenant-Id: B`. | `403 tenant_claim_mismatch` from the conventions layer (the JWT `tenant` claim is compared with `X-Tenant-Id`). Note the JWT is decoded WITHOUT signature verification -- it labels the actor and cross-checks the claim, it does not authenticate; a verifying gateway or the platform key does. Even if that gate were bypassed, Postgres RLS returns zero rows. |
 | **Authenticated user in workspace X, trying to reach workspace Y in same tenant** | Holds a valid JWT for tenant T; hand-crafts a request with `X-Workspace-Id: Y` while referencing a resource id from workspace X. | `404 resource_not_found` (workspace scope enforced on every read-by-id route; documented in [api-reference.md § Workspace scope enforcement](api-reference.md#workspace-scope-enforcement)). The repository WHERE clause and Postgres RLS each independently produce the 404. |
 | **Holder of a compromised agent token** | Has the raw secret; can present `X-Agent-Token` against any agent route until the token is revoked. | Revoke via `DELETE /api/v1/agent-tokens/{id}` (see [operations-runbook.md § Token lifecycle ops](operations-runbook.md#3-token-lifecycle-ops)). After revoke, the next `verify` call fails with `invalid_agent_token`. Blast radius is bounded by the token's `workspace_allowlist` + `scopes`. |
 
@@ -155,12 +157,20 @@ a token belonging to tenant B even if they hand-craft the
 `token_id`. Postgres RLS on `canon_agent_tokens` is the second gate
 (see [§ 4 RLS policies](#4-rls-policies)).
 
-### Mutual exclusion with JWT
+### Agent token and the platform key
 
-The `X-Agent-Token` header is mutually exclusive with
-`Authorization: Bearer <jwt>` -- presenting both is rejected at the
-conventions layer. This prevents a caller from blending agent and
-user credentials to compose unintended scope.
+An agent-tier request that carries `X-Agent-Token` is exempt from the
+platform API key: the token is a tenant-scoped, hashed, scope-limited
+credential verified on every request, and requiring the operator key
+on top would force every agent to hold the operator secret -- the
+opposite of what agent tokens are for. The exemption applies only to
+`/api/v1/agent/*` paths; minting (`/api/v1/agent-tokens`) is user tier
+and needs the platform key.
+
+When `Authorization: Bearer <jwt>` is presented together with
+`X-Agent-Token`, the JWT `sub` wins as the `actor` label and the agent
+token is still verified for authorisation; the two credentials cannot
+combine into a wider scope because scope comes from the token alone.
 
 ### Agent-tier callers cannot mint
 
@@ -218,8 +228,13 @@ CREATE POLICY tenant_workspace_isolation ON canon_workspaces
 
 The `id` column **is** the workspace identity, so the policy matches
 `tenant_id` AND `id = app.workspace_id`. The workspace controller's
-`LIST` path runs with `BYPASSRLS` (per-tenant listing across all
-workspaces of the tenant).
+`LIST` path (`GET /api/v1/workspaces`) is therefore a cross-workspace
+read by definition: it runs on a second engine bound to the BYPASSRLS
+role named by `FLYCANON_ADMIN_DATABASE_URL` (since 26.7.1; the
+`tenant_id` WHERE clause remains the isolation boundary there). With
+that setting empty the request engine is reused and, under
+`flycanon_app`, the listing returns only the header workspace -- the
+boot log says so.
 
 ### Special-case: `canon_agent_tokens` (tenant-only)
 
@@ -399,7 +414,9 @@ token.
 | SSE streams (`POST /api/v1/query/stream`, `POST /api/v1/agent/query/stream`, `GET /api/v1/ingest-jobs/{id}/stream`) cannot replay through idempotency -- the stream is stateful + per-connection. | Intentional. Clients re-subscribe with `?after_id=` (for ingest-job event streams) or repeat the query with the same `Idempotency-Key` if the answer is replayable as a single record. |
 | Agent tokens are valid forever until `expires_at` or `DELETE`. | Recommend `expires_at` on every mint; the [consumers.md § Expiry recommendations](consumers.md#expiry-recommendations) suggests 90 days for production service-to-service. The `last_used_at` listing column flags dormant tokens for cleanup. A null `expires_at` is permitted by the schema (no enforcement) but strongly discouraged outside dev. |
 | `canon_chunk_vectors` is runtime-created (see [§ 4](#4-rls-policies) and [operations-runbook.md § 10](operations-runbook.md#10-canon_chunk_vectors-deploy-ordering)). On a first deploy the table exists briefly without RLS. | The PgvectorStore bootstrap installs the policy in-band with table creation. Confirm via `SELECT polname FROM pg_policies WHERE tablename = 'canon_chunk_vectors'` after first boot. |
-| The default deployment ships with no authentication (`FLYCANON_API_KEYS=`). | Production deployments MUST enable at least one auth mode -- static API keys via `FLYCANON_API_KEYS` or OAuth2 resource server via `pyfly.security.oauth2.resource-server.enabled=true`. See [deployment.md § Authentication](deployment.md#authentication). |
+| The default deployment ships with no authentication (`FLYCANON_API_KEYS=`). | Production deployments MUST set `FLYCANON_API_KEYS` (enforced by `ApiKeyMiddleware` on `/api/v1/*` and the admin dashboard) or put a verifying gateway in front. See [deployment.md § Authentication](deployment.md#authentication). |
+| The outbound host policy resolves a hostname and httpx resolves it again to connect; a hostile resolver with a sub-second TTL can answer public first and private second (DNS rebinding). | The guard stops literal, DNS-resolved and redirect-based targeting of private space, which is the cheap and common attack. Pinning the connection to the vetted address needs a custom transport the HTTP client does not expose today; run flycanon in a network namespace with no route to sensitive private ranges as the second layer. |
+| The admin dashboard's `require-auth` gate reads pyfly's `SecurityContext`, which flycanon populates only from a validated platform key. | With `FLYCANON_API_KEYS` set the dashboard answers to the key and refuses everything else; with no keys it is locked unless `FLYCANON_ADMIN_REQUIRE_AUTH=false` (loopback dev only). |
 | EDA publish failures are logged but never abort the originating mutation (best-effort publish). Consumers may miss events during a broker outage. | The durable record is `canon_audit_events`; consumers can rebuild their projection from the table. The Postgres outbox (`pyfly_eda_outbox`) preserves unpublished events until the worker drains. |
 | Idempotency store is in-memory in the default build; replays do not survive a process restart. | Production deployments are expected to swap for a Postgres-backed store (the `IdempotencyStore` protocol is the integration seam). |
 | PII guardrail defaults to `warn` (index as-is + record findings). | Set `FLYCANON_PII_POLICY=redact` to rewrite sensitive spans before chunking + indexing, or `reject` to fail intake with `422 pii_violation`. See [pii.md](pii.md). |

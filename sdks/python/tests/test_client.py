@@ -16,6 +16,8 @@
 
 from __future__ import annotations
 
+import json
+
 import pytest
 import respx
 
@@ -58,6 +60,7 @@ from flycanon_sdk import (
     SubjectCostReport,
     SubmitSourceJsonPayload,
     SuggestionsResponse,
+    SuggestRequest,
     TopConsumersReport,
     ValidationError,
     VersionInfo,
@@ -146,21 +149,77 @@ async def test_api_error_maps_problem_details() -> None:
 @pytest.mark.asyncio
 async def test_submit_source_async_returns_job() -> None:
     async with respx.mock(base_url="http://canon") as mock, CanonClient(base_url="http://canon") as client:
-        mock.post("/api/v1/sources:async").respond(
-            202,
+        route = mock.post("/api/v1/sources", params={"mode": "async"}).respond(
+            201,
             json={
                 "id": "job-1",
                 "status": "queued",
-                "progress": 0.0,
+                "attempts": 0,
+                "callback_url": "https://hooks.example.com/x",
                 "created_at": "2026-05-18T17:00:00Z",
                 "updated_at": "2026-05-18T17:00:00Z",
             },
         )
         job = await client.submit_source_async(
-            SubmitSourceJsonPayload(content_base64="aGk=", filename="hi.md")
+            SubmitSourceJsonPayload(content_base64="aGk=", filename="hi.md"),
+            callback_url="https://hooks.example.com/x",
         )
         assert isinstance(job, IngestJob)
         assert job.status == "queued"
+        sent = route.calls.last.request
+        assert sent.url.params["mode"] == "async"
+        assert sent.url.params["callback_url"] == "https://hooks.example.com/x"
+
+
+@pytest.mark.asyncio
+async def test_delete_source_hits_user_tier_delete() -> None:
+    async with respx.mock(base_url="http://canon") as mock, CanonClient(base_url="http://canon") as client:
+        route = mock.delete("/api/v1/sources/src-1").respond(204)
+        await client.delete_source("src-1")
+        assert route.called
+
+
+@pytest.mark.asyncio
+async def test_api_key_is_sent_as_x_api_key() -> None:
+    async with (
+        respx.mock(base_url="http://canon") as mock,
+        CanonClient(base_url="http://canon", api_key="k1", tenant_id="acme", workspace_id="ws") as client,
+    ):
+        route = mock.get("/api/v1/version").respond(
+            json={
+                "service": "flycanon",
+                "version": "26.7.1",
+                "embedding_model": "x",
+                "answer_model": "y",
+                "answer_fallback_model": "z",
+                "vector_store": "pgvector",
+                "eda_adapter": "postgres",
+            }
+        )
+        await client.version()
+        headers = route.calls.last.request.headers
+        assert headers["X-API-Key"] == "k1"
+        assert "Authorization" not in headers
+        assert headers["X-Tenant-Id"] == "acme" and headers["X-Workspace-Id"] == "ws"
+
+
+@pytest.mark.asyncio
+async def test_purge_workspace_round_trips() -> None:
+    async with respx.mock(base_url="http://canon") as mock, CanonClient(base_url="http://canon") as client:
+        mock.post("/api/v1/workspaces/ws-1:purge").respond(
+            json={
+                "tenant_id": "acme",
+                "workspace_id": "ws-1",
+                "sources_removed": 3,
+                "originals_deleted": 3,
+                "ingest_jobs_removed": 3,
+                "ingest_job_events_removed": 9,
+                "closed": True,
+            }
+        )
+        result = await client.purge_workspace("ws-1")
+        assert result.sources_removed == 3 and result.closed is True
+        assert result.chunks_removed == 0
 
 
 @pytest.mark.asyncio
@@ -284,30 +343,39 @@ async def test_detect_conflicts_returns_relation_ids() -> None:
 
 
 @pytest.mark.asyncio
-async def test_conversation_add_turn_returns_citations() -> None:
+async def test_conversation_add_turn_unwraps_turn_response() -> None:
     async with respx.mock(base_url="http://canon") as mock, CanonClient(base_url="http://canon") as client:
-        mock.post("/api/v1/conversations/c-1/turns").respond(
+        route = mock.post("/api/v1/conversations/c-1/turn").respond(
+            201,
             json={
-                "id": "trn-1",
                 "conversation_id": "c-1",
-                "query": "...",
-                "answer": "yes",
-                "citations": [],
-                "model": "anthropic:claude-sonnet-4-6",
-                "created_at": "2026-05-18T17:00:00Z",
-            }
+                "turn": {
+                    "id": 3,
+                    "conversation_id": "c-1",
+                    "turn_index": 2,
+                    "question": "what?",
+                    "answer": "yes",
+                    "citations": [],
+                    "model": "anthropic:claude-sonnet-4-6",
+                    "elapsed_ms": 12,
+                    "no_answer": False,
+                    "created_at": "2026-05-18T17:00:00Z",
+                },
+            },
         )
-        turn = await client.add_turn("c-1", CreateConversationTurnRequest(query="what?"))
-        assert turn.answer == "yes"
+        turn = await client.add_turn("c-1", CreateConversationTurnRequest(question="what?"))
+        assert turn.answer == "yes" and turn.turn_index == 2 and turn.no_answer is False
+        assert json.loads(route.calls.last.request.content) == {"question": "what?"}
 
 
 @pytest.mark.asyncio
-async def test_suggest_questions_returns_list() -> None:
+async def test_suggest_questions_uses_query_suggest() -> None:
     async with respx.mock(base_url="http://canon") as mock, CanonClient(base_url="http://canon") as client:
-        mock.post("/api/v1/conversations/c-1/suggest").respond(json={"questions": ["What about X?", "Y?"]})
-        suggestions = await client.suggest_questions("c-1")
+        route = mock.post("/api/v1/query/suggest").respond(json={"questions": ["What about X?", "Y?"]})
+        suggestions = await client.suggest_questions(SuggestRequest(question="what?", answer="yes"))
         assert isinstance(suggestions, SuggestionsResponse)
         assert len(suggestions.questions) == 2
+        assert json.loads(route.calls.last.request.content) == {"question": "what?", "answer": "yes", "n": 3}
 
 
 @pytest.mark.asyncio
@@ -522,8 +590,8 @@ async def test_answer_returns_typed_response() -> None:
 # ----------------------------------------------------------------------
 
 
-def test_sdk_version_string_is_26_5_7() -> None:
-    assert __version__ == "26.5.7"
+def test_sdk_version_string_is_26_7_1() -> None:
+    assert __version__ == "26.7.1"
 
 
 def test_canon_workspaces_topic_constant() -> None:
@@ -605,7 +673,7 @@ async def test_user_agent_advertises_sdk_version() -> None:
             }
         )
         await client.version()
-        assert "flycanon-sdk-python/26.5.7" in route.calls.last.request.headers["User-Agent"]
+        assert "flycanon-sdk-python/26.7.1" in route.calls.last.request.headers["User-Agent"]
 
 
 # ----------------------------------------------------------------------
@@ -631,19 +699,17 @@ async def test_get_job_uses_ingest_jobs_path() -> None:
 
 
 @pytest.mark.asyncio
-async def test_cancel_job_uses_ingest_jobs_path() -> None:
+async def test_stream_job_sends_after_id_only_when_resuming() -> None:
+    body = b'event: status\ndata: {"id": "job-7", "status": "succeeded"}\n\n'
     async with respx.mock(base_url="http://canon") as mock, CanonClient(base_url="http://canon") as client:
-        route = mock.post("/api/v1/ingest-jobs/job-7:cancel").respond(
-            json={
-                "id": "job-7",
-                "status": "cancelled",
-                "progress": 0.5,
-                "created_at": "2026-05-22T17:00:00Z",
-                "updated_at": "2026-05-22T17:00:01Z",
-            }
+        route = mock.get("/api/v1/ingest-jobs/job-7/stream").respond(
+            content=body, headers={"Content-Type": "text/event-stream"}
         )
-        await client.cancel_job("job-7")
-        assert route.called
+        frames = [f async for f in client.stream_job("job-7")]
+        assert frames[0].event == "status"
+        assert "after_id" not in route.calls.last.request.url.params
+        [f async for f in client.stream_job("job-7", after_id=4)]
+        assert route.calls.last.request.url.params["after_id"] == "4"
 
 
 # ----------------------------------------------------------------------
