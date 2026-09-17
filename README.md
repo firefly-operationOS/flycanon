@@ -175,9 +175,10 @@ LLM) is unaffected and stays.
   dev/test, `s3` for production). Sources without a stored original
   (no `object_store_key`) are skipped by the RLM corpus builder.
 - **`ANTHROPIC_API_KEY`** must be set at runtime: the RLM engine calls
-  the Anthropic Messages API directly for all three RLM models
-  (`FLYCANON_RLM_ROOT_MODEL` / `FLYCANON_RLM_SUB_MODEL` /
-  `FLYCANON_RLM_ANSWER_MODEL`, all default `anthropic:claude-sonnet-4-6`).
+  the Anthropic Messages API directly for both RLM models
+  (`FLYCANON_RLM_ROOT_MODEL`, which also produces the final answer, and
+  `FLYCANON_RLM_SUB_MODEL` for the REPL's sub-calls; both default
+  `anthropic:claude-sonnet-4-6`).
 
 See [docs/deployment.md](docs/deployment.md#answer-mode-rlm-default--rag-deprecated)
 for every RLM / object-store env var and its default.

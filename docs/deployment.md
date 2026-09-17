@@ -134,8 +134,7 @@ value other than `rag` is normalised to `rlm`.
 |-----|------------|---------|
 | `FLYCANON_ANSWER_MODE` | `rlm` (default) routes to the Recursive Language Model answerer; `rag` routes to the legacy hybrid-retrieval answerer. | `rlm` |
 | `FLYCANON_RLM_ROOT_MODEL` | Orchestrator model that drives the CodeAct REPL loop. `<provider>:<model>`. Claude 4.6 and later (`claude-sonnet-5`, `claude-opus-5`, Opus 4.6/4.7/4.8, Sonnet 4.6) are called with adaptive thinking and no sampling knobs; Haiku 4.5 / Sonnet 4.5 with the deterministic `temperature: 0.0`. | `anthropic:claude-sonnet-4-6` |
-| `FLYCANON_RLM_SUB_MODEL` | Model for flat recursive sub-calls made from REPL code. Same generation rule as the root model. | `anthropic:claude-sonnet-4-6` |
-| `FLYCANON_RLM_ANSWER_MODEL` | Model for the final single-shot answer synthesis. | `anthropic:claude-sonnet-4-6` |
+| `FLYCANON_RLM_SUB_MODEL` | Model for the flat `llm()` / `rlm()` sub-calls made from REPL code and for the self-consistency candidate selector. Same generation rule as the root model. The **final answer** is the root model's, whether it comes from the `final(...)` tool call or from the tool-less forced-final turn after `FLYCANON_RLM_MAX_ITERS`; there is no third model. (`FLYCANON_RLM_ANSWER_MODEL`, documented in 26.7.0 as the model for "the final single-shot answer synthesis", was read by nothing and was removed in 26.7.1; an env file that still sets it is ignored.) | `anthropic:claude-sonnet-4-6` |
 | `FLYCANON_RLM_MAX_ITERS` | Max orchestrator turns before the loop gives up and asks for a plain-text answer from the transcript. | `8` |
 | `FLYCANON_RLM_SUB_BUDGET` | Total recursive sub-call budget across one root session. | `12` |
 | `FLYCANON_RLM_MAX_DEPTH` | How deep `rlm(...)` may nest before degrading to a flat `llm`. | `1` |
@@ -162,7 +161,7 @@ chunks, which is why it depends on the object store below.
   key on the source row. Sources without a stored original (no
   `object_store_key`) are silently skipped by the RLM corpus builder.
 - **`ANTHROPIC_API_KEY` at runtime.** The RLM engine calls the
-  Anthropic Messages API directly for all three RLM models; the
+  Anthropic Messages API directly for both RLM models; the
   `anthropic:` prefix is stripped before the id is sent.
 
 ### RAG deprecation

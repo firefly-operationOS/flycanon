@@ -117,6 +117,20 @@ found by wiring that caller against 26.7.0.
   `?mode=async` jobs stayed `queued` forever. The API defaults to
   `flycanon-api`, `flycanon worker` to `flycanon-workers`
   (`FLYCANON_EDA_GROUP` overrides either).
+- **`FLYCANON_RLM_ANSWER_MODEL` removed.** `CanonSettings.rlm_answer_model`
+  shipped with the RLM settings in 26.7.0, documented as "the model for
+  the final single-shot answer synthesis", and was read by nothing: the
+  RLM's final answer is produced by the **root** model, either as the
+  `final(...)` tool call of the CodeAct loop or as the tool-less
+  forced-final turn when the loop runs out (both `chat_raw` turns on
+  `FLYCANON_RLM_ROOT_MODEL`); the sub model serves the `llm()` / `rlm()`
+  helpers and the self-consistency selector. There is no single-shot
+  synthesis step for a third model to drive, so the knob is gone rather
+  than wired; `CanonSettings` ignores unknown `FLYCANON_*` variables, so
+  an env file that still sets it boots unchanged. The docs, `env_template`
+  and the README now name two RLM models and say which one answers
+  (`tests/unit/rlm/test_which_model_answers.py` records the request
+  bodies of a whole session and pins it).
 - **Both entry points export pyfly's `_PYFLY_SERVER_*` variables.**
   pyfly logs `server_started` in every process with `0.0.0.0:8080` as
   the fallback. `flycanon serve` exports `uvicorn` / `0.0.0.0` /

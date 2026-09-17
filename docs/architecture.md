@@ -239,9 +239,12 @@ is a thin pass-through and the wire contract is identical across modes:
   LLM call. The dispatcher logs a deprecation warning on every RAG-mode
   answer and the path is slated for removal in a future release.
 
-`FLYCANON_RLM_ROOT_MODEL` / `FLYCANON_RLM_SUB_MODEL` /
-`FLYCANON_RLM_ANSWER_MODEL` (all default `anthropic:claude-sonnet-4-6`)
-select the three RLM models; `FLYCANON_RLM_MAX_ITERS` /
+`FLYCANON_RLM_ROOT_MODEL` / `FLYCANON_RLM_SUB_MODEL` (both default
+`anthropic:claude-sonnet-4-6`) select the two RLM models: the root
+model drives the CodeAct loop and produces the final answer (the
+`final(...)` tool call, or the tool-less forced-final turn when the
+loop runs out); the sub model serves the `llm()` / `rlm()` helpers and
+the self-consistency selector. `FLYCANON_RLM_MAX_ITERS` /
 `FLYCANON_RLM_SUB_BUDGET` / `FLYCANON_RLM_MAX_DEPTH` bound the loop. The
 engine calls the Anthropic Messages API directly, so an
 `ANTHROPIC_API_KEY` is required at runtime in the default mode.

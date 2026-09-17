@@ -125,9 +125,13 @@ FLYCANON_ANSWER_MODE=rlm
 # RLM models, all in ``<provider>:<model>`` form (the ``anthropic:``
 # prefix is stripped before the id is sent to the Anthropic Messages API,
 # which reads ANTHROPIC_API_KEY from the environment -- see below).
-#   root   -- orchestrator model that drives the CodeAct REPL loop.
-#   sub    -- model for flat recursive sub-calls made from REPL code.
-#   answer -- model for the final single-shot answer synthesis.
+#   root   -- orchestrator model that drives the CodeAct REPL loop AND
+#             produces the final answer (the final(...) tool call, or the
+#             tool-less forced-final turn when the loop runs out of turns).
+#   sub    -- model for the flat llm()/rlm() sub-calls made from REPL code
+#             and for the self-consistency candidate selector.
+# There is no third "answer" model: FLYCANON_RLM_ANSWER_MODEL (26.7.0) was
+# read by nothing and is gone since 26.7.1; a value here is ignored.
 # The client shapes the request per model generation: Claude 4.6 and
 # later (claude-sonnet-5, claude-opus-5, Opus 4.6/4.7/4.8, Sonnet 4.6)
 # are called with adaptive thinking and no temperature (the API refuses
@@ -135,7 +139,6 @@ FLYCANON_ANSWER_MODE=rlm
 # deterministic temperature 0.0. Any of them is a valid value here.
 FLYCANON_RLM_ROOT_MODEL=anthropic:claude-sonnet-4-6
 FLYCANON_RLM_SUB_MODEL=anthropic:claude-sonnet-4-6
-FLYCANON_RLM_ANSWER_MODEL=anthropic:claude-sonnet-4-6
 
 # RLM budgets.
 #   max_iters  -- max orchestrator turns before the loop gives up and asks
@@ -331,7 +334,7 @@ FLYCANON_OCR_LANG=eng+spa
 # Provider credentials -- pulled from the standard env vars. Set only
 # the ones you need. ANTHROPIC_API_KEY is REQUIRED at runtime in the
 # default answer mode: the RLM engine calls the Anthropic Messages API
-# directly for all three RLM models above.
+# directly for both RLM models above.
 # ----------------------------------------------------------------------------
 # OPENAI_API_KEY=
 # ANTHROPIC_API_KEY=

@@ -275,7 +275,7 @@ class CanonSettings(BaseSettings):
     # The Recursive Language Model query engine (``core/services/query/
     # rlm/``) is a CodeAct REPL: a root orchestrator that writes Python
     # against the document corpus, makes recursive sub-calls on slices,
-    # and finishes by citing the filings/pages it used. All three models
+    # and finishes by citing the filings/pages it used. Both models
     # are in ``<provider>:<model>`` form; the ``anthropic:`` prefix is
     # stripped before the id is sent to the Anthropic Messages API.
     #
@@ -298,10 +298,18 @@ class CanonSettings(BaseSettings):
         default="anthropic:claude-sonnet-4-6",
         description="Model for flat recursive sub-calls made from REPL code.",
     )
-    rlm_answer_model: str = Field(
-        default="anthropic:claude-sonnet-4-6",
-        description="Model for the final single-shot answer synthesis.",
-    )
+    # There is deliberately NO third "answer" model. The RLM's final answer
+    # is produced by the ROOT model: either as the ``final(...)`` tool call
+    # of the CodeAct loop (a ``chat_raw`` turn on ``rlm_root_model``) or, when
+    # the loop runs out of turns, as the tool-less forced-final turn, which is
+    # also a ``chat_raw`` on the root model. The sub model serves only the
+    # ``llm()`` / ``rlm()`` helpers called from REPL code and the
+    # self-consistency candidate selector. A ``rlm_answer_model`` field
+    # shipped with the RLM settings in 26.7.0 and was read by nothing, so an
+    # operator who set it to a cheaper or stronger model got neither; it was
+    # removed in 26.7.1 rather than wired, because there is no single-shot
+    # synthesis step for it to drive. ``extra="ignore"`` above means an env
+    # file that still carries ``FLYCANON_RLM_ANSWER_MODEL`` boots unchanged.
     # Max orchestrator turns before the loop gives up and asks for a
     # plain-text answer from the transcript.
     rlm_max_iters: int = Field(default=8, ge=1, le=64)
