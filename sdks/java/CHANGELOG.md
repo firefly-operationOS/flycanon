@@ -6,6 +6,25 @@ The SDK uses CalVer (`YY.MM.Patch`). Breaking changes are signalled
 in the entry header and the **Breaking** section, not in the version
 number (CalVer has no "major" axis to bump).
 
+## [26.8.0] - 2026-09-24
+
+### Added
+
+- `ChunkStats.byEmbeddingModel` (`by_embedding_model`) -- the chunk count
+  per `<provider>:<model>` embedder, from `GET /api/v1/stats`. During a
+  `flycanon reindex` the corpus is split across two identifiers and the
+  split moving is the run making progress. Deserialisation is additive
+  (`@JsonIgnoreProperties(ignoreUnknown = true)` throughout), but
+  `ChunkStats` is a record, so **code that constructs one by hand needs
+  the new component**.
+
+### Note
+
+- `ChunkStats.embeddedPct` now means something. The 26.7.x server
+  computed it from a column nothing ever wrote, so it reported `0.0` on a
+  fully embedded corpus; the 26.8.0 server counts chunks that carry an
+  `embedding_model`. No client change is required.
+
 ## [26.5.7] - 2026-05-22
 
 ### Added -- 12-plan unification surface (non-breaking, additive)

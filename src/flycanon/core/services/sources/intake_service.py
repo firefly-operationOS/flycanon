@@ -46,6 +46,7 @@ new binary. The orchestrator owns:
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import mimetypes
 import os
@@ -60,7 +61,13 @@ from sqlalchemy.exc import IntegrityError
 
 from flycanon.config import CanonSettings
 from flycanon.core.services.audit import AuditService
-from flycanon.core.services.embeddings import EmbeddingService
+from flycanon.core.services.embeddings import (
+    EmbeddingRegistry,
+    EmbeddingService,
+    EmbeddingSetBinding,
+    EmbeddingSetService,
+    bind_embedding_set,
+)
 from flycanon.core.services.ingestion import IngestionService, LoadedDocument
 from flycanon.core.services.ingestion.loaders import LoaderRegistry
 from flycanon.core.services.metadata import MetadataExtractor
@@ -119,6 +126,8 @@ class IntakeService:
         event_publisher: EventPublisher,
         object_store: ObjectStore,
         settings: CanonSettings,
+        embedding_sets: EmbeddingSetService | None = None,
+        embedding_registry: EmbeddingRegistry | None = None,
     ) -> None:
         self._binary_normalizer = binary_normalizer
         self._ingestion = ingestion
@@ -132,6 +141,11 @@ class IntakeService:
         self._publisher = event_publisher
         self._object_store = object_store
         self._settings = settings
+        # Which embedding space this workspace's vectors go into, and the
+        # embedder that produces them. Optional so a test that wires a mock
+        # embedder and a mock index keeps the pre-26.8.0 shape.
+        self._embedding_sets = embedding_sets
+        self._embedding_registry = embedding_registry
         # Resolve the configured PII scanner once at construction.
         # ``None`` when the scanner is disabled (or the policy is
         # ``disabled``) -- the submit path short-circuits the check.
@@ -143,6 +157,21 @@ class IntakeService:
         self._pii_scanner: PiiScanner | None = (
             build_pii_scanner(settings.pii_scanner) if policy != PiiPolicy.disabled else None
         )
+
+    async def _embedder_for(
+        self, *, tenant_id: str, workspace_id: str
+    ) -> tuple[EmbeddingSetBinding | None, EmbeddingService]:
+        """The workspace's embedding set and its embedder, minting the first set.
+
+        A workspace's very first ingest creates a set from the process default
+        and points the workspace at it, so a single-embedder deployment never
+        chooses a set and still gets one that records what produced its
+        vectors -- which is the whole point.
+        """
+        if self._embedding_sets is None or self._embedding_registry is None:
+            return None, self._embeddings
+        binding = await self._embedding_sets.ensure_active(tenant_id=tenant_id, workspace_id=workspace_id)
+        return binding, self._embedding_registry.for_binding(binding)
 
     async def submit(
         self,
@@ -269,24 +298,26 @@ class IntakeService:
             raise
 
         if result.chunks:
+            binding, embedder = await self._embedder_for(tenant_id=tenant_id, workspace_id=workspace_id)
             texts = [chunk.content for chunk in result.chunks]
-            embeddings = await self._embeddings.embed(texts)
-            # Stamp the model on the chunks BEFORE persisting so the
-            # canon_chunks row carries the right ``embedding_model``
-            # column on its single INSERT. The vector projection then
-            # mirrors the same chunk ids into the chosen vector store
-            # for retrieval-time RRF fusion.
-            for chunk in result.chunks:
-                chunk.embedding_model = self._embeddings.model
-            await self._chunks.replace_for_source(result.source.id, result.chunks)
-            await self._indexer.replace_for_source(
-                source=result.source,
-                chunks=result.chunks,
-                embeddings=embeddings,
-                embedding_model=self._embeddings.model,
-                tenant_id=tenant_id,
-                workspace_id=workspace_id,
-            )
+            with bind_embedding_set(binding) if binding is not None else contextlib.nullcontext():
+                embeddings = await embedder.embed(texts)
+                # Stamp the model on the chunks BEFORE persisting so the
+                # canon_chunks row carries the right ``embedding_model``
+                # column on its single INSERT. The vector projection then
+                # mirrors the same chunk ids into the chosen vector store
+                # for retrieval-time RRF fusion.
+                for chunk in result.chunks:
+                    chunk.embedding_model = embedder.model
+                await self._chunks.replace_for_source(result.source.id, result.chunks)
+                await self._indexer.replace_for_source(
+                    source=result.source,
+                    chunks=result.chunks,
+                    embeddings=embeddings,
+                    embedding_model=embedder.model,
+                    tenant_id=tenant_id,
+                    workspace_id=workspace_id,
+                )
         else:
             await self._chunks.replace_for_source(result.source.id, [])
 
@@ -449,20 +480,22 @@ class IntakeService:
         updated_row = await self._sources.update(existing)
 
         if result.chunks:
+            binding, embedder = await self._embedder_for(tenant_id=tenant_id, workspace_id=workspace_id)
             texts = [chunk.content for chunk in result.chunks]
-            embeddings = await self._embeddings.embed(texts)
-            for chunk in result.chunks:
-                chunk.embedding_model = self._embeddings.model
-                chunk.source_id = updated_row.id
-            await self._chunks.replace_for_source(updated_row.id, result.chunks)
-            await self._indexer.replace_for_source(
-                source=updated_row,
-                chunks=result.chunks,
-                embeddings=embeddings,
-                embedding_model=self._embeddings.model,
-                tenant_id=tenant_id,
-                workspace_id=workspace_id,
-            )
+            with bind_embedding_set(binding) if binding is not None else contextlib.nullcontext():
+                embeddings = await embedder.embed(texts)
+                for chunk in result.chunks:
+                    chunk.embedding_model = embedder.model
+                    chunk.source_id = updated_row.id
+                await self._chunks.replace_for_source(updated_row.id, result.chunks)
+                await self._indexer.replace_for_source(
+                    source=updated_row,
+                    chunks=result.chunks,
+                    embeddings=embeddings,
+                    embedding_model=embedder.model,
+                    tenant_id=tenant_id,
+                    workspace_id=workspace_id,
+                )
         else:
             await self._chunks.replace_for_source(updated_row.id, [])
 

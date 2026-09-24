@@ -24,7 +24,7 @@ from __future__ import annotations
 
 from functools import lru_cache
 
-from pydantic import Field, field_validator
+from pydantic import AliasChoices, Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -165,6 +165,48 @@ class CanonSettings(BaseSettings):
         description="Vector size for the configured embedding model.",
     )
     embedding_batch_size: int = Field(default=64, ge=1, le=2048)
+    # What a per-item embedding failure does. ``False`` (the default since
+    # 26.8.0) fails the batch; ``True`` restores the pre-26.8.0 behaviour of
+    # writing ``[0.0] * dimensions`` for the offending input so one bad chunk
+    # never blocks an ingest. The zero vector is a data-integrity bug wherever
+    # it fires -- the row enters the ANN index indistinguishable from a real
+    # one and nothing marks it -- so it is opt-in, and the reindex path
+    # refuses it outright whatever this says.
+    embedding_zero_vector_on_failure: bool = Field(default=False)
+
+    # -- Azure OpenAI ---------------------------------------------------
+    # Azure is a first-class embedding (and, on the RAG answer path, model)
+    # provider. It is configured HERE rather than read from bare os.environ
+    # at construction time, so a missing endpoint fails at config validation
+    # with a message naming the setting instead of inside the provider SDK.
+    #
+    # THE GRAMMAR NOTHING USED TO DOCUMENT: on Azure the model argument is
+    # the DEPLOYMENT name, not the model name. ``azure:text-embedding-3-large``
+    # works only if the deployment happens to be named after the model;
+    # ``azure:my-emb-3-large-deploy`` is the general spelling.
+    # The two credentials fall back to the bare names the Azure SDKs read, so
+    # a deployment that already exports AZURE_OPENAI_ENDPOINT / _API_KEY for
+    # another tool does not have to say it twice.
+    azure_openai_endpoint: str = Field(
+        default="",
+        validation_alias=AliasChoices("FLYCANON_AZURE_OPENAI_ENDPOINT", "AZURE_OPENAI_ENDPOINT"),
+        description="https://<resource>.openai.azure.com -- required when any ``azure:`` model is set.",
+    )
+    azure_openai_api_version: str = Field(
+        default="2026-05-01",
+        description="Azure OpenAI data-plane API version. Aligned with the control plane's default.",
+    )
+    azure_openai_api_key: str = Field(
+        default="",
+        validation_alias=AliasChoices("FLYCANON_AZURE_OPENAI_API_KEY", "AZURE_OPENAI_API_KEY"),
+    )
+    # ``api_key`` (the default) sends the key as the ``api-key`` header.
+    # ``managed_identity`` acquires a bearer token through
+    # DefaultAzureCredential for the cognitiveservices scope -- no secret in
+    # the environment, which is the difference between a preproduction that
+    # passes a security review and one that does not. Needs the ``azure``
+    # extra (``uv sync --extra azure``) for ``azure-identity``.
+    azure_auth: str = Field(default="api_key")
 
     # Answer-stage model used by the RAG query endpoint.
     answer_model: str = "anthropic:claude-sonnet-4-6"
@@ -504,6 +546,16 @@ class CanonSettings(BaseSettings):
         # ``rlm`` default -- only ``rag`` opts into the deprecated path.
         text = str(value).strip().lower() if value is not None else ""
         return "rag" if text == "rag" else "rlm"
+
+    @field_validator("azure_auth", mode="before")
+    @classmethod
+    def _normalise_azure_auth(cls, value: object) -> str:
+        # Only the exact string ``managed_identity`` opts into the token
+        # flow; anything else (including an empty or misspelled value)
+        # resolves to the key path, which fails visibly on a missing key
+        # rather than silently trying an identity that is not there.
+        text = str(value).strip().lower().replace("-", "_") if value is not None else ""
+        return "managed_identity" if text == "managed_identity" else "api_key"
 
     @field_validator("rlm_sandbox", mode="before")
     @classmethod

@@ -19,7 +19,8 @@ from __future__ import annotations
 from collections.abc import Iterable, Sequence
 from contextlib import asynccontextmanager
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, select
+from sqlalchemy import update as sa_update
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 from flycanon.models.entities.knowledge_chunk import KnowledgeChunkRow
@@ -68,6 +69,107 @@ class ChunkRepository:
                 select(KnowledgeChunkRow).where(KnowledgeChunkRow.id.in_(list(chunk_ids)))
             )
             return list(result.scalars().all())
+
+    # ------------------------------------------------------------------
+    # The reindex reads -- keyset-paged over a whole workspace
+    # ------------------------------------------------------------------
+
+    async def list_for_workspace(
+        self,
+        *,
+        tenant_id: str,
+        workspace_id: str,
+        after_id: str | None = None,
+        limit: int = 256,
+    ) -> list[KnowledgeChunkRow]:
+        """One batch of a workspace's chunks, ordered by id, after ``after_id``.
+
+        Keyset pagination rather than OFFSET: a re-embed of a large workspace
+        walks the whole table and an OFFSET scan would re-read everything it
+        has already passed on every batch. The id order is arbitrary but
+        stable, which is all a resume cursor needs.
+        """
+        async with self._session_factory() as session:
+            statement = (
+                select(KnowledgeChunkRow)
+                .where(
+                    KnowledgeChunkRow.tenant_id == tenant_id,
+                    KnowledgeChunkRow.workspace_id == workspace_id,
+                )
+                .order_by(KnowledgeChunkRow.id.asc())
+                .limit(limit)
+            )
+            if after_id is not None:
+                statement = statement.where(KnowledgeChunkRow.id > after_id)
+            result = await session.execute(statement)
+            return list(result.scalars().all())
+
+    async def count_for_workspace(self, *, tenant_id: str, workspace_id: str) -> int:
+        async with self._session_factory() as session:
+            result = await session.execute(
+                select(func.count())
+                .select_from(KnowledgeChunkRow)
+                .where(
+                    KnowledgeChunkRow.tenant_id == tenant_id,
+                    KnowledgeChunkRow.workspace_id == workspace_id,
+                )
+            )
+            return int(result.scalar_one() or 0)
+
+    async def input_chars_for_workspace(
+        self, *, tenant_id: str, workspace_id: str, max_input_chars: int
+    ) -> int:
+        """Total characters the embedder would actually see for this workspace.
+
+        ``LEAST(length(content), max_input_chars)`` because
+        :attr:`EmbeddingService._MAX_INPUT_CHARS` truncates every input before
+        it is sent -- an estimate that ignores the truncation overstates the
+        bill, sometimes by a lot on a corpus with a few very long chunks.
+        """
+        async with self._session_factory() as session:
+            # Postgres spells the two-argument minimum LEAST (``min`` there is
+            # the aggregate); SQLite spells it ``min``. The unit tests run on
+            # SQLite and the reindex runs on Postgres, so both are wired.
+            scalar_min = func.least if session.get_bind().dialect.name == "postgresql" else func.min
+            capped = scalar_min(func.length(KnowledgeChunkRow.content), max_input_chars)
+            result = await session.execute(
+                select(func.coalesce(func.sum(capped), 0)).where(
+                    KnowledgeChunkRow.tenant_id == tenant_id,
+                    KnowledgeChunkRow.workspace_id == workspace_id,
+                )
+            )
+            return int(result.scalar_one() or 0)
+
+    async def scopes_with_chunks(self, *, tenant_id: str | None = None) -> list[tuple[str, str]]:
+        """Every ``(tenant_id, workspace_id)`` that holds chunks.
+
+        A cross-workspace read: under a NOBYPASSRLS role the policy collapses
+        it to the scope in the GUCs, which is why ``flycanon reindex`` runs it
+        on the admin engine and says so when that engine is the request one.
+        """
+        async with self._session_factory() as session:
+            statement = select(KnowledgeChunkRow.tenant_id, KnowledgeChunkRow.workspace_id).distinct()
+            if tenant_id is not None:
+                statement = statement.where(KnowledgeChunkRow.tenant_id == tenant_id)
+            result = await session.execute(statement.order_by(KnowledgeChunkRow.tenant_id))
+            return [(str(t), str(w)) for t, w in result.all()]
+
+    async def stamp_embedding_model(self, *, chunk_ids: Sequence[str], embedding_model: str) -> int:
+        """Record which embedder produced the vectors for ``chunk_ids``.
+
+        Written in the same unit of work as the vectors themselves, because a
+        resume cursor that disagrees with the rows it is pointing at is worse
+        than no cursor.
+        """
+        if not chunk_ids:
+            return 0
+        async with self._session_factory() as session, session.begin():
+            await session.execute(
+                sa_update(KnowledgeChunkRow)
+                .where(KnowledgeChunkRow.id.in_(list(chunk_ids)))
+                .values(embedding_model=embedding_model)
+            )
+            return len(list(chunk_ids))
 
     async def replace_for_source(
         self,

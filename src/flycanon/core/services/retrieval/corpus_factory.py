@@ -54,6 +54,18 @@ class CorpusContext:
     vector_store: ScopedVectorStore
     backend: str
 
+    @property
+    def dense_backend(self) -> object:
+        """The unwrapped dense store, for the operations scope cannot express.
+
+        ``TenantScopedVectorStore`` folds ``(tenant, workspace)`` into a
+        namespace and exposes only the data surface. Building an embedding
+        set's ANN index and dropping a set are DDL against the whole table,
+        not reads or writes inside one scope, so they live on the backend
+        itself -- and only the pgvector backend has them.
+        """
+        return getattr(self.vector_store, "_inner", self.vector_store)
+
     async def initialise(self) -> None:
         """Open the corpus + dense store and create every required schema.
 

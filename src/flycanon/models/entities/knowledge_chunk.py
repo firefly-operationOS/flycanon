@@ -79,11 +79,16 @@ class KnowledgeChunkRow(Base):
         doc="Heading path (e.g. ``Scope > In scope``) recovered by the loader.",
     )
 
-    # Optional dense embedding. Kept JSON for backend portability; the
-    # pgvector adapter mirrors this column into a typed vector when
-    # ``FLYCANON_VECTOR_STORE=pgvector`` is set.
+    # The ``<provider>:<model>`` identifier that embedded this chunk, written
+    # by :class:`IndexService` and READ by ``flycanon reindex`` -- it is the
+    # resume cursor's discriminator and the answer to "what produced you?".
+    #
+    # There is deliberately no vector here. A sibling ``embedding JSON``
+    # column shipped in 0001 documented as the pgvector mirror; nothing ever
+    # wrote it, and ``StatsService`` counted it, so a fully embedded corpus
+    # reported 0.0% embedded on the admin dashboard. 0017 drops it and the
+    # statistic is counted against ``canon_chunk_vectors`` instead.
     embedding_model: Mapped[str | None] = mapped_column(String(128), nullable=True)
-    embedding: Mapped[list[float] | None] = mapped_column(JSON, nullable=True)
 
     metadata_json: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
 

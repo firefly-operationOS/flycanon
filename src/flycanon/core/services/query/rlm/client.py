@@ -27,7 +27,9 @@ service, so blocking I/O here is correct. The API key is read from the
 ``ANTHROPIC_API_KEY`` environment variable; default models come from
 :class:`CanonSettings`. Model ids in settings use the provider-prefixed
 ``anthropic:claude-sonnet-4-6`` form -- the ``anthropic:`` prefix is stripped
-before the id is sent to the Anthropic API.
+before the id is sent to the Anthropic API, and **any other prefix is refused
+at construction** (:func:`anthropic_model_id`): this client has one URL and
+one wire shape, and a model on another provider cannot be reached through it.
 
 Two generations of Claude, two request shapes
 ---------------------------------------------
@@ -140,8 +142,50 @@ def request_shape(model: str) -> RequestShape:
 
 
 def _strip_provider(model: str) -> str:
-    """Drop the ``anthropic:`` (or any ``provider:``) prefix the settings use."""
+    """Drop the ``anthropic:`` (or any ``provider:``) prefix the settings use.
+
+    Classification only. :func:`anthropic_model_id` is what the client calls
+    on a configured setting, because dropping a prefix is the right thing to
+    do to an id that is already known to be Anthropic's and the wrong thing
+    to do to one that is not.
+    """
     return model.split(":", 1)[1] if ":" in model else model
+
+
+class NonAnthropicRlmModel(ValueError):
+    """Raised when an RLM model setting names a provider this client cannot call."""
+
+
+def anthropic_model_id(model: str, *, setting: str) -> str:
+    """Return the bare Anthropic id in ``model``, or refuse the provider.
+
+    The RLM engine is a hand-written Anthropic Messages client: one URL, one
+    auth header, one wire shape. Until the :class:`ChatClient` port lands it
+    can call Anthropic and nothing else -- and **Anthropic's Claude models
+    are not served by Azure OpenAI**, so ``azure:gpt-5.2`` on this path is a
+    configuration that can never work.
+
+    Before 26.8.0 the prefix was simply dropped, so that configuration
+    POSTed ``{"model": "gpt-5.2"}`` to ``api.anthropic.com``, retried six
+    times with exponential backoff and surfaced a 404 blaming Anthropic for
+    a model Anthropic never had. Refusing here turns a slow, misattributed
+    runtime failure into an instant boot error that names the setting, the
+    provider and the way out.
+    """
+    provider, sep, bare = model.partition(":")
+    if not sep:
+        return model
+    if provider.strip().lower() == "anthropic":
+        return bare
+    raise NonAnthropicRlmModel(
+        f"{setting}={model!r} names provider {provider!r}, and the RLM engine speaks "
+        "only the Anthropic Messages API. Claude models are not served by Azure "
+        "OpenAI: an Azure deployment runs the GPT family. Either keep answers on "
+        f"Anthropic ({setting}=anthropic:claude-sonnet-5) or run the deprecated RAG "
+        "engine, which is provider-agnostic (FLYCANON_ANSWER_MODE=rag with "
+        "FLYCANON_ANSWER_MODEL=azure:<deployment>). Embeddings are unaffected -- "
+        "FLYCANON_EMBEDDING_MODEL takes any provider."
+    )
 
 
 class AnthropicClient:
@@ -157,8 +201,8 @@ class AnthropicClient:
         self._settings = settings
         self._api_key = os.environ.get("ANTHROPIC_API_KEY", "")
         self._http = http_client or httpx.Client(timeout=180.0)
-        self.root_model = _strip_provider(settings.rlm_root_model)
-        self.sub_model = _strip_provider(settings.rlm_sub_model)
+        self.root_model = anthropic_model_id(settings.rlm_root_model, setting="FLYCANON_RLM_ROOT_MODEL")
+        self.sub_model = anthropic_model_id(settings.rlm_sub_model, setting="FLYCANON_RLM_SUB_MODEL")
         self._prompt_cache = settings.rlm_prompt_cache
         self._tokens: dict[str, dict[str, int]] = {}
         self._token_lock = threading.Lock()

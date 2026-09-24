@@ -62,7 +62,15 @@ class ChunkStats(BaseModel):
     embedded_pct: float = Field(
         ge=0.0,
         le=100.0,
-        description="Percentage of chunks with a non-NULL embedding vector.",
+        description="Percentage of chunks that have been embedded (``embedding_model`` is set).",
+    )
+    by_embedding_model: dict[str, int] = Field(
+        default_factory=dict,
+        description=(
+            "Chunk count per ``<provider>:<model>`` identifier. During a "
+            "``flycanon reindex`` the corpus is split across two identifiers "
+            "and the split moving is the run making progress."
+        ),
     )
 
 

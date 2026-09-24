@@ -23,7 +23,13 @@ import httpx
 import pytest
 
 from flycanon.config import CanonSettings
-from flycanon.core.services.query.rlm.client import AnthropicClient, _strip_provider, request_shape
+from flycanon.core.services.query.rlm.client import (
+    AnthropicClient,
+    NonAnthropicRlmModel,
+    _strip_provider,
+    anthropic_model_id,
+    request_shape,
+)
 
 
 class _FakeResponse:
@@ -58,6 +64,43 @@ def _settings() -> CanonSettings:
 def test_strip_provider_drops_prefix():
     assert _strip_provider("anthropic:claude-sonnet-4-6") == "claude-sonnet-4-6"
     assert _strip_provider("claude-sonnet-4-6") == "claude-sonnet-4-6"
+
+
+def test_anthropic_model_id_accepts_anthropic_and_bare_ids():
+    assert anthropic_model_id("anthropic:claude-sonnet-5", setting="X") == "claude-sonnet-5"
+    assert anthropic_model_id("ANTHROPIC:claude-sonnet-5", setting="X") == "claude-sonnet-5"
+    assert anthropic_model_id("claude-sonnet-5", setting="X") == "claude-sonnet-5"
+
+
+@pytest.mark.parametrize(
+    "model",
+    ["azure:gpt-5.2", "openai:gpt-5.2", "bedrock:eu.anthropic.claude-sonnet-5-v1:0"],
+)
+def test_rlm_refuses_non_anthropic_prefix_at_boot(monkeypatch, model: str):
+    """A provider this client cannot call fails at construction, not at 404.
+
+    Before 26.8.0 the prefix was dropped and the request went to
+    ``api.anthropic.com`` anyway -- six retries and a 404 that blamed the
+    wrong vendor.
+    """
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "k")
+    monkeypatch.setenv("FLYCANON_RLM_ROOT_MODEL", model)
+    with pytest.raises(NonAnthropicRlmModel) as exc:
+        AnthropicClient(CanonSettings(), http_client=_FakeHttp([]))
+    message = str(exc.value)
+    assert "FLYCANON_RLM_ROOT_MODEL" in message
+    assert "not served by Azure OpenAI" in message
+    # The message must point at the two configurations that do work.
+    assert "FLYCANON_ANSWER_MODE=rag" in message
+    assert "FLYCANON_EMBEDDING_MODEL" in message
+
+
+def test_rlm_refusal_names_the_sub_model_setting(monkeypatch):
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "k")
+    monkeypatch.setenv("FLYCANON_RLM_SUB_MODEL", "azure:gpt-5.2")
+    with pytest.raises(NonAnthropicRlmModel) as exc:
+        AnthropicClient(CanonSettings(), http_client=_FakeHttp([]))
+    assert "FLYCANON_RLM_SUB_MODEL" in str(exc.value)
 
 
 def test_default_models_are_stripped(monkeypatch):

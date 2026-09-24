@@ -392,12 +392,15 @@ def test_canon_agent_tokens_tenant_only_policy(
 
 
 # ---------------------------------------------------------------------------
-# canon_chunk_vectors: created by migration 0016 since 26.7.1 (namespace shape,
-# HNSW index, FORCEd namespace-keyed RLS policy on the ``app.scope_namespace``
-# GUC), no longer at boot. flycanon's ``RlsPgVectorVectorStore`` is verify-first
-# on an existing table: ``initialise`` runs no DDL and only checks the width.
-# This drives that boot path against the migrated table and verifies the
-# policy isolates by namespace and fails closed when unset.
+# canon_chunk_vectors: created by migration 0016 and reshaped by 0017 into the
+# embedding-set form (untyped ``vector`` column, ``set_id`` / ``dim`` /
+# ``model``, PRIMARY KEY (set_id, id), one partial HNSW per set), with the same
+# FORCEd namespace-keyed RLS policy on the ``app.scope_namespace`` GUC.
+# flycanon's ``RlsPgVectorVectorStore`` stays verify-first on an existing
+# table: ``initialise`` runs no DDL. This drives that boot path against the
+# migrated table and verifies the policy isolates by namespace and fails closed
+# when the GUC is unset -- which is unchanged by 0017, and is worth re-proving
+# precisely because the table was reshaped underneath it.
 # ---------------------------------------------------------------------------
 
 
@@ -412,9 +415,6 @@ def test_canon_chunk_vectors_namespace_rls_isolation(
     from flycanon.config import get_settings
     from flycanon.core.services.retrieval.pgvector_store import RlsPgVectorVectorStore
 
-    # The width 0016 baked into the column when the module fixture ran alembic
-    # (FLYCANON_EMBEDDING_DIMENSIONS, or the settings default). The store must
-    # be asked for the same width -- any other is refused, by design.
     dimension = get_settings().embedding_dimensions
 
     async def _bootstrap() -> None:
@@ -439,18 +439,37 @@ def test_canon_chunk_vectors_namespace_rls_isolation(
         # TABLES covered it. Repeated here so the test states its own needs.
         conn.execute(sa.text("GRANT ALL ON canon_chunk_vectors TO app_user"))
 
+        # Every vector belongs to a declared embedding set since 0017 -- the
+        # coherence trigger refuses one that does not, which is the guard that
+        # replaced the boot-time width refusal.
+        for set_id, workspace in (("es-rls-a", "ws-a"), ("es-rls-b", "ws-b")):
+            conn.execute(
+                sa.text(
+                    """
+                    INSERT INTO canon_embedding_sets
+                        (id, tenant_id, workspace_id, provider, model, dimensions, status,
+                         config_fingerprint)
+                    VALUES (:id, 'acme', :workspace, 'stub', 'unit', :dim, 'active', 'fp')
+                    ON CONFLICT (id) DO NOTHING
+                    """
+                ),
+                {"id": set_id, "workspace": workspace, "dim": dimension},
+            )
+
         # Seed two scopes (admin role -- bypasses RLS).
         conn.execute(
             sa.text(
                 """
-                INSERT INTO canon_chunk_vectors (id, namespace, embedding, text)
+                INSERT INTO canon_chunk_vectors (id, set_id, namespace, embedding, dim, model, text)
                 VALUES
-                    ('vec-a', 't/acme/w/ws-a', CAST(:vec_a AS vector), 'alpha'),
-                    ('vec-b', 't/acme/w/ws-b', CAST(:vec_b AS vector), 'bravo')
-                ON CONFLICT (id) DO NOTHING
+                    ('vec-a', 'es-rls-a', 't/acme/w/ws-a', CAST(:vec_a AS vector), :dim,
+                     'stub:unit', 'alpha'),
+                    ('vec-b', 'es-rls-b', 't/acme/w/ws-b', CAST(:vec_b AS vector), :dim,
+                     'stub:unit', 'bravo')
+                ON CONFLICT (set_id, id) DO NOTHING
                 """
             ),
-            {"vec_a": _unit(0), "vec_b": _unit(1)},
+            {"vec_a": _unit(0), "vec_b": _unit(1), "dim": dimension},
         )
 
     with pg_app_engine.begin() as conn:

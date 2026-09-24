@@ -21,16 +21,39 @@ provider-selection logic from upstream callers so:
 * the ingestion stage just hands it ``list[str]`` and gets
   ``list[list[float]]`` back,
 * the query stage uses the same instance to embed the query string,
-* swapping the provider (OpenAI -> Cohere -> Bedrock -> ...) is a
-  one-line settings change.
+* swapping the provider (OpenAI -> Azure -> Cohere -> Bedrock -> ...) is
+  a one-line settings change plus a ``flycanon reindex``, never a fresh
+  database -- which embedding SETS are what make true.
 """
 
 from __future__ import annotations
 
 from flycanon.core.services.embeddings.embedding_service import (
     EmbeddingError,
+    EmbeddingRegistry,
     EmbeddingService,
+    EmbeddingThrottled,
     build_embedding_service,
 )
+from flycanon.core.services.embeddings.embedding_sets import (
+    EmbeddingSetBinding,
+    EmbeddingSetError,
+    EmbeddingSetService,
+    bind_embedding_set,
+    current_embedding_set,
+    split_embedding_model,
+)
 
-__all__ = ["EmbeddingError", "EmbeddingService", "build_embedding_service"]
+__all__ = [
+    "EmbeddingError",
+    "EmbeddingRegistry",
+    "EmbeddingService",
+    "EmbeddingSetBinding",
+    "EmbeddingSetError",
+    "EmbeddingSetService",
+    "EmbeddingThrottled",
+    "bind_embedding_set",
+    "build_embedding_service",
+    "current_embedding_set",
+    "split_embedding_model",
+]

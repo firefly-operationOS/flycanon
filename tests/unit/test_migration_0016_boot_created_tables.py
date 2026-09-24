@@ -128,12 +128,14 @@ def test_outbox_ddl_is_pyflys_own() -> None:
     assert "CREATE TABLE IF NOT EXISTS pyfly_eda_offsets" in _DDL_OFFSETS
 
 
-def test_revision_is_head_after_0015() -> None:
+def test_revision_follows_0015_and_is_followed_by_0017() -> None:
     cfg = Config(str(_ROOT / "alembic.ini"))
     cfg.set_main_option("script_location", str(_ROOT / "migrations"))
     script = ScriptDirectory.from_config(cfg)
-    assert script.get_current_head() == "0016_boot_created_tables"
     assert script.get_revision("0016_boot_created_tables").down_revision == "0015_source_object_store_key"
+    # 0017 reshapes the table 0016 creates, so the order of the two is part
+    # of this migration's contract, not an incidental fact about the head.
+    assert script.get_revision("0017_embedding_sets").down_revision == "0016_boot_created_tables"
 
 
 def test_sqlite_upgrade_and_downgrade_are_no_ops(tmp_path: Path) -> None:

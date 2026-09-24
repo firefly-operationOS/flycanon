@@ -337,6 +337,14 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA public
   GRANT USAGE, SELECT ON SEQUENCES TO flycanon_app;
 ```
 
+`GRANT ... ON ALL TABLES` covers `canon_embedding_sets` (migration
+`0017`) because the migration creates it before the grant runs. Note that
+`flycanon reindex` is **not** a `flycanon_app` operation: it reads across
+workspaces and creates one ANN index per embedding set, so run it with
+`FLYCANON_DATABASE_URL` pointed at `flycanon_admin`. A role that cannot
+see a workspace's chunks fails the run rather than activating an empty
+set.
+
 Wire `FLYCANON_DATABASE_URL` at `flycanon_app` for the `serve` role
 and at `flycanon_admin` for the `migrate` + `worker` roles, and give
 the `serve` role `FLYCANON_ADMIN_DATABASE_URL` at `flycanon_admin` as
@@ -424,28 +432,113 @@ Switch via `FLYCANON_OFFICE_CONVERTER=none|gotenberg|libreoffice`.
 
 ## Embedding providers
 
-The embedding stack is **provider-agnostic** -- any
-`fireflyframework-agentic` embedder identifier works. Set the model
-id, the dimensions, and the provider's API key env var.
+The embedding stack is **provider-agnostic** -- every embedder
+`fireflyframework-agentic` ships is wired, and none of them is
+privileged. Set `FLYCANON_EMBEDDING_MODEL` to `<provider>:<model>`,
+`FLYCANON_EMBEDDING_DIMENSIONS` to the width, and give the provider its
+credentials.
 
-| Provider | Model id example | Dimensions | API key env |
-|----------|------------------|-----------|-------------|
+| Provider | Model id example | Native width | Credentials |
+|----------|------------------|--------------|-------------|
 | OpenAI | `openai:text-embedding-3-small` | 1536 | `OPENAI_API_KEY` |
 | OpenAI | `openai:text-embedding-3-large` | 3072 | `OPENAI_API_KEY` |
-| VoyageAI | `voyageai:voyage-large-2` | 1536 | `VOYAGEAI_API_KEY` |
+| **Azure OpenAI** | `azure:<deployment-name>` | per deployment | see the Azure block below |
+| AWS Bedrock | `bedrock:amazon.titan-embed-text-v2:0` | 1024 | AWS default credential chain + region |
 | Cohere | `cohere:embed-multilingual-v3.0` | 1024 | `COHERE_API_KEY` |
 | Mistral | `mistral:mistral-embed` | 1024 | `MISTRAL_API_KEY` |
-| Ollama (local) | `ollama:nomic-embed-text` | 768 | (none -- needs `OLLAMA_HOST`) |
+| Voyage | `voyage:voyage-3` | 1024 | `VOYAGE_API_KEY` |
+| Google | `google:text-embedding-004` | 768 | `GOOGLE_API_KEY` |
+| Ollama (local) | `ollama:nomic-embed-text` | 768 | none -- `FLYCANON_OLLAMA_BASE_URL` |
 
-**Dimensions must match the `pgvector` column.** Migration
-`0016_boot_created_tables` creates `canon_chunk_vectors.embedding` as
-`vector(<dim>)` from the `FLYCANON_EMBEDDING_DIMENSIONS` in the migrate
-job's environment (before 26.7.1 the dense store created it at first
-boot). The width is locked at that moment: a `serve` process configured
-for another width refuses to boot (`VectorStoreError: ... needs a fresh
-database`) rather than write a vector the index cannot compare.
-**Changing the embedding model after data is loaded is a re-index on a
-fresh database** -- not a hot swap.
+Two rows to read carefully. The provider token for Voyage is **`voyage`**,
+not `voyageai:` -- the older spelling in this table was one
+`_build_embedder` never accepted. And **Google needs an extra flycanon
+does not install**: the framework's `GoogleEmbedder` imports
+`google.generativeai`, which is a different package from the
+`google-genai` that arrives transitively. Install it before configuring
+`google:`.
+
+### Azure OpenAI
+
+Azure is configured, not guessed. Before 26.8.0 the endpoint came from a
+bare `os.environ.get("AZURE_OPENAI_ENDPOINT", "")`, whose empty default
+failed inside the SDK on the first ingest; the api-version was pinned at
+`2024-02-01` inside the framework and unreachable from flycanon; and
+`dimensions` was forwarded to models that answer `400` to it.
+
+| Setting | Default | Note |
+|---|---|---|
+| `FLYCANON_AZURE_OPENAI_ENDPOINT` | `""` | `https://<resource>.openai.azure.com`. Falls back to `AZURE_OPENAI_ENDPOINT`. **Required** whenever an `azure:` model is configured, validated at config time. |
+| `FLYCANON_AZURE_OPENAI_API_VERSION` | `2026-05-01` | Data-plane api-version. |
+| `FLYCANON_AZURE_OPENAI_API_KEY` | `""` | Falls back to `AZURE_OPENAI_API_KEY`. |
+| `FLYCANON_AZURE_AUTH` | `api_key` | `api_key` or `managed_identity`. |
+
+**The `model=` argument on Azure is the DEPLOYMENT name, not the model
+name.** `azure:text-embedding-3-large` works only if the deployment
+happens to be named after the model; `azure:my-emb-3-large-deploy` is the
+general spelling. flycanon recognises a known model name appearing inside
+a deployment name (`prod-text-embedding-3-large` prices and validates as
+3-large) and asserts nothing about one it does not recognise.
+
+`FLYCANON_AZURE_AUTH=managed_identity` acquires a bearer token through
+`DefaultAzureCredential` for the
+`https://cognitiveservices.azure.com/.default` scope, so no key exists in
+the environment to leak. It needs the `azure` extra
+(`uv sync --extra azure`, which installs `azure-identity`).
+
+`dimensions` is sent only to models that accept it: the
+`text-embedding-3-*` line is Matryoshka-trained and takes 3072 / 1536 /
+1024 / 256 (3-large) or 1536 / 1024 / 512 / 256 (3-small);
+`text-embedding-ada-002` takes none and always returns 1536. A
+`flycanon reindex --dimensions` a model cannot produce is refused in the
+preflight, naming the widths it can.
+
+A 429 carries `Retry-After`, which flycanon honours exactly (with jitter),
+halving its in-flight window and recovering slowly. During a reindex a
+sustained throttle records `reindex.throttled` and keeps the cursor
+instead of consuming one of the job's attempts.
+
+### Changing the embedding model
+
+**It is `flycanon reindex`, not a fresh database.** Since 26.8.0
+`canon_chunk_vectors.embedding` has no fixed width: every row belongs to
+an *embedding set* (`canon_embedding_sets`), carries its own `set_id` /
+`dim` / `model`, and each set has its own partial HNSW index.
+`canon_workspaces.active_embedding_set_id` names the set that answers a
+workspace's searches, and changing the embedder is:
+
+```bash
+flycanon reindex --to azure:my-emb-3-large-deploy --dimensions 1536 \
+                 --tenant t-123 --workspace w-456 --estimate-only
+flycanon reindex --to azure:my-emb-3-large-deploy --dimensions 1536 \
+                 --tenant t-123 --workspace w-456
+```
+
+The old set serves every search for the whole run; the new one is
+invisible until it is activated, because the search predicate IS the set
+id. Activation is one `UPDATE` of one column, `--rollback` is the same
+`UPDATE` backwards, and `--drop-set` reclaims the old rows when the
+operator is satisfied. The full procedure is in
+`docs/operations-runbook.md`.
+
+Two consequences worth knowing before choosing a width:
+
+* **pgvector will not build an HNSW index on a `vector` column wider than
+  2000 dimensions.** flycanon indexes a wider set as `halfvec(N)`
+  (supported to 4000), storing full precision in the column and half in
+  the index. `text-embedding-3-large` at its native 3072 therefore works;
+  1536 is the cheaper trade and is a true truncation of the same vector.
+* **A mis-scoped query is now an error, not a wrong answer.** On a table
+  holding two widths, a query that omits the set predicate raises
+  `expected N dimensions, not M` from pgvector. That replaced the
+  boot-time refusal a single-width deployment used to get.
+
+A workspace whose set does not match this process's
+`FLYCANON_EMBEDDING_MODEL` logs a WARNING naming `flycanon reindex` and
+keeps serving from its set -- a warning and not a refusal, because one
+shared flycanon legitimately serves workspaces on different embedders.
+Per-workspace model choice is supported; per-**tenant credentials** are
+not yet (see `docs/security-model.md`).
 
 ---
 

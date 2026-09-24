@@ -27,13 +27,20 @@ compensate by widening the retrieval window.
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import time
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from flycanon.core.services.embeddings import EmbeddingService
+from flycanon.core.services.embeddings import (
+    EmbeddingRegistry,
+    EmbeddingService,
+    EmbeddingSetBinding,
+    EmbeddingSetService,
+    bind_embedding_set,
+)
 from flycanon.core.services.retrieval.corpus_factory import CorpusContext
 from flycanon.models.repositories.chunk_repository import ChunkRepository
 from flycanon.models.repositories.knowledge_repository import KnowledgeRepository
@@ -96,9 +103,20 @@ class RetrievalService:
         reranker_top_n: int = 20,
         query_expander: QueryExpander | None = None,
         query_expansion_n: int = 1,
+        embedding_sets: EmbeddingSetService | None = None,
+        embedding_registry: EmbeddingRegistry | None = None,
     ) -> None:
         self._context = context
         self._embeddings = embeddings
+        # Set-aware query embedding. Both are optional so a test that wires a
+        # mock corpus and a mock dense store keeps the pre-26.8.0 shape: no
+        # sets, one embedder, the injected one.
+        self._embedding_sets = embedding_sets
+        self._embedding_registry = embedding_registry
+        # (workspace, set) pairs already warned about, so the "this process is
+        # configured for something else" line is logged once per process and
+        # not once per query.
+        self._warned_sets: set[tuple[str, str]] = set()
         self._source_repo = source_repository
         self._chunk_repo = chunk_repository
         self._knowledge_repo = knowledge_repository
@@ -139,6 +157,12 @@ class RetrievalService:
 
         from flycanon.core.services.retrieval.fusion import HybridRetriever
 
+        # Which embedding space this workspace's corpus lives in, and the
+        # embedder that can put a query into it. A workspace that has never
+        # been indexed has no set; its dense half has nothing to return, so
+        # it is switched off rather than asked with the wrong model.
+        binding, embedder = await self._resolve_embedder(tenant_id=tenant_id, workspace_id=workspace_id)
+
         # Scope-bound proxies. ``HybridRetriever`` calls
         # ``corpus.bm25_search(text, top_k=...)`` and
         # ``vector_store.search(qvec, top_k=...)`` without scope
@@ -155,13 +179,14 @@ class RetrievalService:
             self._context.vector_store,
             tenant_id=tenant_id,
             workspace_id=workspace_id,
+            enabled=binding is not None or self._embedding_sets is None,
         )
         # The embedder protocol is honoured by EmbeddingService
         # via the ``embed`` method; pass it through directly.
         retriever = HybridRetriever(
             corpus=scoped_corpus,  # type: ignore[arg-type]
             vector_store=scoped_vector_store,  # type: ignore[arg-type]
-            embedder=_EmbedderShim(self._embeddings),  # type: ignore[arg-type]
+            embedder=_EmbedderShim(embedder),  # type: ignore[arg-type]
             rrf_k=self._rrf_k,
         )
         effective_top_k = top_k or self._default_top_k
@@ -182,11 +207,16 @@ class RetrievalService:
                     len(queries),
                 )
 
-        chunk_hits = await retriever.retrieve(
-            queries,
-            top_k_per_query=effective_per_query_k,
-            top_k_final=effective_top_k * 3,  # widen for post-filter
-        )
+        # The set is bound for the whole retrieval: the query embedding and
+        # the ANN scan have to agree on it, and the dense store reads it from
+        # the ContextVar rather than from a parameter the framework's
+        # ``search(vector, top_k, namespace)`` has nowhere to carry.
+        with bind_embedding_set(binding) if binding is not None else contextlib.nullcontext():
+            chunk_hits = await retriever.retrieve(
+                queries,
+                top_k_per_query=effective_per_query_k,
+                top_k_final=effective_top_k * 3,  # widen for post-filter
+            )
         # Hydrate with Postgres metadata + apply filters.
         hydrated = await self._hydrate(chunk_hits)
         if filters is not None:
@@ -214,6 +244,63 @@ class RetrievalService:
             elapsed_ms,
         )
         return RetrievalResult(hits=hydrated, elapsed_ms=elapsed_ms)
+
+    async def _resolve_embedder(
+        self, *, tenant_id: str, workspace_id: str
+    ) -> tuple[EmbeddingSetBinding | None, EmbeddingService]:
+        """The workspace's embedding space, and the embedder that speaks it.
+
+        This is what makes one shared flycanon able to serve a workspace on
+        Ollama and a workspace on Azure at the same time, and what keeps a
+        re-embed's dual-set window correct: the query goes through the model
+        that produced the corpus it is about to search, never through
+        ``FLYCANON_EMBEDDING_MODEL``.
+
+        Returns ``(None, default embedder)`` when sets are not wired (unit
+        tests with a mock dense store) or when the workspace has never been
+        indexed.
+        """
+        if self._embedding_sets is None or self._embedding_registry is None:
+            return None, self._embeddings
+        binding = await self._embedding_sets.active_binding(tenant_id=tenant_id, workspace_id=workspace_id)
+        if binding is None:
+            return None, self._embeddings
+        self._warn_if_not_the_process_default(workspace_id=workspace_id, binding=binding)
+        return binding, self._embedding_registry.for_binding(binding)
+
+    def _warn_if_not_the_process_default(self, *, workspace_id: str, binding: EmbeddingSetBinding) -> None:
+        """Say so, once, when a workspace is not on this process's embedder.
+
+        This is what replaced the boot-time width refusal. It is a WARNING and
+        not a refusal because one process legitimately serves workspaces on
+        several sets -- during a re-embed, and permanently in a deployment
+        whose tenants chose different embedders. What it must not do is stay
+        silent: before 26.8.0 a same-width change of model produced no error
+        and no log line at all.
+        """
+        assert self._embedding_registry is not None
+        default = self._embedding_registry.default
+        if binding.embedding_model == default.model and binding.dimensions == default.dimensions:
+            return
+        key = (workspace_id, binding.set_id)
+        if key in self._warned_sets:
+            return
+        self._warned_sets.add(key)
+        logger.warning(
+            "workspace %s is on embedding set %s (%s @%d) but this process is configured for "
+            "%s @%d. Searches for %s use the set, not the process default. To move it:\n"
+            "    flycanon reindex --workspace %s --to %s --dimensions %d",
+            workspace_id,
+            binding.set_id,
+            binding.embedding_model,
+            binding.dimensions,
+            default.model,
+            default.dimensions,
+            workspace_id,
+            workspace_id,
+            default.model,
+            default.dimensions,
+        )
 
     # ------------------------------------------------------------------
     # Hydration + filtering
@@ -437,12 +524,19 @@ class _ScopedVectorStore:
     foreign-scope chunk is dropped when hydration can't find it.
     """
 
-    def __init__(self, inner: object, *, tenant_id: str, workspace_id: str) -> None:
+    def __init__(self, inner: object, *, tenant_id: str, workspace_id: str, enabled: bool = True) -> None:
         self._inner = inner
         self._tenant_id = tenant_id
         self._workspace_id = workspace_id
+        # ``False`` when the workspace has no embedding set: there are no
+        # vectors to find, so the dense half returns nothing rather than
+        # querying one embedding space with a vector from another. BM25 still
+        # answers, which is the honest degradation.
+        self._enabled = enabled
 
     async def search(self, query_embedding, top_k: int = 5):  # noqa: ANN001, ANN201
+        if not self._enabled:
+            return []
         return await self._inner.search(  # type: ignore[attr-defined]
             query_embedding,
             top_k=top_k,

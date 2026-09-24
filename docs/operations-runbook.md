@@ -72,7 +72,7 @@ multitenancy + agent surface that the runbook owns.
 | Agent calls return `429 rate_limit_exceeded` | Token has exhausted its per-minute budget. Configured via `rate_limit_rpm` at mint time; enforced as a process-local sliding 60s window keyed by `token_id`. | `GET /api/v1/agent-tokens` and check `rate_limit_rpm`. The CHANGELOG flags this as in-memory + process-local. | Slow the consumer; if legitimate, re-mint the token with a higher `rate_limit_rpm` and revoke the old. The limiter is per-process today -- multi-replica deploys multiply the effective rate (see [security-model.md § 6](security-model.md#6-rate-limiting)). |
 | Workspace cache stale on a downstream service | EDA broker outage; subscriber not attached on the consumer side; topic mismatch (`FLYCANON_WORKSPACE_TOPIC` vs the consumer's setting). | Check `pyfly_eda_outbox` for unpublished rows: `SELECT topic, count(*) FROM pyfly_eda_outbox WHERE published_at IS NULL GROUP BY 1`. | Restart the worker (it pumps the outbox); confirm `LISTEN/NOTIFY` is not blocked by pg_bouncer in transaction mode. See [troubleshooting.md § Subscribers aren't receiving events](troubleshooting.md#subscribers-arent-receiving-flycanonknowledge-events). |
 | `canon_chunk_vectors` writes from a non-admin role fail with `new row violates row-level security policy` on a freshly deployed cluster | Deploy-ordering bug: migration `0013_rls_policies` runs before `PgvectorStore` boots, so the runtime-created table briefly exists without RLS. On reboot the PgvectorStore bootstrap installs the policy. | Confirm `pg_policies` has a row for `canon_chunk_vectors` with `policyname = 'tenant_workspace_isolation'`. | Restart the API container; `PgvectorStore._initialise_schema` installs the RLS policy idempotently on the next boot (see [§ 10 `canon_chunk_vectors` deploy ordering](#10-canon_chunk_vectors-deploy-ordering)). |
-| pgvector HNSW queries are very slow | HNSW index missing, or `hnsw.ef_search` set higher than necessary, or `m` / `ef_construction` raised past the defaults. | `\di+ canon_chunk_vectors_hnsw` against Postgres. Inspect `FLYCANON_PGVECTOR_HNSW_M` / `_HNSW_EF_CONSTRUCTION`. | The defaults (m=16, ef_construction=64) are correct for most corpora. If you bumped them past 200, reindex. See [troubleshooting.md § High p99 on `/api/v1/search`](troubleshooting.md#high-p99-on-apiv1search). |
+| pgvector HNSW queries are very slow | The set's partial HNSW is missing (created by a role that does not own the table -- the boot log says so and prints the statement), or `hnsw.ef_search` is higher than necessary, or `m` / `ef_construction` were raised past the defaults. | `\di+ canon_chunk_vectors_hnsw*` against Postgres -- there is ONE index per embedding set since 26.8.0. Cross-check `canon_embedding_sets.index_name`. Inspect `FLYCANON_PGVECTOR_HNSW_M` / `_HNSW_EF_CONSTRUCTION`. | Create the missing index as the table owner. The defaults (m=16, ef_construction=64) are correct for most corpora. See [troubleshooting.md § High p99 on `/api/v1/search`](troubleshooting.md#high-p99-on-apiv1search). |
 | `alembic upgrade head` fails with `current revision in db doesn't match` | Migration drift -- DB has been hand-patched, or the deploy ran against a DB that's already on `head`. | `alembic current` against the live DB. Compare against the highest revision in `migrations/versions/` (currently `0013_rls_policies`). | Reconcile by `alembic stamp head` ONLY when the DB matches the schema; otherwise hand-resolve by running missing revisions individually. |
 | `relation "canon_sources" does not exist` on first boot | Schema not on the database yet. | `alembic current` returns empty. | Run migrations once: `docker run --rm --env-file .env ghcr.io/firefly-operationos/flycanon:latest migrate`. Detail in [troubleshooting.md § Service boot](troubleshooting.md#service-boot). |
 
@@ -339,6 +339,83 @@ Special considerations:
 Recommended cadence: hourly snapshots for the cost trail + audit
 log; daily full dumps for everything else. Pair with cross-region
 replication for production.
+
+---
+
+## 7b. Changing the embedding model (`flycanon reindex`)
+
+Since 26.8.0 a change of embedder is a batch job with a rollback, not a
+fresh database. Every vector belongs to an *embedding set*, each set has
+its own partial HNSW, and `canon_workspaces.active_embedding_set_id`
+names the one that answers a workspace's searches.
+
+**Run it as the migrate/admin role.** `flycanon reindex` reads across
+workspaces and creates one index per set, so `FLYCANON_DATABASE_URL`
+must point at a role that bypasses RLS and owns `canon_chunk_vectors`. A
+role that cannot see a workspace's chunks **fails the run** rather than
+activating an empty set, and a set whose index could not be built is
+never activated -- the command prints the `CREATE INDEX` for an owner to
+run and stops.
+
+```bash
+# 1. Estimate. Prints the corpus size, the token estimate and the cost
+#    -- or "cost unknown" for a model with no price row. Writes nothing.
+flycanon reindex --to azure:my-emb-3-large-deploy --dimensions 1536 \
+                 --tenant t-123 --workspace w-456 --estimate-only
+
+# 2. Run. Prints the set id immediately -- it is the --resume handle.
+#    --no-activate builds the set and leaves the workspace where it is.
+flycanon reindex --to azure:my-emb-3-large-deploy --dimensions 1536 \
+                 --tenant t-123 --workspace w-456 --no-activate
+
+# 3. Watch. The job is an ordinary ingest job of kind 'reindex', so the
+#    existing stream works:
+#    GET /api/v1/ingest-jobs/{id}/stream
+#    Stages: reindex.started -> reindex.batch* -> reindex.ready.
+#    The admin dashboard's chunk stats split by embedder while it runs.
+
+# 4. Switch. One UPDATE of one column; no request sees a mixture.
+flycanon reindex --activate <set-id> --tenant t-123 --workspace w-456
+
+# 5. Observe recall for a day, then reclaim the old set's storage.
+flycanon reindex --list --tenant t-123 --workspace w-456
+flycanon reindex --drop-set <old-set-id> --tenant t-123 --workspace w-456
+```
+
+If anything looks wrong between steps 4 and 5:
+
+```bash
+flycanon reindex --rollback --tenant t-123 --workspace w-456
+```
+
+The rollback window is a policy you choose, not a timeout the code
+imposes -- it lasts until `--drop-set`. **A dropped set cannot be rolled
+back to**; it has to be rebuilt.
+
+### What to plan for
+
+| | |
+|---|---|
+| **Storage** | Two sets double the vector table and its indexes for the length of the rollback window. `VACUUM FULL` or `pg_repack` after `--drop-set` reclaims it; neither is automated. |
+| **Index build** | The dominant cost above ~100k chunks. Raise `maintenance_work_mem` and `max_parallel_maintenance_workers` and treat it as a maintenance operation. |
+| **Rate limits** | A 429 is honoured (`Retry-After`, with jitter), the in-flight window halves, and a sustained throttle records `reindex.throttled` and stops with the cursor saved. Resume with `--resume <set-id>`; `attempts` is untouched. |
+| **Interruption** | The cursor advances in the same transaction as the vectors, so a killed run resumes from the last committed batch and a replayed batch rewrites the same rows. |
+| **Ingestion during the run** | A catch-up pass re-embeds anything ingested while the run was walking the corpus, before the switch. There is no dual-write: a deployment that cannot tolerate the catch-up window should freeze ingestion for it. |
+| **Scope** | `--all` re-embeds every workspace of every tenant. There is no bare `flycanon reindex`. |
+
+### Verifying afterwards
+
+```sql
+-- One row per set, with what produced it and how much of it exists.
+SELECT workspace_id, id, provider, model, dimensions, status, vector_count
+FROM   canon_embedding_sets ORDER BY workspace_id, created_at;
+
+-- Which set each workspace answers from.
+SELECT id, active_embedding_set_id FROM canon_workspaces;
+
+-- And the indexes that serve them.
+SELECT indexname FROM pg_indexes WHERE tablename = 'canon_chunk_vectors';
+```
 
 ---
 

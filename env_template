@@ -71,10 +71,49 @@ FLYCANON_WORKER_SHUTDOWN_GRACE_S=30
 # Embeddings + RAG
 # ----------------------------------------------------------------------------
 # Embedding provider, used by the chunk indexer and the query stage.
-# Supports any pydantic-ai / fireflyframework-agentic embedder identifier
-# (``openai:text-embedding-3-small``, ``cohere:embed-english-v3.0``, ...).
+# Any fireflyframework-agentic embedder identifier, ``<provider>:<model>``:
+# openai, azure (= azure-openai), cohere, google (= gemini), mistral,
+# voyage, bedrock, ollama.
+#
+# ON AZURE THE SECOND HALF IS THE DEPLOYMENT NAME, NOT THE MODEL NAME.
+# ``azure:text-embedding-3-large`` works only if the deployment happens to
+# be named after the model; ``azure:my-emb-3-large-deploy`` is the general
+# spelling.
 FLYCANON_EMBEDDING_MODEL=openai:text-embedding-3-small
+# The DEFAULT WIDTH FOR NEW EMBEDDING SETS -- no longer a schema lock.
+# Since 26.8.0 canon_chunk_vectors.embedding has no fixed width: each row
+# belongs to an embedding set that records its own model and dimensions,
+# and changing the embedder is ``flycanon reindex``, not a fresh database.
+# Note pgvector will not build an HNSW on a vector column above 2000
+# dimensions; flycanon indexes a wider set as halfvec (full precision in
+# the column, half in the index).
 FLYCANON_EMBEDDING_DIMENSIONS=1536
+# What a per-item embedding failure does. ``false`` (the default since
+# 26.8.0) fails the batch and writes nothing. ``true`` restores the older
+# behaviour of indexing ``[0.0] * dimensions`` for the offending input so
+# one bad chunk never blocks an ingest -- an unrecoverable, unmarked wrong
+# row that the ANN index ranks as equidistant from everything. The reindex
+# path refuses it whatever this says.
+FLYCANON_EMBEDDING_ZERO_VECTOR_ON_FAILURE=false
+
+# ----------------------------------------------------------------------------
+# Azure OpenAI (embeddings, and the RAG answer path)
+# ----------------------------------------------------------------------------
+# Required whenever any ``azure:`` model is configured -- validated at
+# config time, so a missing endpoint fails at boot with a message naming
+# the setting instead of inside the provider SDK on the first ingest.
+# Both credentials fall back to the bare AZURE_* names the Azure SDKs read.
+#
+# NOTE: Claude models are NOT served by Azure OpenAI -- an Azure deployment
+# runs the GPT family. Embeddings and answers are two independent choices;
+# the recommended shape is Azure embeddings with Anthropic answers.
+# FLYCANON_AZURE_OPENAI_ENDPOINT=https://<resource>.openai.azure.com
+# FLYCANON_AZURE_OPENAI_API_VERSION=2026-05-01
+# FLYCANON_AZURE_OPENAI_API_KEY=
+# api_key (default) | managed_identity. The identity path acquires a bearer
+# token through DefaultAzureCredential for the cognitiveservices scope, so
+# no key exists in the environment to leak. Needs ``uv sync --extra azure``.
+# FLYCANON_AZURE_AUTH=api_key
 
 # Answer model for the RAG query endpoint. Any pydantic-ai provider id.
 FLYCANON_ANSWER_MODEL=anthropic:claude-sonnet-4-6

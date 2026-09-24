@@ -1215,13 +1215,21 @@
       "ChunkStats": {
         "description": "Coverage of the retrieval index.",
         "properties": {
+          "by_embedding_model": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "description": "Chunk count per ``<provider>:<model>`` identifier. During a ``flycanon reindex`` the corpus is split across two identifiers and the split moving is the run making progress.",
+            "title": "By Embedding Model",
+            "type": "object"
+          },
           "embedded": {
             "minimum": 0,
             "title": "Embedded",
             "type": "integer"
           },
           "embedded_pct": {
-            "description": "Percentage of chunks with a non-NULL embedding vector.",
+            "description": "Percentage of chunks that have been embedded (``embedding_model`` is set).",
             "maximum": 100.0,
             "minimum": 0.0,
             "title": "Embedded Pct",
@@ -5095,7 +5103,7 @@
       "url": "https://github.com/firefly-operationOS/flycanon/blob/main/LICENSE"
     },
     "title": "flycanon",
-    "version": "26.7.1"
+    "version": "26.8.0"
   },
   "openapi": "3.1.0",
   "paths": {
