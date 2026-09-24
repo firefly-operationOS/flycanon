@@ -28,15 +28,16 @@ Compatible with **flycanon service version `26.7.x`**.
 
 | SDK | Service |
 |-----|---------|
+| `26.8.0` | `26.8.x` (embedding sets, `flycanon reindex`, `ChunkStats.by_embedding_model`) |
 | `26.7.1` | `26.7.x` (routes realigned: `?mode=async`, `/query/stream`, `/conversations/{id}/turn`, `/query/suggest`, `?after_id=`; `X-API-Key`; `delete_source`, `purge_workspace`) |
 | `26.5.7` | `26.5.x` |
 
 ## Install
 
 ```bash
-uv add flycanon-sdk==26.7.1
+uv add flycanon-sdk==26.8.0
 # or
-pip install flycanon-sdk==26.7.1
+pip install flycanon-sdk==26.8.0
 ```
 
 ## Quick start

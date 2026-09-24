@@ -297,6 +297,49 @@ soft-fails on `insufficient_privilege` so a non-admin boot logs a
 warning instead of crashing. The deploy-ordering gap is documented
 in [operations-runbook.md § `canon_chunk_vectors` deploy ordering](operations-runbook.md#10-canon_chunk_vectors-deploy-ordering).
 
+### Special-case: `canon_embedding_sets` (26.8.0)
+
+Migration `0017` creates the embedding-set registry with the standard
+scoped policy above, `FORCE`d. One point is worth stating explicitly: a
+set row records **what model produced a workspace's vectors**, never
+**whose credentials paid for them**. There is deliberately nothing
+credential-shaped on it.
+
+The `canon_chunk_vectors_set_coherence` trigger installed alongside it is
+`SECURITY DEFINER` so its lookup into `canon_embedding_sets` succeeds
+whatever scope the writer is under -- a vector whose set cannot be found
+is itself the bug the trigger exists to catch, so "not found" raises
+rather than waving the row through. It reads one row by primary key and
+writes nothing.
+
+### Per-tenant model choice, and the credential boundary that is not closed
+
+**Model choice is per workspace.** One shared flycanon can serve tenant A
+on Azure and tenant B on Ollama: two embedding sets, two cached embedders,
+two partial indexes, one table. The query is embedded by the model that
+produced the corpus it searches.
+
+**Credentials are per deployment, and this is a compliance fact, not an
+implementation detail.** Every provider key is read from the *process*
+environment -- `FLYCANON_AZURE_OPENAI_API_KEY`, `OPENAI_API_KEY`,
+`ANTHROPIC_API_KEY`, the AWS default chain. flycanon never sees, scopes
+or validates a per-tenant credential. So "tenant A on Azure" means *the
+one Azure account in flycanon's environment*, and two tenants with
+different Azure subscriptions, or a bring-your-own-key tenant, cannot be
+served differently.
+
+The same boundary applies to the answer path: one shared flycanon runs
+one `FLYCANON_RLM_ROOT_MODEL` for every tenant. A tenant whose control
+plane pins an EU-resident provider with its own DPA and named
+subprocessor still has their knowledge questions answered by whatever
+provider flycanon's environment names. Embedding sets do not close that
+hole; they make closing it a configuration change rather than an
+architecture change, because the per-workspace routing now exists and
+only the credential resolution is missing.
+
+Treat it as a documented limitation when a deployment's tenants have
+differing residency or subprocessor commitments.
+
 ### Write-path enforcement
 
 The `USING`-only policies the migration creates auto-derive `WITH
@@ -428,6 +471,7 @@ token.
 | EDA publish failures are logged but never abort the originating mutation (best-effort publish). Consumers may miss events during a broker outage. | The durable record is `canon_audit_events`; consumers can rebuild their projection from the table. The Postgres outbox (`pyfly_eda_outbox`) preserves unpublished events until the worker drains. |
 | Idempotency store is in-memory in the default build; replays do not survive a process restart. | Production deployments are expected to swap for a Postgres-backed store (the `IdempotencyStore` protocol is the integration seam). |
 | PII guardrail defaults to `warn` (index as-is + record findings). | Set `FLYCANON_PII_POLICY=redact` to rewrite sensitive spans before chunking + indexing, or `reject` to fail intake with `422 pii_violation`. See [pii.md](pii.md). |
+| **Provider credentials are per deployment, not per tenant.** A shared flycanon calls one embedding account and one answer provider for every tenant, whatever their own residency or subprocessor commitments say. | Model choice IS per workspace (embedding sets), so the routing exists; only credential resolution is missing. Deployments whose tenants have differing residency commitments should run one flycanon per commitment until a credential resolver lands. See [§ 4](#4-rls-policies). |
 
 ---
 

@@ -43,6 +43,8 @@ canon_knowledge_items   canonical pointer (status, current_version, domain, juri
        -> canon_citations       (version, chunk, source) edges
 canon_audit_events      append-only mutation trail
 canon_taxonomy_nodes    domain / jurisdiction tree (closure via parent_id)
+canon_embedding_sets    one row per (workspace, embedder configuration)
+  -> canon_chunk_vectors    every dense row names the set it belongs to
 ```
 
 All tables are prefixed `canon_` so a multi-service Postgres remains
@@ -143,12 +145,47 @@ The write path (`IndexService.replace_for_source()`) requires
 scope fails loud with a `TypeError` at the call site rather than
 landing the vectors in the wrong RLS bucket.
 
-### Re-embed drift detection
+### Embedding sets
 
-The `ix_canon_chunks_tenant_workspace_model` index lets the
-re-embed job detect `(tenant, workspace) x embedding_model`
-drift -- the right composite when a model upgrade rolls out
-per-workspace.
+An **embedding set** is every vector one (provider, model, dimensions,
+endpoint) configuration produced for one workspace. It is the unit a
+deployment re-embeds into and the unit search reads from:
+`canon_workspaces.active_embedding_set_id` names the set that answers a
+workspace's queries, and flipping that one column is the whole of a
+change of embedder.
+
+Before 26.8.0 the width of `canon_chunk_vectors.embedding` was the width
+of the whole deployment -- `vector(N)` baked in by migration `0016` from
+the migrate job's environment, with a boot refusal when a process
+disagreed. A change of MODEL at the same width was not even refused: it
+passed every check and silently degraded recall, because no row recorded
+what had produced it. Migration `0017` replaces both:
+
+* `canon_chunk_vectors.embedding` is an untyped `vector`; every row
+  carries `set_id`, `dim` and `model`, keyed `PRIMARY KEY (set_id, id)`
+  so one chunk can hold a vector in two sets at once.
+* One **partial expression** HNSW per set,
+  `USING hnsw ((embedding::vector(N)) vector_cosine_ops) WHERE set_id = ...`
+  -- `halfvec(N)` above 2000 dimensions, which is pgvector's ceiling for a
+  `vector` HNSW. The predicate is the SET, not the width, so two sets at
+  one width never share an index and a switch never degenerates into
+  filtered ANN across both.
+* A `SECURITY DEFINER` trigger refuses a vector whose `(model, dim)`
+  disagrees with its set's. That is the guard the width check never was.
+
+The set travels through the read and write paths on a ContextVar
+(`flycanon.core.services.embeddings.embedding_sets`), because the
+framework's `upsert(documents, namespace)` /
+`search(vector, top_k, namespace)` surface has nowhere to carry one.
+`EmbeddingRegistry` caches one embedder per `(provider, model,
+dimensions)`, so a query is always embedded by the model that produced
+the corpus it is searching -- which is what lets one shared flycanon
+serve tenants on different embedders, and what makes a re-embed's
+dual-set window correct.
+
+`ix_canon_chunks_tenant_workspace_model` is what the reindex reads to
+find chunks still carrying another model's stamp -- the catch-up pass
+and, per workspace, the drift the boot warning names.
 
 ## The seven workshop features
 
@@ -516,7 +553,8 @@ identical.
 |-------|--------|-----|
 | `canon_workspaces` | `tenant_id = app.tenant_id` AND `id = app.workspace_id` | The `id` column **is** the workspace identity, so the policy joins through it. The workspace controller's `LIST` path runs with `BYPASSRLS` (per-tenant listing). |
 | `canon_agent_tokens` | `tenant_id = app.tenant_id` (no workspace clause) | Tokens span workspaces via their `workspace_allowlist`, so a workspace-scoped policy would hide legitimate rows. |
-| `canon_chunk_vectors` | Standard `(tenant_id, workspace_id)` policy installed via a runtime `DO` block guarded by `IF EXISTS` | The pgvector table is created at boot by `PgvectorStore`, not by Alembic. |
+| `canon_chunk_vectors` | `namespace = app.scope_namespace`, where the namespace is `t/<tenant>/w/<workspace>` | The framework's pgvector adapter is namespace-based; migration `0016` creates the table and installs the policy, and the store re-asserts it in-band for a database no migration has touched. |
+| `canon_embedding_sets` | Standard `(tenant_id, workspace_id)` policy (migration `0017`) | A set is scoped exactly like the chunks it embeds. Its coherence trigger is `SECURITY DEFINER` so the lookup cannot be starved by the writer's scope. |
 | 14 other tables (`canon_audit_events`, `canon_candidates`, `canon_chunks`, `canon_citations`, `canon_conversations`, `canon_conversation_turns`, `canon_cost_events`, `canon_ingest_jobs`, `canon_ingest_job_events`, `canon_knowledge_items`, `canon_knowledge_relations`, `canon_knowledge_versions`, `canon_sources`, `canon_taxonomy_nodes`) | Standard `(tenant_id, workspace_id)` policy | -- |
 
 ### Session GUCs

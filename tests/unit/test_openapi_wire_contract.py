@@ -133,4 +133,11 @@ class TestCommittedSnapshot:
         assert "post" in spec["paths"]["/api/v1/workspaces/{workspace_id}:purge"]
         stream = spec["paths"]["/api/v1/ingest-jobs/{job_id}/stream"]["get"]
         assert any(p.get("name") == "after_id" for p in stream["parameters"])
-        assert spec["info"]["version"] == "26.7.1"
+        # The committed snapshot is stamped with the package version, so a
+        # release that forgets to regenerate it flips this gate red.
+        from importlib.metadata import version
+
+        assert spec["info"]["version"] == version("flycanon")
+        # 26.8.0: the embedder split, which the SDKs deserialise.
+        chunk_stats = spec["components"]["schemas"]["ChunkStats"]["properties"]
+        assert "by_embedding_model" in chunk_stats

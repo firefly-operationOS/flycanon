@@ -678,6 +678,10 @@ class ChunkStats(BaseModel):
     total: int = 0
     embedded: int = 0
     embedded_pct: float = 0.0
+    #: Chunk count per ``<provider>:<model>`` embedder (26.8.0). During a
+    #: ``flycanon reindex`` the corpus is split across two identifiers and
+    #: the split moving is the run making progress.
+    by_embedding_model: dict[str, int] = Field(default_factory=dict)
 
 
 class JobStats(BaseModel):

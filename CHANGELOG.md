@@ -4,6 +4,214 @@ All notable changes to **flycanon** are documented here.
 
 ## [Unreleased]
 
+## [26.8.0] - 2026-09-24
+
+Any embedder, and a way to change it.
+
+Until this release the embedding model was pluggable *per process* and
+completely absent *from the data*. Two environment variables picked the
+provider and the width; nothing in `canon_chunk_vectors` recorded which
+model had produced a row; and the only guard in the system was a width
+guard that refused to boot -- "the dimension is fixed when the table is
+created and a different width needs a fresh database". A change of MODEL
+at the same width was not even refused: it passed every check, and the
+query stage then cosine-compared queries from one embedding space against
+a corpus in another, with no error and no log line.
+
+**There is no production data in flycanon anywhere**, which is exactly
+why this landed now: making the model and its width first-class costs one
+migration and zero downtime today, and would cost a maintenance window
+and a data move later.
+
+### One thing nobody should be allowed to assume
+
+**Anthropic's Claude models are not served by Azure OpenAI.** An Azure
+OpenAI deployment runs the GPT family. Claude is reachable on Anthropic's
+own API, on AWS Bedrock and on Google Vertex. Embeddings and answers are
+therefore two independent decisions, and the recommended shape for an
+Azure preproduction is:
+
+```yaml
+FLYCANON_EMBEDDING_MODEL:  azure:<deployment-name>   # embeddings on Azure
+FLYCANON_RLM_ROOT_MODEL:   anthropic:claude-sonnet-5 # answers on Anthropic
+```
+
+That combination was impossible to express before this release and is
+the default recommendation after it.
+
+### Added
+
+- **Embedding sets** (`canon_embedding_sets`, migration `0017`). An
+  embedding set is every vector one (provider, model, dimensions,
+  endpoint) configuration produced for one workspace.
+  `canon_workspaces.active_embedding_set_id` names the set that answers a
+  workspace's searches, and **changing the embedder is one `UPDATE` of
+  that column**. `canon_chunk_vectors.embedding` loses its typmod and
+  every row gains `set_id` / `dim` / `model`, re-keyed
+  `PRIMARY KEY (set_id, id)` so one chunk can hold a vector in two sets
+  at once. One **partial expression HNSW per set** replaces the single
+  global index; the predicate is the SET, not the width, so two sets at
+  one width never share an index.
+- **`flycanon reindex`** -- the verb `docs/deployment.md` and
+  `docs/operations-runbook.md` have been telling operators to run since
+  26.5 and which the software did not have.
+
+  ```
+  flycanon reindex --to azure:<deployment> --dimensions 1536 \
+                   [--workspace w --tenant t | --tenant t | --all]
+                   [--estimate-only] [--yes] [--resume <set-id>]
+                   [--batch-size 256] [--no-activate]
+  flycanon reindex --list | --activate <set-id> | --rollback | --drop-set <set-id>
+  ```
+
+  It plans and prices first, creates one set per workspace, embeds in
+  batches from `canon_chunks`, catches up anything ingested during the
+  run, builds the ANN index, and only then switches. **The old set serves
+  every search for the whole run** -- the search predicate IS the set id,
+  so the new set is invisible until it is activated -- and the old set's
+  rows and index are kept, so `--rollback` is the same `UPDATE`
+  backwards. Progress rides the existing `canon_ingest_jobs` /
+  `canon_ingest_job_events` tables (`kind='reindex'`, cursor in
+  `metadata_json`), so the SSE stream works with no new plumbing, and
+  `ON CONFLICT (set_id, id)` makes a replayed batch a rewrite.
+- **Azure OpenAI as real configuration.**
+  `FLYCANON_AZURE_OPENAI_ENDPOINT` / `_API_VERSION` / `_API_KEY` (falling
+  back to the bare `AZURE_*` names) and
+  `FLYCANON_AZURE_AUTH=api_key|managed_identity`, validated at config
+  time with messages that name the setting. `managed_identity` acquires a
+  bearer token through `DefaultAzureCredential`
+  (`uv sync --extra azure`), so no key exists in the environment to leak.
+  The api-version was previously pinned at `2024-02-01` inside the
+  framework and unreachable from flycanon; it now defaults to
+  `2026-05-01`.
+- **Per-workspace model choice.** One shared flycanon can serve tenant A
+  on Azure and tenant B on Ollama: `EmbeddingRegistry` caches one
+  embedder per `(provider, model, dimensions)` and a query is embedded by
+  the model that produced the corpus it searches. Per-**tenant
+  credentials** are still per deployment -- named as a limitation in
+  `docs/security-model.md`, because it is a compliance statement and not
+  an implementation detail.
+- `ChunkStats.by_embedding_model` on `GET /api/v1/stats` (and both SDKs):
+  the chunk count per `<provider>:<model>`. During a reindex the corpus
+  is split across two identifiers and the split moving is the run making
+  progress.
+
+### Fixed
+
+- **The admin dashboard reported `embedded_pct: 0.0` on a fully embedded
+  corpus.** `StatsService` counted `canon_chunks.embedding`, a JSON
+  column nothing in `src/` has ever written. The column is dropped and
+  coverage is counted from `embedding_model`, which every indexed chunk
+  carries. That number is what an operator stares at while a reindex
+  runs.
+- **A model change at the same width could no longer corrupt retrieval
+  silently.** A `SECURITY DEFINER` trigger refuses a vector whose
+  `(model, dim)` disagrees with its set's, with a message naming
+  `flycanon reindex`. This is the single most valuable guard in the
+  release: the failure it closes had no error and no log line.
+- **The RLM engine refuses a non-Anthropic model at boot.**
+  `AnthropicClient` stripped ANY provider prefix, so
+  `FLYCANON_RLM_ROOT_MODEL=azure:gpt-5.2` POSTed `{"model": "gpt-5.2"}`
+  to `api.anthropic.com`, retried six times with exponential backoff and
+  surfaced a 404 that blamed the wrong vendor. It now raises at
+  construction, naming the setting and the two configurations that work.
+- **An unknown embedding model is priced `cost unknown`, never `$0.00`.**
+  `prices.py` keys rows by `(provider, model)` with a named `basis`
+  (`2026-09-azure-published`) and returns `None` for a model it does not
+  know. A local embedder is priced at zero with the basis `local`, which
+  is a fact rather than an absence.
+- **Zero vectors on a per-item embedding failure are opt-in.** The
+  previous behaviour wrote `[0.0] * dimensions` with a warning; those
+  rows entered the ANN index indistinguishable from real ones, nothing
+  marked them, and they were unrecoverable afterwards.
+  `FLYCANON_EMBEDDING_ZERO_VECTOR_ON_FAILURE` defaults to `false`, and
+  the reindex path refuses them whatever it says.
+- **A 429 is a throttle, not an error.** `Retry-After` is honoured
+  exactly (with jitter), the in-flight window halves and recovers, and a
+  sustained throttle during a reindex records `reindex.throttled` and
+  keeps the cursor instead of consuming one of the job's three attempts.
+- **A 3072-wide model had no ANN index at all.** pgvector refuses an HNSW
+  on a `vector` column wider than 2000 dimensions, so
+  `text-embedding-3-large` at its native width -- the exact configuration
+  this release exists to support -- would have sequential-scanned in
+  silence. Sets above that ceiling are indexed as `halfvec(N)`: full
+  precision in the column, half in the index. Found by running the
+  end-to-end suite against a real server, which is what it is for.
+- **Searches set `hnsw.iterative_scan = relaxed_order`** alongside
+  `ef_search`, so the post-ANN namespace filter cannot under-recall a
+  small workspace inside a large set.
+- `docs/deployment.md` listed Voyage under the token `voyageai:`, which
+  `_build_embedder` has never accepted (it is `voyage`), and omitted
+  Azure, Bedrock and Google entirely. Google is now marked as needing an
+  extra flycanon does not install (`google-generativeai`; the
+  transitively present `google-genai` is a different package).
+
+### Changed
+
+- **The boot-time width refusal is deleted.** After `0017` the column has
+  no width to disagree with, and three better things replace it:
+  pgvector raises `expected N dimensions, not M` on a mis-scoped query
+  (an error, not a wrong answer); the coherence trigger catches the
+  same-width model change the width check never could; and a workspace
+  that is not on this process's embedder logs a WARNING naming
+  `flycanon reindex` -- a warning and not a refusal, because one process
+  legitimately serves workspaces on several sets.
+- Migration `0017` reads settings only to **label** the set it adopts,
+  never to size a column. `0016` read `FLYCANON_EMBEDDING_DIMENSIONS` to
+  bake `vector(N)` into the schema, which is why a migrate/serve
+  environment mismatch created one width and then failed every pod's
+  boot. After `0017` the schema has no environment dependency at all.
+- `partition_admin.py` is **deleted**. Its Tier-B recipe partitioned
+  `canon_chunk_vectors` by `LIST (tenant_id)`, a column migration `0014`
+  dropped and `0016` never recreated, so it could not have worked -- and
+  a reader of that table would have found it and believed it.
+  `docs/architecture.md` and `docs/scale-and-performance.md` say what
+  replaced it.
+
+### Migration `0017`, and what it does to data
+
+**Reversible, and lossless where rows exist.** The upgrade relaxes the
+column in place (a typmod relaxation rewrites no value and cannot drop a
+row), adopts existing vectors into one set per namespace sized by
+`vector_dims()` **measured per row**, re-keys the table and builds one
+partial index per adopted set. The downgrade restores `vector(N)` at one
+width, and **refuses at two widths** -- naming
+`flycanon reindex --drop-set` -- rather than truncating rows into a width
+they were not embedded at. Both directions are proven against a live
+pgvector in `tests/integration/test_migration_0017_populated.py`.
+
+On every deployment that exists today the adoption path finds nothing and
+the migration is pure DDL. It still ships, and is still tested, because
+it is the only thing between a future populated deployment and a fresh
+database.
+
+Run `flycanon migrate` before rolling the new image, as for every
+`YY.MM.0`.
+
+### What a POPULATED deployment would need on top
+
+Stated plainly, because this release ships the schema, the command and
+the switch, and deliberately not an online zero-downtime dual-serving
+proxy:
+
+1. **Write-path fan-out during the window.** A catch-up pass re-embeds
+   anything ingested while the run was walking the corpus, before the
+   switch -- that ships. Genuine dual-write in `IndexService` to every
+   non-retired set is the real zero-downtime answer and is **not** here;
+   a deployment that cannot tolerate the catch-up window should freeze
+   ingestion for it.
+2. **Batches run in the CLI process, not on the ingest worker.**
+   `FLYCANON_WORKER_HANDLER_TIMEOUT_S` is 120 s, so a worker-dispatched
+   re-embed needs one event per batch with its own retry accounting; a
+   CLI has no such wall. The cursor is what makes a killed shell
+   survivable.
+3. **Index build under load.** Above ~100k chunks the HNSW build is the
+   dominant cost and wants `maintenance_work_mem`,
+   `max_parallel_maintenance_workers` and a maintenance window.
+4. **Storage.** Two sets double the vector table for the length of the
+   rollback window; `VACUUM FULL` or `pg_repack` after `--drop-set`
+   reclaims it. Neither is automated.
+
 ## [26.7.1] - 2026-09-24
 
 Hardening for a multi-tenant caller (the dworkers control plane, which

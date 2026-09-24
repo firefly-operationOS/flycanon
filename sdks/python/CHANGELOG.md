@@ -2,6 +2,23 @@
 
 All notable changes to **flycanon-sdk** (Python) are documented here.
 
+## [26.8.0] - 2026-09-24
+
+### Added
+
+- `ChunkStats.by_embedding_model` -- the chunk count per
+  `<provider>:<model>` embedder, from `GET /api/v1/stats`. During a
+  `flycanon reindex` the corpus is split across two identifiers and the
+  split moving is the run making progress. Additive: a 26.7.x server
+  omits the field and it defaults to `{}`.
+
+### Note
+
+- `ChunkStats.embedded_pct` now means something. The 26.7.x server
+  computed it from a column nothing ever wrote, so it reported `0.0` on
+  a fully embedded corpus; the 26.8.0 server counts chunks that carry an
+  `embedding_model`. No client change is required.
+
 ## [26.7.1] - 2026-09-24
 
 ### Changed -- realigned with the 26.7.x server (breaking where the old route no longer existed)

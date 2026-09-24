@@ -14,7 +14,7 @@ over whole documents with citations — all behind a single HTTP service.
 [![agentic](https://img.shields.io/badge/genai-fireflyframework--agentic-purple)](https://github.com/fireflyframework/fireflyframework-agentic)
 [![OpenAPI](https://img.shields.io/badge/api-openapi%203.1-green)](docs/api-reference.md)
 [![vector store](https://img.shields.io/badge/vector--store-pgvector%20%7C%20qdrant%20%7C%20chroma-336791)](docs/architecture.md#retrieval-backend-pluggable-dense-store)
-[![Version](https://img.shields.io/badge/version-26.7.1-green.svg)](#)
+[![Version](https://img.shields.io/badge/version-26.8.0-green.svg)](#)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 
 </div>
@@ -143,6 +143,23 @@ Every backend is wrapped in a tenant/workspace-scoped layer, so reads and
 writes are confined to `(tenant_id, workspace_id)` via a canonical
 `t/<tenant>/w/<workspace>` namespace. Fusion always happens via Reciprocal Rank
 Fusion over the two channels.
+
+**Changing the embedder is a re-embed, never a fresh database.** Since 26.8.0
+every dense row belongs to an *embedding set* that records the provider, the
+model and the width that produced it, each set has its own partial HNSW, and
+one column on the workspace says which set answers its searches. Moving a
+workspace from one embedder to another — including to Azure OpenAI, which is a
+first-class provider with real configuration and optional managed identity — is:
+
+```bash
+flycanon reindex --to azure:<deployment> --dimensions 1536                  --tenant t-123 --workspace w-456
+```
+
+The old set serves every search for the whole run, the switch is one `UPDATE`,
+and `--rollback` is the same `UPDATE` backwards. One shared flycanon can serve
+different tenants on different embedders at the same time. See
+[deployment.md § Embedding providers](docs/deployment.md#embedding-providers)
+and [operations-runbook.md § 7b](docs/operations-runbook.md).
 
 ---
 

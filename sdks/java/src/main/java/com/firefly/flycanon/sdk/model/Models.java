@@ -515,7 +515,13 @@ public final class Models {
     public record ChunkStats(
             int total,
             int embedded,
-            @JsonProperty("embedded_pct") double embeddedPct) {
+            @JsonProperty("embedded_pct") double embeddedPct,
+            /**
+             * Chunk count per {@code <provider>:<model>} embedder (26.8.0). During a
+             * {@code flycanon reindex} the corpus is split across two identifiers and the
+             * split moving is the run making progress.
+             */
+            @JsonProperty("by_embedding_model") Map<String, Integer> byEmbeddingModel) {
     }
 
     @JsonIgnoreProperties(ignoreUnknown = true)
