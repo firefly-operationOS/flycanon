@@ -181,17 +181,35 @@ async def _plan(service: ReindexService, **overrides: Any):
 
 
 class TestScope:
-    async def test_exactly_one_selector_is_required(self, world) -> None:
+    async def test_a_scope_is_required(self, world) -> None:
         """No bare ``flycanon reindex`` that silently means ``--all``."""
-        service = world["service"]
-        with pytest.raises(ReindexError, match="exactly one scope"):
-            await service.resolve_scope()
-        with pytest.raises(ReindexError, match="exactly one scope"):
-            await service.resolve_scope(tenant_id=_TENANT, everything=True)
+        with pytest.raises(ReindexError, match="choose a scope"):
+            await world["service"].resolve_scope()
+
+    async def test_a_workspace_and_its_tenant_are_one_selector(self, world) -> None:
+        """``--workspace w --tenant t`` is the single-workspace scope.
+
+        It is not two selectors, and reading it as two is how the first real
+        invocation of this command was refused.
+        """
+        assert await world["service"].resolve_scope(workspace_id=_WORKSPACE, tenant_id=_TENANT) == [
+            (_TENANT, _WORKSPACE)
+        ]
 
     async def test_a_workspace_needs_its_tenant(self, world) -> None:
         with pytest.raises(ReindexError, match="--workspace needs --tenant"):
             await world["service"].resolve_scope(workspace_id=_WORKSPACE)
+
+    @pytest.mark.parametrize(
+        "kwargs",
+        [
+            {"tenant_id": _TENANT, "everything": True},
+            {"workspace_id": _WORKSPACE, "tenant_id": _TENANT, "everything": True},
+        ],
+    )
+    async def test_all_cannot_be_combined_with_a_narrower_scope(self, world, kwargs) -> None:
+        with pytest.raises(ReindexError, match="different scopes"):
+            await world["service"].resolve_scope(**kwargs)
 
     async def test_all_finds_every_workspace_that_holds_chunks(self, world) -> None:
         assert await world["service"].resolve_scope(everything=True) == [(_TENANT, _WORKSPACE)]

@@ -291,6 +291,49 @@ class TestUpgrade:
         assert "embedding" not in columns
         assert "embedding_model" in columns
 
+    def test_an_orphaned_namespace_is_adopted_and_announced(self, seeded) -> None:
+        """Vectors whose workspace row is gone.
+
+        Measured on the dworkers dev corpus: one of its 21 namespaces has no
+        ``canon_workspaces`` row, so 21 sets were adopted and only 20 pointers
+        were set. The rows are worth keeping, but nothing will ever point at
+        that set, and an operator counting rows would otherwise have to find
+        the discrepancy themselves.
+        """
+        pg, engine = seeded
+        with engine.begin() as conn:
+            conn.execute(
+                sa.text(
+                    "INSERT INTO canon_chunk_vectors (id, namespace, embedding, text) "
+                    "VALUES ('orphan-1', :ns, CAST(:vec AS vector), 'orphaned')"
+                ),
+                {"ns": f"t/{TENANT}/w/w-purged", "vec": _literal(WIDTH, 0)},
+            )
+        _upgrade(pg)
+        # The fact is recorded on the row, not only in migration output that
+        # scrolls past: `flycanon reindex --list` is where an operator will be
+        # standing when they wonder why a set answers nothing. (Alembic's
+        # env.py runs fileConfig(), which takes its loggers off the handler
+        # chain, so the WARNING itself is not capturable from here.)
+        with engine.connect() as conn:
+            note = conn.execute(
+                sa.text("SELECT note FROM canon_embedding_sets WHERE workspace_id = 'w-purged'")
+            ).scalar_one()
+        assert "ORPHANED" in note
+        assert "no canon_workspaces row" in note
+        with engine.connect() as conn:
+            adopted = conn.execute(
+                sa.text(
+                    "SELECT count(*) FROM canon_chunk_vectors WHERE namespace = :ns AND set_id IS NOT NULL"
+                ),
+                {"ns": f"t/{TENANT}/w/w-purged"},
+            ).scalar_one()
+            pointers = conn.execute(
+                sa.text("SELECT count(*) FROM canon_workspaces WHERE active_embedding_set_id IS NOT NULL")
+            ).scalar_one()
+        assert adopted == 1, "the rows are adopted, not dropped"
+        assert pointers == len(WORKSPACES), "and no phantom workspace is invented for them"
+
 
 class TestDowngrade:
     def test_it_round_trips_at_one_width(self, seeded) -> None:

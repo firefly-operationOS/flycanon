@@ -223,19 +223,24 @@ class ReindexService:
     ) -> list[tuple[str, str]]:
         """The ``(tenant, workspace)`` pairs in scope. Exactly one selector.
 
+        The three selectors are ONE workspace (which needs its tenant, because
+        a workspace id is scoped to one), one whole tenant, and everything.
+        ``--workspace`` plus ``--tenant`` is the first of those, not two.
+
         There is deliberately no bare ``flycanon reindex`` that silently means
         ``--all``: re-embedding every tenant of a shared deployment is a
         decision, and it should read like one in the shell history.
         """
-        selectors = [bool(workspace_id), bool(tenant_id), everything]
-        if sum(selectors) != 1:
-            raise ReindexError(
-                "choose exactly one scope: --workspace <id> (with --tenant), --tenant <id>, or --all"
-            )
+        if workspace_id and everything:
+            raise ReindexError("--workspace and --all are different scopes; choose one")
         if workspace_id:
             if not tenant_id:
                 raise ReindexError("--workspace needs --tenant: a workspace id is scoped to a tenant")
             return [(tenant_id, workspace_id)]
+        if tenant_id and everything:
+            raise ReindexError("--tenant and --all are different scopes; choose one")
+        if not tenant_id and not everything:
+            raise ReindexError("choose a scope: --workspace <id> --tenant <id>, --tenant <id>, or --all")
         return await self._chunks.scopes_with_chunks(tenant_id=tenant_id if not everything else None)
 
     # ------------------------------------------------------------------

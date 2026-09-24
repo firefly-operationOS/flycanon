@@ -361,13 +361,48 @@ def _adopt_existing_vectors(bind: sa.Connection) -> None:
                 "namespace": namespace,
             },
         )
-        bind.execute(
+        pointed = bind.execute(
             sa.text(
                 "UPDATE canon_workspaces SET active_embedding_set_id = :set_id "
                 "WHERE id = :workspace_id AND tenant_id = :tenant_id"
             ),
             {"set_id": set_id, "workspace_id": workspace_id, "tenant_id": tenant_id},
-        )
+        ).rowcount
+        if not pointed:
+            # Recorded on the row as well as logged: migration output scrolls
+            # past, and `flycanon reindex --list` is where an operator will
+            # actually be standing when they wonder why a set answers nothing.
+            bind.execute(
+                sa.text("UPDATE canon_embedding_sets SET note = :note WHERE id = :id"),
+                {
+                    "id": set_id,
+                    "note": (
+                        "adopted by migration 0017; ORPHANED -- no canon_workspaces row for "
+                        f"{tenant_id}/{workspace_id}, so nothing points at this set"
+                    ),
+                },
+            )
+            # Vectors whose workspace row is gone -- a purge that left the
+            # dense projection behind, or a namespace written outside the
+            # normal path. The set is still adopted (the rows exist and are
+            # worth keeping), but nothing points at it and nothing ever will,
+            # so an operator has to be told rather than left to find 21 sets
+            # and 20 pointers. Measured on the dworkers dev corpus, where one
+            # of 21 namespaces has no workspace row.
+            logger.warning(
+                "0017: namespace %s has %d vector(s) but no canon_workspaces row "
+                "(tenant=%s workspace=%s). They are adopted into set %s, which nothing points at "
+                "and which no search will reach. Recreate the workspace and run "
+                "`flycanon reindex --activate %s`, or drop the set with "
+                "`flycanon reindex --drop-set %s`.",
+                namespace,
+                int(row.rows),
+                tenant_id,
+                workspace_id,
+                set_id,
+                set_id,
+                set_id,
+            )
         logger.info(
             "0017: adopted %d vector(s) of namespace %s into set %s (%s:%s @%d)",
             int(row.rows),
