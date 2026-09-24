@@ -141,6 +141,14 @@ s3 = [
     "boto3>=1.34",
 ]
 
+# Optional Entra (managed-identity) authentication for Azure OpenAI.
+# Activates when FLYCANON_AZURE_AUTH=managed_identity; the default
+# ``api_key`` mode needs no extra. The Azure OpenAI client itself rides on
+# the ``openai`` wheel flycanon already depends on.
+azure = [
+    "azure-identity>=1.19",
+]
+
 [build-system]
 requires = ["hatchling>=1.18"]
 build-backend = "hatchling.build"

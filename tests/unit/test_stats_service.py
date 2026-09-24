@@ -132,16 +132,13 @@ async def _seed_corpus(repositories) -> None:
         content="hello",
         char_start=0,
         char_end=5,
-        embedding_model="dummy",
-        embedding=[0.1, 0.2],
+        embedding_model="dummy:v1",
         metadata_json={},
         **_SCOPE,
     )
-    # NOTE: ``embedding=None`` is explicitly omitted (not set as a
-    # kwarg) because the JSON column treats ``None`` as a JSON ``null``
-    # literal rather than SQL ``NULL`` on SQLite. Leaving the attribute
-    # unset preserves the column-level SQL NULL we need for the
-    # embedded-vs-pending split.
+    # ``embedding_model`` is left unset: a chunk that has been persisted
+    # but not yet indexed carries SQL NULL there, and that is the
+    # embedded-vs-pending split the dashboard reports.
     chunk_pending = KnowledgeChunkRow(
         id="chunk-2",
         source_id="src-1",
@@ -202,6 +199,7 @@ class TestSnapshot:
         assert snap["candidates"]["total"] == 0
         assert snap["chunks"]["total"] == 0
         assert snap["chunks"]["embedded_pct"] == 0.0
+        assert snap["chunks"]["by_embedding_model"] == {}
         assert snap["ingest_jobs"]["total"] == 0
         assert snap["cost"]["total_events"] == 0
 
@@ -221,6 +219,10 @@ class TestSnapshot:
         assert snap["chunks"]["total"] == 2
         assert snap["chunks"]["embedded"] == 1
         assert snap["chunks"]["embedded_pct"] == 50.0
+        # The split by embedder is what an operator watches during a
+        # reindex; before 26.8.0 coverage was read from a column nothing
+        # wrote and this whole block reported 0.0% on a full corpus.
+        assert snap["chunks"]["by_embedding_model"] == {"dummy:v1": 1}
         assert snap["ingest_jobs"]["total"] == 2
         assert snap["ingest_jobs"]["by_status"] == {"succeeded": 1, "failed": 1}
         assert snap["ingest_jobs"]["avg_attempts"] == 2.0

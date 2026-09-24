@@ -1215,13 +1215,21 @@
       "ChunkStats": {
         "description": "Coverage of the retrieval index.",
         "properties": {
+          "by_embedding_model": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "description": "Chunk count per ``<provider>:<model>`` identifier. During a ``flycanon reindex`` the corpus is split across two identifiers and the split moving is the run making progress.",
+            "title": "By Embedding Model",
+            "type": "object"
+          },
           "embedded": {
             "minimum": 0,
             "title": "Embedded",
             "type": "integer"
           },
           "embedded_pct": {
-            "description": "Percentage of chunks with a non-NULL embedding vector.",
+            "description": "Percentage of chunks that have been embedded (``embedding_model`` is set).",
             "maximum": 100.0,
             "minimum": 0.0,
             "title": "Embedded Pct",

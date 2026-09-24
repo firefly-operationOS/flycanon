@@ -108,7 +108,11 @@ class TestRlsHooks:
             database_url="postgresql://u:p@h/db", dimension=768, table_name="canon_chunk_vectors"
         )
         conn = AsyncMock()
-        conn.fetchrow.return_value = {"column_type": "vector(768)", "has_policy": True}
+        conn.fetchrow.return_value = {
+            "column_type": "vector",
+            "has_set_id": True,
+            "has_policy": True,
+        }
         await store._create_schema(conn)
         conn.execute.assert_not_awaited()
         # The probe itself is a catalogue read for THIS table, in the current schema.
@@ -121,7 +125,11 @@ class TestRlsHooks:
             database_url="postgresql://u:p@h/db", dimension=768, table_name="canon_chunk_vectors"
         )
         conn = AsyncMock()
-        conn.fetchrow.return_value = {"column_type": "vector(768)", "has_policy": False}
+        conn.fetchrow.return_value = {
+            "column_type": "vector",
+            "has_set_id": True,
+            "has_policy": False,
+        }
         await store._create_schema(conn)
         executed = [str(call.args[0]) for call in conn.execute.await_args_list]
         assert len(executed) == 1
@@ -129,14 +137,35 @@ class TestRlsHooks:
         assert "CREATE INDEX" not in executed[0]
         assert "tenant_workspace_isolation" in executed[0] and "insufficient_privilege" in executed[0]
 
-    async def test_existing_table_of_another_width_is_refused(self) -> None:
+    async def test_pre_26_8_0_table_is_refused_and_names_the_migration(self) -> None:
+        """The width refusal is gone; a table with no SET is what is refused now.
+
+        Before 26.8.0 this test pinned "a different width needs a fresh
+        database" -- a boot refusal that made a change of embedder a schema
+        fight. After migration 0017 the column has no width to disagree with,
+        and the one state that cannot be repaired at runtime is a table still
+        in the single-width shape: the process would write vectors that belong
+        to no embedding set. The refusal therefore names the migration, and
+        says that it is lossless and reversible, instead of naming a fresh
+        database.
+        """
         from fireflyframework_agentic.exceptions import VectorStoreError
 
         store = RlsPgVectorVectorStore(
             database_url="postgresql://u:p@h/db", dimension=1536, table_name="canon_chunk_vectors"
         )
         conn = AsyncMock()
-        conn.fetchrow.return_value = {"column_type": "vector(768)", "has_policy": True}
-        with pytest.raises(VectorStoreError, match=r"vector\(768\).*vector\(1536\).*fresh database"):
+        conn.fetchrow.return_value = {
+            "column_type": "vector(768)",
+            "has_set_id": False,
+            "has_policy": True,
+        }
+        with pytest.raises(VectorStoreError) as exc:
             await store._create_schema(conn)
+        message = str(exc.value)
+        assert "pre-26.8.0" in message
+        assert "flycanon migrate" in message
+        assert "0017" in message
+        assert "lossless and reversible" in message
+        assert "fresh database" not in message
         conn.execute.assert_not_awaited()

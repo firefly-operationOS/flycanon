@@ -178,24 +178,48 @@ class StatsService:
         }
 
     # ------------------------------------------------------------------
-    # Chunks -- total + embedded coverage
+    # Chunks -- total + embedded coverage, split by embedder
     # ------------------------------------------------------------------
 
     async def _chunk_stats(self) -> dict[str, Any]:
+        """Chunk counts, coverage, and which embedder produced each chunk.
+
+        Coverage used to be counted from ``canon_chunks.embedding``, a JSON
+        column that NOTHING in ``src/`` ever wrote -- so the admin dashboard
+        reported ``embedded_pct: 0.0`` on a fully embedded corpus, which is
+        the number an operator stares at while a reindex runs. Migration 0017
+        drops that column; coverage is now counted from ``embedding_model``,
+        which :meth:`IndexService.replace_for_source` stamps on every chunk it
+        indexes and which is therefore the system of record's own answer to
+        "has this been embedded, and by what?".
+
+        ``by_embedding_model`` is the reindex progress bar in one line: during
+        a re-embed the corpus is split across two identifiers, and the split
+        moving from one to the other is the run making progress.
+        """
         async with self._chunks._session_factory() as session:  # type: ignore[attr-defined]
             total = (await session.execute(select(func.count()).select_from(KnowledgeChunkRow))).scalar_one()
             embedded = (
                 await session.execute(
                     select(func.count())
                     .select_from(KnowledgeChunkRow)
-                    .where(KnowledgeChunkRow.embedding.isnot(None))
+                    .where(KnowledgeChunkRow.embedding_model.isnot(None))
                 )
             ).scalar_one()
+            by_model = (
+                await session.execute(
+                    select(KnowledgeChunkRow.embedding_model, func.count(KnowledgeChunkRow.id))
+                    .where(KnowledgeChunkRow.embedding_model.isnot(None))
+                    .group_by(KnowledgeChunkRow.embedding_model)
+                    .order_by(KnowledgeChunkRow.embedding_model)
+                )
+            ).all()
         embedded_pct = round((int(embedded or 0) / int(total)) * 100.0, 1) if total else 0.0
         return {
             "total": int(total or 0),
             "embedded": int(embedded or 0),
             "embedded_pct": embedded_pct,
+            "by_embedding_model": {str(k): int(v) for k, v in by_model},
         }
 
     # ------------------------------------------------------------------

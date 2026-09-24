@@ -29,6 +29,7 @@ from sqlalchemy import (
     String,
     Text,
     func,
+    text,
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -54,6 +55,15 @@ class IngestJobRow(Base):
         index=True,
     )
     status: Mapped[str] = mapped_column(String(24), nullable=False, index=True)
+    # What this job is. ``ingest`` (the default, and every row written before
+    # 26.8.0) processes one source; ``reindex`` re-embeds a whole workspace
+    # into a new embedding set. The source-shaped columns below are all
+    # nullable and all NULL on a reindex row, which is why this is one column
+    # rather than a second table: status, attempts, timestamps, correlation
+    # id, callback and the append-only event stream are wanted verbatim.
+    kind: Mapped[str] = mapped_column(
+        String(24), nullable=False, server_default=text("'ingest'"), default="ingest", index=True
+    )
     source_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
     attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 

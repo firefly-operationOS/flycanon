@@ -29,6 +29,7 @@ from flycanon.models.entities.candidate import CandidateRow
 from flycanon.models.entities.citation import CitationRow
 from flycanon.models.entities.conversation import ConversationRow, ConversationTurnRow
 from flycanon.models.entities.cost_event import CostEventRow
+from flycanon.models.entities.embedding_set import EmbeddingSetRow
 from flycanon.models.entities.ingest_job import IngestJobEventRow, IngestJobRow
 from flycanon.models.entities.knowledge_chunk import KnowledgeChunkRow
 from flycanon.models.entities.knowledge_item import KnowledgeItemRow
@@ -47,6 +48,7 @@ __all__ = [
     "ConversationRow",
     "ConversationTurnRow",
     "CostEventRow",
+    "EmbeddingSetRow",
     "IngestJobEventRow",
     "IngestJobRow",
     "KnowledgeChunkRow",

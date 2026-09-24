@@ -60,7 +60,11 @@ from flycanon.core.services.consolidation import (
     Consolidator,
 )
 from flycanon.core.services.consolidation.prompt_loader import load_prompt
-from flycanon.core.services.embeddings import EmbeddingService, build_embedding_service
+from flycanon.core.services.embeddings import (
+    EmbeddingRegistry,
+    EmbeddingService,
+    EmbeddingSetService,
+)
 from flycanon.core.services.ingestion import (
     Chunker,
     IngestionService,
@@ -92,6 +96,7 @@ from flycanon.models.repositories import (
     ChunkRepository,
     ConversationRepository,
     CostRepository,
+    EmbeddingSetRepository,
     IngestJobRepository,
     KnowledgeRepository,
     RelationRepository,
@@ -165,6 +170,10 @@ class CanonCoreConfiguration:
     @bean
     def ingest_job_repository(self, settings: CanonSettings) -> IngestJobRepository:
         return IngestJobRepository.from_url(settings.database_url)
+
+    @bean
+    def embedding_set_repository(self, settings: CanonSettings) -> EmbeddingSetRepository:
+        return EmbeddingSetRepository.from_url(settings.database_url)
 
     @bean
     def conversation_repository(self, settings: CanonSettings) -> ConversationRepository:
@@ -301,12 +310,34 @@ class CanonCoreConfiguration:
         return build_object_store(settings)
 
     @bean
-    def embedding_service(self, settings: CanonSettings) -> EmbeddingService:
-        return build_embedding_service(
-            embedding_model=settings.embedding_model,
-            dimensions=settings.embedding_dimensions,
-            batch_size=settings.embedding_batch_size,
-        )
+    def embedding_registry(self, settings: CanonSettings) -> EmbeddingRegistry:
+        """One embedder per ``(provider, model, dimensions)``, built on demand.
+
+        The process default is built eagerly inside the registry so a
+        misconfigured ``FLYCANON_EMBEDDING_MODEL`` still fails at boot; the
+        others appear when a workspace on another embedding set is first read
+        or written, which is what lets one shared flycanon serve tenants on
+        different embedders and what makes a re-embed's dual-set window work.
+        """
+        return EmbeddingRegistry(settings=settings)
+
+    @bean
+    def embedding_service(self, embedding_registry: EmbeddingRegistry) -> EmbeddingService:
+        """The process default, for the callers that legitimately have no scope.
+
+        Quality detectors compare knowledge-item bodies against each other,
+        not against a workspace's corpus, so they embed with the deployment's
+        configured model rather than with a set's.
+        """
+        return embedding_registry.default
+
+    @bean
+    def embedding_set_service(
+        self,
+        embedding_set_repository: EmbeddingSetRepository,
+        settings: CanonSettings,
+    ) -> EmbeddingSetService:
+        return EmbeddingSetService(repository=embedding_set_repository, settings=settings)
 
     @bean
     def corpus_context(self, settings: CanonSettings) -> CorpusContext:
@@ -329,6 +360,8 @@ class CanonCoreConfiguration:
         self,
         corpus_context: CorpusContext,
         embedding_service: EmbeddingService,
+        embedding_registry: EmbeddingRegistry,
+        embedding_set_service: EmbeddingSetService,
         source_repository: SourceRepository,
         chunk_repository: ChunkRepository,
         knowledge_repository: KnowledgeRepository,
@@ -362,6 +395,8 @@ class CanonCoreConfiguration:
             reranker_top_n=settings.reranker_top_n,
             query_expander=expander,
             query_expansion_n=settings.query_expansion_n if expander else 1,
+            embedding_sets=embedding_set_service,
+            embedding_registry=embedding_registry,
         )
 
     # ------------------------------------------------------------------

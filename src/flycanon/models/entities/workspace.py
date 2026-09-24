@@ -55,6 +55,20 @@ class Workspace(Base):
     retention_days: Mapped[int | None] = mapped_column(Integer, nullable=True)
     jurisdiction: Mapped[str | None] = mapped_column(String(64), nullable=True)
 
+    # The embedding set (``canon_embedding_sets.id``) that answers this
+    # workspace's searches. NULL means "use the process default", which is
+    # the back-compatible reading and the one a single-embedder deployment
+    # never has to think about. Changing the embedder is one UPDATE of this
+    # column, and undoing it is the same UPDATE backwards.
+    #
+    # There is deliberately no foreign key. The correct shape would be a
+    # COMPOSITE key carrying tenant_id, so an RLS-bypassing single-column
+    # check cannot accept another tenant's set; the workspace table is
+    # written by a different scope path than the sets are, so the integrity
+    # is asserted by the service that writes it and pinned by a test rather
+    # than half-asserted by a single-column FK.
+    active_embedding_set_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+
     # Bookkeeping.
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
