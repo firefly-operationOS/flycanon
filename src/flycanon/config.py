@@ -207,6 +207,20 @@ class CanonSettings(BaseSettings):
     # passes a security review and one that does not. Needs the ``azure``
     # extra (``uv sync --extra azure``) for ``azure-identity``.
     azure_auth: str = Field(default="api_key")
+    # Per-deployment USD prices for the Azure answer path, as
+    # ``<deployment>=<usd-per-million-input>/<usd-per-million-output>``,
+    # comma-separated. Azure rates are per deployment and per agreement and a
+    # deployment name carries no model identity, so flycanon cannot ship a
+    # table for them the way it ships Anthropic's public rates. Unset, the
+    # Azure RLM client counts tokens exactly, records a cost of 0.00 and says
+    # so once per deployment at WARNING -- the honest reading of "we do not
+    # know what this costs". A malformed entry is refused at construction
+    # rather than skipped: a price table that drops the row you mistyped is a
+    # bill that is quietly wrong.
+    azure_model_prices: str = Field(
+        default="",
+        description="``<deployment>=<in>/<out>`` USD per million tokens, comma-separated.",
+    )
 
     # Answer-stage model used by the RAG query endpoint.
     answer_model: str = "anthropic:claude-sonnet-4-6"

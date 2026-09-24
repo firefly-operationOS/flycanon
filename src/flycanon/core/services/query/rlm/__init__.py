@@ -14,7 +14,14 @@
 
 """Recursive Language Model (RLM) query engine.
 
-A self-contained, corpus-agnostic CodeAct REPL plus its synchronous Anthropic
-client. The engine never imports a concrete document store -- the corpus is
-duck-typed (see :class:`flycanon.core.services.query.rlm.session.DocCorpus`).
+A self-contained CodeAct REPL plus the synchronous chat clients it drives.
+The engine is agnostic in two directions:
+
+* **corpus** -- it never imports a concrete document store; the corpus is
+  duck-typed (see :class:`flycanon.core.services.query.rlm.session.DocCorpus`).
+* **provider** -- :mod:`~flycanon.core.services.query.rlm.chat` holds the
+  ``RlmChatClient`` protocol and the factory that resolves
+  ``FLYCANON_RLM_ROOT_MODEL`` to
+  :class:`~flycanon.core.services.query.rlm.client.AnthropicClient` or
+  :class:`~flycanon.core.services.query.rlm.azure_client.AzureOpenAIChatClient`.
 """

@@ -20,6 +20,25 @@ output-token budget into ``model_settings`` and keeps the
 construction recipe identical across stages so a tuning change
 lands in one place.
 
+Background -- why ``azure:`` is built here rather than inferred
+==============================================================
+pydantic-ai resolves a ``provider:model`` string itself, and its
+``AzureProvider`` reads ``AZURE_OPENAI_ENDPOINT``, ``AZURE_OPENAI_API_KEY``
+and ``OPENAI_API_VERSION`` from the bare environment. flycanon configures the
+same account as ``FLYCANON_AZURE_OPENAI_ENDPOINT`` /
+``FLYCANON_AZURE_OPENAI_API_KEY`` / ``FLYCANON_AZURE_OPENAI_API_VERSION``
+(with the bare ``AZURE_*`` names accepted as a fallback), and has no
+``OPENAI_API_VERSION`` at all. A deployment that configured flycanon's way
+therefore had working Azure EMBEDDINGS and an answer path that raised
+``UserError: Must provide one of the api_version argument or the
+OPENAI_API_VERSION environment variable`` on the first query.
+
+So an ``azure:`` id is built explicitly from :class:`CanonSettings` here --
+one Azure account, one place it is described, the same two credentials the
+embedding path uses. Every other provider id is still handed to pydantic-ai
+as a string, because for those the SDK's own environment contract is the
+right one and duplicating it would be the bug this fixes, inverted.
+
 Background -- why ``max_tokens`` matters
 ========================================
 Anthropic's API defaults to ``max_tokens=4096`` and OpenAI clamps
@@ -82,6 +101,7 @@ def build_agent(
         raise RuntimeError("fireflyframework_agentic is required to build FireflyAgent instances") from exc
 
     resolved_max = resolve_max_output_tokens(settings, override=max_output_tokens)
+    resolved_model: Any = _resolve_model(model, settings)
     model_settings: dict[str, Any] = {"max_tokens": resolved_max}
     if extra_settings:
         # Caller-provided settings win on conflict -- a stage can cap
@@ -91,12 +111,65 @@ def build_agent(
 
     return FireflyAgent(
         name,
-        model=model,
+        model=resolved_model,
         instructions=instructions,
         output_type=output_type,
         model_settings=model_settings,
         auto_register=False,
     )
+
+
+def _resolve_model(model: str, settings: CanonSettings) -> Any:
+    """``azure:<deployment>`` as a configured model object; anything else unchanged.
+
+    Returns the id untouched for every other provider so pydantic-ai keeps
+    doing its own inference -- this function exists only to close the gap
+    described in the module docstring, and widening it would mean flycanon
+    re-implementing provider resolution it does not own.
+    """
+    provider, separator, deployment = model.partition(":")
+    if not separator or provider.strip().lower() not in ("azure", "azure-openai"):
+        return model
+    if not deployment.strip():
+        raise ValueError(
+            f"model={model!r} has an azure: prefix and no deployment after it. On Azure the "
+            "second half is the DEPLOYMENT name, e.g. azure:my-gpt-5-deployment."
+        )
+
+    from pydantic_ai.models.openai import OpenAIChatModel
+    from pydantic_ai.providers.azure import AzureProvider
+
+    from flycanon.core.services.embeddings.azure import (
+        entra_token_provider,
+        require_azure_configuration,
+    )
+
+    require_azure_configuration(
+        endpoint=settings.azure_openai_endpoint,
+        api_version=settings.azure_openai_api_version,
+        api_key=settings.azure_openai_api_key,
+        auth=settings.azure_auth,
+    )
+    if settings.azure_auth == "managed_identity":
+        # AzureProvider only takes a key, so the identity path builds the SDK
+        # client itself -- the same move, and the same reason, as
+        # :class:`~flycanon.core.services.embeddings.azure.FlycanonAzureEmbedder`.
+        from openai import AsyncAzureOpenAI
+
+        provider_obj = AzureProvider(
+            openai_client=AsyncAzureOpenAI(
+                azure_endpoint=settings.azure_openai_endpoint,
+                api_version=settings.azure_openai_api_version,
+                azure_ad_token_provider=entra_token_provider(),
+            )
+        )
+    else:
+        provider_obj = AzureProvider(
+            azure_endpoint=settings.azure_openai_endpoint,
+            api_version=settings.azure_openai_api_version,
+            api_key=settings.azure_openai_api_key,
+        )
+    return OpenAIChatModel(deployment.strip(), provider=provider_obj)
 
 
 def resolve_max_output_tokens(

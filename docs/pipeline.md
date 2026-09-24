@@ -112,8 +112,10 @@ POST /api/v1/conversations/{id}/turn   (same dispatcher since 26.7.1)
                 original from the ObjectStore, extract page text
                 (sources without a stored original are skipped)
           → run the Recursive Language Model engine (RLMSession +
-                AnthropicClient) in asyncio.to_thread: a CodeAct REPL
-                that reasons over whole documents, not chunks
+                the RlmChatClient the configured provider resolves to --
+                Anthropic Messages or Azure OpenAI Chat Completions)
+                in asyncio.to_thread: a CodeAct REPL that reasons over
+                whole documents, not chunks
           → map engine citations back to Hit rows
           → AnswerResponse { answer, citations, model, elapsed_ms, no_answer }
 

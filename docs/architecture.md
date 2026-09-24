@@ -277,8 +277,9 @@ is a thin pass-through and the wire contract is identical across modes:
   *lazily*, on first access from the REPL (so the rest are never
   fetched), through a shared page cache (see below).
   `RLMSession` then drives the REPL inside `asyncio.to_thread` against
-  the synchronous `AnthropicClient`. Because it reasons over **whole
-  documents**, not chunks, it depends on the originals being persisted.
+  the synchronous `RlmChatClient` the configured provider resolves to.
+  Because it reasons over **whole documents**, not chunks, it depends on
+  the originals being persisted.
 * **`rag`** (opt-in, **deprecated**) -- the legacy `AnswerService`:
   hybrid retrieval (same path as `/search`) followed by one grounded
   LLM call. The dispatcher logs a deprecation warning on every RAG-mode
@@ -290,9 +291,20 @@ model drives the CodeAct loop and produces the final answer (the
 `final(...)` tool call, or the tool-less forced-final turn when the
 loop runs out); the sub model serves the `llm()` / `rlm()` helpers and
 the self-consistency selector. `FLYCANON_RLM_MAX_ITERS` /
-`FLYCANON_RLM_SUB_BUDGET` / `FLYCANON_RLM_MAX_DEPTH` bound the loop. The
-engine calls the Anthropic Messages API directly, so an
-`ANTHROPIC_API_KEY` is required at runtime in the default mode.
+`FLYCANON_RLM_SUB_BUDGET` / `FLYCANON_RLM_MAX_DEPTH` bound the loop.
+
+Both model settings carry a `<provider>:<model>` prefix and
+`build_rlm_client()` (`core/services/query/rlm/chat.py`) resolves it to
+the client that speaks that provider: `anthropic:<model>` to the
+Anthropic Messages client -- so an `ANTHROPIC_API_KEY` is required at
+runtime in the default configuration -- and `azure:<deployment>` to the
+Azure OpenAI Chat Completions client, which reads the same
+`FLYCANON_AZURE_OPENAI_*` settings as the embedding path. Both clients
+satisfy the `RlmChatClient` protocol and speak the Anthropic
+content-block vocabulary, so `RLMSession` is written once; the Azure
+client translates that vocabulary to and from Chat Completions. Both
+settings must name the same provider (one client, one endpoint, one
+credential), and any other prefix is refused at boot.
 
 ### RLM execution sandbox
 

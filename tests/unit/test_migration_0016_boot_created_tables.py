@@ -72,6 +72,23 @@ async def _framework_statements(dimension: int, *, hnsw_m: int, hnsw_ef_construc
         hnsw_ef_construction=hnsw_ef_construction,
     )
     conn = AsyncMock()
+    # The framework asks `pg_extension` before creating the extension. An AsyncMock answers every
+    # call with a truthy Mock, so without this the store would believe the extension is installed,
+    # skip it, and this comparison would silently lose a statement it is here to compare.
+    conn.fetchval.return_value = False
+    await store._create_schema(conn)
+    return [str(call.args[0]) for call in conn.execute.await_args_list]
+
+
+async def _framework_skips_the_extension_when_installed(dimension: int) -> list[str]:
+    """The same call with `pg_extension` answering yes — what a managed database produces."""
+    store = PgVectorVectorStore(
+        "postgresql://u:p@h/db",
+        dimension=dimension,
+        table_name="canon_chunk_vectors",
+    )
+    conn = AsyncMock()
+    conn.fetchval.return_value = True
     await store._create_schema(conn)
     return [str(call.args[0]) for call in conn.execute.await_args_list]
 
@@ -93,8 +110,32 @@ async def test_vector_table_ddl_matches_the_framework_column_for_column(dimensio
     def _normalise(statement: str) -> str:
         return " ".join(statement.split())
 
+    # THE INDEXES AND THE TABLE MUST MATCH TEXTUALLY. THE EXTENSION MUST NOT, AND THAT IS THE POINT.
+    #
+    # Both sides refuse to issue a bare `CREATE EXTENSION IF NOT EXISTS vector` against a database
+    # that already has it, because on a managed PostgreSQL the permission check runs BEFORE the
+    # existence check and the statement fails for any role outside the administrator group. They
+    # guard it in different places for a reason that is not a preference: the framework holds a
+    # CONNECTION and can ask `pg_extension` and branch in Python; the migration renders a list of
+    # STATEMENTS and has nothing to branch on, so its guard is a DO block in the SQL itself.
+    #
+    # The two extension assertions below are therefore per-side, and the skip case is asserted
+    # separately. Everything that must be identical — the columns, the index names, the HNSW build
+    # parameters — is still compared literally.
+    assert any(
+        "IF NOT EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'vector') THEN CREATE EXTENSION vector"
+        in _normalise(s)
+        for s in ours
+    ), "the migration must guard the extension in SQL"
+    assert any("CREATE EXTENSION IF NOT EXISTS vector" in _normalise(s) for s in theirs), (
+        "the framework must still create the extension when pg_extension says it is absent"
+    )
+    skipped = await _framework_skips_the_extension_when_installed(dimension)
+    assert not any("CREATE EXTENSION" in s for s in skipped), (
+        "the framework must not issue CREATE EXTENSION when the extension is already installed"
+    )
+
     for needle in (
-        "CREATE EXTENSION IF NOT EXISTS vector",
         "CREATE INDEX IF NOT EXISTS canon_chunk_vectors_hnsw ON canon_chunk_vectors USING hnsw "
         "(embedding vector_cosine_ops) WITH (m = 24, ef_construction = 96)",
         "CREATE INDEX IF NOT EXISTS canon_chunk_vectors_namespace ON canon_chunk_vectors (namespace)",

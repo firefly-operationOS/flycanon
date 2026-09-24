@@ -74,7 +74,7 @@ from flycanon.core.services.ingestion.chunker import build_default_chunker
 from flycanon.core.services.ingestion.loaders import default_registry
 from flycanon.core.services.query.answer_dispatcher import AnswerDispatcher
 from flycanon.core.services.query.answer_service import AnswerService
-from flycanon.core.services.query.rlm.client import AnthropicClient
+from flycanon.core.services.query.rlm.chat import RlmChatClient, build_rlm_client
 from flycanon.core.services.query.rlm.corpus import CanonCorpusBuilder
 from flycanon.core.services.query.rlm.page_cache import CorpusPageCache, build_page_cache
 from flycanon.core.services.query.rlm_answer_service import RLMAnswerService
@@ -503,20 +503,27 @@ class CanonCoreConfiguration:
         )
 
     @bean
-    def anthropic_client(self, settings: CanonSettings) -> AnthropicClient:
-        return AnthropicClient(settings)
+    def rlm_chat_client(self, settings: CanonSettings) -> RlmChatClient:
+        """The provider client the configured RLM models name.
+
+        ``anthropic:`` and ``azure:`` are routed to their own clients; any
+        other prefix, and a root/sub pair that straddles two providers, are
+        refused here -- at boot, with the setting named -- rather than at the
+        first query.
+        """
+        return build_rlm_client(settings)
 
     @bean
     def rlm_answer_service(
         self,
         canon_corpus_builder: CanonCorpusBuilder,
-        anthropic_client: AnthropicClient,
+        rlm_chat_client: RlmChatClient,
         settings: CanonSettings,
         cost_service: CostService,
     ) -> RLMAnswerService:
         return RLMAnswerService(
             corpus_builder=canon_corpus_builder,
-            client=anthropic_client,
+            client=rlm_chat_client,
             settings=settings,
             cost_service=cost_service,
         )

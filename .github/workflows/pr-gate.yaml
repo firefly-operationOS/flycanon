@@ -38,7 +38,7 @@ env:
   # dependency itself resolves from the git tags in pyproject.toml
   # (locked in uv.lock), so keep these equal to those tags.
   PYFLY_REF: v26.09.04
-  AGENTIC_REF: v26.06.14
+  AGENTIC_REF: v26.06.16
 
 jobs:
   lint:
