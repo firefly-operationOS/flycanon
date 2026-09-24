@@ -103,7 +103,33 @@ def vector_table_ddl(table: str) -> list[str]:
     is written.
     """
     return [
-        "CREATE EXTENSION IF NOT EXISTS vector",
+        # GUARDED, AND NOT BY `IF NOT EXISTS` ALONE.
+        #
+        # On Azure Database for PostgreSQL the PERMISSION check runs BEFORE the existence check, so
+        # `CREATE EXTENSION IF NOT EXISTS vector` raises against a database that already has the
+        # extension installed:
+        #
+        #     InsufficientPrivilegeError: Because vector isn't a trusted extension, only members of
+        #     "azure_pg_admin" are allowed to use CREATE EXTENSION vector
+        #
+        # `vector` is an UNTRUSTED extension in PostgreSQL's own sense, so a managed service is right
+        # to reserve it. The answer is not to put the application roles into `azure_pg_admin`: that
+        # grant carries far more than one extension, and a deployment whose roles are separated
+        # precisely so no application role holds it would be undoing its own posture to get past one
+        # statement. On a managed server the extension is installed once, by the administrator,
+        # before anything else runs.
+        #
+        # So the statement is skipped when the extension is already there — which it is on a managed
+        # server, and is not on a fresh local database, where this still installs it.
+        """
+        DO $$
+        BEGIN
+            IF NOT EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'vector') THEN
+                CREATE EXTENSION vector;
+            END IF;
+        END
+        $$
+        """,
         f"""
         CREATE TABLE IF NOT EXISTS {table} (
             id         TEXT NOT NULL,

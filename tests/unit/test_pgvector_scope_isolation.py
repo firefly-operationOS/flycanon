@@ -89,8 +89,14 @@ class TestRlsHooks:
         conn.fetchrow.return_value = None  # fresh database: the table does not exist yet
         await store._create_schema(conn)
         executed = "\n".join(str(call.args[0]) for call in conn.execute.await_args_list)
-        # Base schema (extension/table) still created...
-        assert "CREATE EXTENSION IF NOT EXISTS vector" in executed
+        # Base schema (extension/table) still created, with the extension GUARDED: on a managed
+        # PostgreSQL the permission check runs before the existence check, so the bare statement
+        # fails against a database that already has the extension. Asserting the absence of the bare
+        # form matters as much as asserting the presence of the guard — a regression would reinstate
+        # the statement rather than delete the guard.
+        assert "IF NOT EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'vector')" in executed
+        assert "CREATE EXTENSION vector" in executed
+        assert "CREATE EXTENSION IF NOT EXISTS vector" not in executed
         assert "canon_chunk_vectors" in executed
         # ...plus the flycanon RLS policy, keyed on the scope namespace, FORCEd.
         assert "tenant_workspace_isolation" in executed

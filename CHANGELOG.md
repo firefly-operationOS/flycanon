@@ -2,7 +2,41 @@
 
 All notable changes to **flycanon** are documented here.
 
-## [Unreleased]
+## [26.9.0] - 2026-09-24
+
+### Fixed
+
+- **The knowledge plane could not migrate or start against a managed PostgreSQL.** Three places
+  issued `CREATE EXTENSION IF NOT EXISTS vector` — migration `0016`, flycanon's own
+  `vector_table_ddl`, and the framework's `PgVectorVectorStore._create_schema` on first use of the
+  store. On a managed service the PERMISSION check runs BEFORE the existence check, so the statement
+  fails against a database that ALREADY HAS the extension, which is every managed database because
+  an administrator installs it there first. Azure Database for PostgreSQL answers:
+
+      Because vector isn't a trusted extension, only members of "azure_pg_admin" are allowed to
+      use CREATE EXTENSION vector
+
+  `vector` is untrusted in PostgreSQL's own sense, so a managed service is right to reserve it. The
+  answer is not to put `flycanon_admin` and `flycanon_app` into the administrator group: that grant
+  carries far more than one extension, and a deployment whose roles are separated precisely so no
+  application role holds it would be undoing its own posture to get past one statement.
+
+  The two flycanon paths now guard the statement with a `DO` block that asks `pg_extension` first.
+  The framework guards it in Python instead, because it holds a connection and can branch on the
+  answer — released as `fireflyframework-agentic` v26.06.16, which this release pins.
+
+  The drift test between the migration and the framework changed shape with them: the columns, the
+  index names and the HNSW build parameters are still compared literally, the extension is asserted
+  per side because the two guard in different places for a reason, and a new case proves the
+  framework issues nothing when `pg_extension` says the extension is installed. That test also had
+  to stop lying — it drove the framework with an `AsyncMock`, whose `fetchval` answers with a truthy
+  `Mock`, so the moment the framework started asking, the mock said yes and the comparison silently
+  lost the statement it exists to compare.
+
+### Changed
+
+- `fireflyframework-agentic` moves from `v26.06.14` to `v26.06.16`, in `pyproject.toml`'s git source
+  and in the pr-gate's `AGENTIC_REF`.
 
 ### Added
 
