@@ -500,7 +500,7 @@ else has a working default. Every row was verified against
 | `FLYCANON_OCR_LANG` | no | `eng+spa` | `+`-joined ISO 639-2/B codes. |
 | `FLYCANON_API_KEYS` | no | (empty) | Comma-separated static API keys (open if empty -- guard with the IdP integration in `pyfly.yaml` instead). |
 | `OPENAI_API_KEY` | conditional | (none) | Required if any embedding / answer / reranker model is OpenAI. |
-| `ANTHROPIC_API_KEY` | conditional | (none) | Required if any answer model is Anthropic. |
+| `ANTHROPIC_API_KEY` | conditional | (none) | Required if any answer model is Anthropic. RLM models on `azure:<deployment>` authenticate with the `FLYCANON_AZURE_OPENAI_*` settings instead. |
 
 ### flyradar
 

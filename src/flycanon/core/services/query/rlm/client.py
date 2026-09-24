@@ -21,6 +21,16 @@ that code. This is the thin HTTP wrapper they all share -- multi-turn
 single-shot :func:`AnthropicClient.complete` (a recursive sub-call), both over
 the Anthropic API.
 
+This is now ONE of the engine's providers rather than the engine's only way
+out. :func:`flycanon.core.services.query.rlm.chat.build_rlm_client` reads the
+``<provider>:<model>`` prefix on ``FLYCANON_RLM_ROOT_MODEL`` /
+``FLYCANON_RLM_SUB_MODEL`` and picks this client for ``anthropic:`` and
+:class:`~flycanon.core.services.query.rlm.azure_client.AzureOpenAIChatClient`
+for ``azure:``; both satisfy the
+:class:`~flycanon.core.services.query.rlm.chat.RlmChatClient` protocol, and
+the content-block vocabulary below is what the protocol speaks. Nothing about
+the Anthropic wire changed when the seam landed.
+
 The client is deliberately **synchronous** (``httpx.Client``): the engine is
 designed to be run inside ``asyncio.to_thread`` by a later async answer
 service, so blocking I/O here is correct. The API key is read from the
@@ -29,7 +39,8 @@ service, so blocking I/O here is correct. The API key is read from the
 ``anthropic:claude-sonnet-4-6`` form -- the ``anthropic:`` prefix is stripped
 before the id is sent to the Anthropic API, and **any other prefix is refused
 at construction** (:func:`anthropic_model_id`): this client has one URL and
-one wire shape, and a model on another provider cannot be reached through it.
+one wire shape, so a model on another provider must be routed to another
+client, not smuggled through this one.
 
 Two generations of Claude, two request shapes
 ---------------------------------------------
@@ -58,13 +69,13 @@ from __future__ import annotations
 
 import os
 import re
-import threading
 import time
 from dataclasses import dataclass
 
 import httpx
 
 from flycanon.config import CanonSettings
+from flycanon.core.services.query.rlm.chat import TokenLedger
 
 API_URL = "https://api.anthropic.com/v1/messages"
 API_VERSION = "2023-06-01"
@@ -159,18 +170,19 @@ class NonAnthropicRlmModel(ValueError):
 def anthropic_model_id(model: str, *, setting: str) -> str:
     """Return the bare Anthropic id in ``model``, or refuse the provider.
 
-    The RLM engine is a hand-written Anthropic Messages client: one URL, one
-    auth header, one wire shape. Until the :class:`ChatClient` port lands it
-    can call Anthropic and nothing else -- and **Anthropic's Claude models
-    are not served by Azure OpenAI**, so ``azure:gpt-5.2`` on this path is a
-    configuration that can never work.
+    THIS CLIENT's guard, not the engine's router. One URL, one auth header,
+    one wire shape: an id for another provider cannot be served here, so it
+    is refused at construction rather than sent to ``api.anthropic.com``
+    with its prefix quietly removed -- which is what happened before 26.8.0
+    and produced six retries and a 404 blaming Anthropic for a model
+    Anthropic never had.
 
-    Before 26.8.0 the prefix was simply dropped, so that configuration
-    POSTed ``{"model": "gpt-5.2"}`` to ``api.anthropic.com``, retried six
-    times with exponential backoff and surfaced a 404 blaming Anthropic for
-    a model Anthropic never had. Refusing here turns a slow, misattributed
-    runtime failure into an instant boot error that names the setting, the
-    provider and the way out.
+    Which client a setting gets is decided one level up, by
+    :func:`~flycanon.core.services.query.rlm.chat.build_rlm_client`, which
+    routes ``azure:`` to the Azure OpenAI client and refuses an unknown
+    prefix by name. Reaching this function with a non-Anthropic id therefore
+    means a caller constructed :class:`AnthropicClient` directly with a
+    setting it cannot serve, and the message says so.
     """
     provider, sep, bare = model.partition(":")
     if not sep:
@@ -178,13 +190,11 @@ def anthropic_model_id(model: str, *, setting: str) -> str:
     if provider.strip().lower() == "anthropic":
         return bare
     raise NonAnthropicRlmModel(
-        f"{setting}={model!r} names provider {provider!r}, and the RLM engine speaks "
-        "only the Anthropic Messages API. Claude models are not served by Azure "
-        "OpenAI: an Azure deployment runs the GPT family. Either keep answers on "
-        f"Anthropic ({setting}=anthropic:claude-sonnet-5) or run the deprecated RAG "
-        "engine, which is provider-agnostic (FLYCANON_ANSWER_MODE=rag with "
-        "FLYCANON_ANSWER_MODEL=azure:<deployment>). Embeddings are unaffected -- "
-        "FLYCANON_EMBEDDING_MODEL takes any provider."
+        f"{setting}={model!r} names provider {provider!r}, and AnthropicClient speaks only the "
+        "Anthropic Messages API. Build the RLM client through "
+        "flycanon.core.services.query.rlm.chat.build_rlm_client, which routes "
+        f"{setting}=azure:<deployment> to the Azure OpenAI client and refuses any other prefix "
+        "by name."
     )
 
 
@@ -204,8 +214,10 @@ class AnthropicClient:
         self.root_model = anthropic_model_id(settings.rlm_root_model, setting="FLYCANON_RLM_ROOT_MODEL")
         self.sub_model = anthropic_model_id(settings.rlm_sub_model, setting="FLYCANON_RLM_SUB_MODEL")
         self._prompt_cache = settings.rlm_prompt_cache
-        self._tokens: dict[str, dict[str, int]] = {}
-        self._token_lock = threading.Lock()
+        # The ledger is shared with the Azure client so ``token_totals()``
+        # means one thing whichever provider produced it; the price table is
+        # this provider's own.
+        self._ledger = TokenLedger(_PRICE_PER_M)
 
     def fork(self) -> AnthropicClient:
         """Return a fresh client sharing the connection pool, fresh token state.
@@ -234,31 +246,18 @@ class AnthropicClient:
 
     # -- token accounting ----------------------------------------------
     def _record_usage(self, model: str, usage: dict) -> None:
-        with self._token_lock:
-            bucket = self._tokens.setdefault(model, {"input": 0, "output": 0})
-            bucket["input"] += usage.get("input_tokens", 0)
-            bucket["output"] += usage.get("output_tokens", 0)
+        """Record one turn from an Anthropic ``usage`` block."""
+        self._ledger.record(
+            model,
+            input_tokens=usage.get("input_tokens", 0),
+            output_tokens=usage.get("output_tokens", 0),
+        )
 
     def reset_tokens(self) -> None:
-        with self._token_lock:
-            self._tokens.clear()
+        self._ledger.reset()
 
     def token_totals(self) -> dict:
-        with self._token_lock:
-            snapshot = {m: dict(v) for m, v in self._tokens.items()}
-        total_in = sum(v["input"] for v in snapshot.values())
-        total_out = sum(v["output"] for v in snapshot.values())
-        cost = sum(
-            v["input"] / 1e6 * _PRICE_PER_M.get(m, (0, 0))[0]
-            + v["output"] / 1e6 * _PRICE_PER_M.get(m, (0, 0))[1]
-            for m, v in snapshot.items()
-        )
-        return {
-            "input_tokens": total_in,
-            "output_tokens": total_out,
-            "estimated_cost_usd": round(cost, 4),
-            "by_model": snapshot,
-        }
+        return self._ledger.totals()
 
     # -- HTTP ----------------------------------------------------------
     def _request(self, body: dict) -> dict:

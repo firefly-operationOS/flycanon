@@ -100,10 +100,10 @@ required for production:
 | `FLYCANON_EMBEDDING_MODEL` | `<provider>:<model>` (e.g. `openai:text-embedding-3-small`, `voyageai:voyage-large-2`, `ollama:nomic-embed-text`) | **Yes** |
 | `FLYCANON_EMBEDDING_DIMENSIONS` | Dimensions of the chosen embedding model. **Must match `pgvector` index dimension** -- a mismatch produces a runtime error on first insert. | **Yes** |
 | `FLYCANON_ANSWER_MODE` | Answer engine for `/api/v1/query`: `rlm` (default) or `rag` (deprecated, opt-in). See [Answer mode](#answer-mode-rlm-default--rag-deprecated). | Defaults to `rlm`. |
-| `FLYCANON_ANSWER_MODEL` | `<provider>:<model>` for the **RAG** answer endpoint (default `anthropic:claude-sonnet-4-6`). Only used when `FLYCANON_ANSWER_MODE=rag`. | Needed only for `rag` mode. |
+| `FLYCANON_ANSWER_MODEL` | `<provider>:<model>` for the **RAG** answer endpoint (default `anthropic:claude-sonnet-4-6`). Only used when `FLYCANON_ANSWER_MODE=rag`. `azure:<deployment>` is built from the `FLYCANON_AZURE_OPENAI_*` settings; every other prefix is resolved by pydantic-ai from its own environment contract. | Needed only for `rag` mode. |
 | `FLYCANON_ANSWER_FALLBACK_MODEL` | Used when the primary RAG model errors (e.g. provider 5xx, rate limit). | Recommended for `rag` mode. |
 | `FLYCANON_STORE_ORIGINALS` | Persist original document bytes to the object store so RLM can reason over whole documents. **Required (`true`, the default) for RLM.** See [Answer mode](#answer-mode-rlm-default--rag-deprecated). | Defaults to `true`. |
-| Provider API keys | `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `VOYAGEAI_API_KEY`, `COHERE_API_KEY`, ... -- read by `fireflyframework-agentic` from env at boot. **`ANTHROPIC_API_KEY` is required at runtime in the default RLM mode** (the RLM engine calls the Anthropic Messages API directly). | As needed for your provider mix. |
+| Provider API keys | `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `VOYAGEAI_API_KEY`, `COHERE_API_KEY`, ... -- read by `fireflyframework-agentic` from env at boot. **`ANTHROPIC_API_KEY` is required at runtime whenever the RLM models are on `anthropic:`** (the default -- the engine calls the Anthropic Messages API directly). On `azure:` RLM models the engine authenticates with the `FLYCANON_AZURE_OPENAI_*` settings instead and does not read it. | As needed for your provider mix. |
 | `FLYCANON_VECTOR_STORE` | Dense backend: `pgvector` (default), `qdrant` (`--extra qdrant`), or `chroma` (`--extra chroma`). | Defaults to `pgvector`. |
 | `FLYCANON_EDA_ADAPTER` | `postgres` (default -- durable outbox + LISTEN/NOTIFY), `memory`, `redis`, `kafka`. | Defaults to `postgres`. |
 | `FLYCANON_API_KEYS` | Comma-separated static API keys. When set, every `/api/v1/*` request (except `GET /api/v1/version`) and the admin dashboard require `X-API-Key: <key>` or `Authorization: ApiKey <key>`; agent-tier requests carrying `X-Agent-Token` are exempt. Empty = open user tier (logged at boot). | **Yes in production.** |
@@ -133,12 +133,12 @@ value other than `rag` is normalised to `rlm`.
 | Key | What it is | Default |
 |-----|------------|---------|
 | `FLYCANON_ANSWER_MODE` | `rlm` (default) routes to the Recursive Language Model answerer; `rag` routes to the legacy hybrid-retrieval answerer. | `rlm` |
-| `FLYCANON_RLM_ROOT_MODEL` | Orchestrator model that drives the CodeAct REPL loop. `<provider>:<model>`. Claude 4.6 and later (`claude-sonnet-5`, `claude-opus-5`, Opus 4.6/4.7/4.8, Sonnet 4.6) are called with adaptive thinking and no sampling knobs; Haiku 4.5 / Sonnet 4.5 with the deterministic `temperature: 0.0`. | `anthropic:claude-sonnet-4-6` |
-| `FLYCANON_RLM_SUB_MODEL` | Model for the flat `llm()` / `rlm()` sub-calls made from REPL code and for the self-consistency candidate selector. Same generation rule as the root model. The **final answer** is the root model's, whether it comes from the `final(...)` tool call or from the tool-less forced-final turn after `FLYCANON_RLM_MAX_ITERS`; there is no third model. (`FLYCANON_RLM_ANSWER_MODEL`, documented in 26.7.0 as the model for "the final single-shot answer synthesis", was read by nothing and was removed in 26.7.1; an env file that still sets it is ignored.) | `anthropic:claude-sonnet-4-6` |
+| `FLYCANON_RLM_ROOT_MODEL` | Orchestrator model that drives the CodeAct REPL loop. `<provider>:<model>`, where the provider is `anthropic` or `azure` (`azure-openai` is accepted too) and any other prefix is refused at boot with the supported list. On `anthropic:`, Claude 4.6 and later (`claude-sonnet-5`, `claude-opus-5`, Opus 4.6/4.7/4.8, Sonnet 4.6) are called with adaptive thinking and no sampling knobs; Haiku 4.5 / Sonnet 4.5 with the deterministic `temperature: 0.0`. On `azure:`, the second half is the **deployment** name, no sampling knob is sent (a deployment name does not reveal whether the model behind it refuses `temperature`) and the budget travels as `max_completion_tokens`. | `anthropic:claude-sonnet-4-6` |
+| `FLYCANON_RLM_SUB_MODEL` | Model for the flat `llm()` / `rlm()` sub-calls made from REPL code and for the self-consistency candidate selector. Same generation rule as the root model, and it must name the **same provider** as the root model -- the engine holds one client, with one endpoint and one credential, so a mixed pair is refused at boot. The **final answer** is the root model's, whether it comes from the `final(...)` tool call or from the tool-less forced-final turn after `FLYCANON_RLM_MAX_ITERS`; there is no third model. (`FLYCANON_RLM_ANSWER_MODEL`, documented in 26.7.0 as the model for "the final single-shot answer synthesis", was read by nothing and was removed in 26.7.1; an env file that still sets it is ignored.) | `anthropic:claude-sonnet-4-6` |
 | `FLYCANON_RLM_MAX_ITERS` | Max orchestrator turns before the loop gives up and asks for a plain-text answer from the transcript. | `8` |
 | `FLYCANON_RLM_SUB_BUDGET` | Total recursive sub-call budget across one root session. | `12` |
 | `FLYCANON_RLM_MAX_DEPTH` | How deep `rlm(...)` may nest before degrading to a flat `llm`. | `1` |
-| `FLYCANON_RLM_PROMPT_CACHE` | Mark the large static RLM system prompt with Anthropic `cache_control: ephemeral` so it is cached server-side and reused across the many Messages calls one CodeAct session makes (cuts input-token cost + per-call latency). `false` sends it as a plain string. | `true` |
+| `FLYCANON_RLM_PROMPT_CACHE` | Mark the large static RLM system prompt with Anthropic `cache_control: ephemeral` so it is cached server-side and reused across the many Messages calls one CodeAct session makes (cuts input-token cost + per-call latency). `false` sends it as a plain string. **Anthropic only**: Azure OpenAI caches long prompt prefixes automatically and has no equivalent field, so this setting is not read on the `azure:` path. | `true` |
 | `FLYCANON_RLM_SANDBOX` | Where the model-written REPL code runs. `subprocess` (the secure default) execs it in a scrubbed-env, resource-limited child process; `inprocess` is the explicit opt-out that runs it in the engine's own restricted `exec` namespace (dev / trusted use only). Only the exact value `inprocess` opts out; anything else resolves to `subprocess`. See [RLM execution sandbox](#rlm-execution-sandbox-security). | `subprocess` |
 | `FLYCANON_RLM_SANDBOX_TIMEOUT_S` | Per-turn wall-clock timeout (seconds) for the subprocess sandbox; the child is killed and the turn fails if exceeded. | `30` |
 
@@ -160,9 +160,13 @@ chunks, which is why it depends on the object store below.
   store (`FLYCANON_STORE_ORIGINALS=true`, the default) and record its
   key on the source row. Sources without a stored original (no
   `object_store_key`) are silently skipped by the RLM corpus builder.
-- **`ANTHROPIC_API_KEY` at runtime.** The RLM engine calls the
-  Anthropic Messages API directly for both RLM models; the
-  `anthropic:` prefix is stripped before the id is sent.
+- **A provider credential at runtime.** On `anthropic:` models the RLM
+  engine calls the Anthropic Messages API directly (the `anthropic:`
+  prefix is stripped before the id is sent) and needs
+  `ANTHROPIC_API_KEY`. On `azure:<deployment>` models it calls Azure
+  OpenAI Chat Completions and needs `FLYCANON_AZURE_OPENAI_ENDPOINT` +
+  `FLYCANON_AZURE_OPENAI_API_KEY` (or `FLYCANON_AZURE_AUTH=managed_identity`)
+  -- the same settings the embedding path uses.
 
 ### RAG deprecation
 
@@ -472,6 +476,25 @@ failed inside the SDK on the first ingest; the api-version was pinned at
 | `FLYCANON_AZURE_OPENAI_API_VERSION` | `2026-05-01` | Data-plane api-version. |
 | `FLYCANON_AZURE_OPENAI_API_KEY` | `""` | Falls back to `AZURE_OPENAI_API_KEY`. |
 | `FLYCANON_AZURE_AUTH` | `api_key` | `api_key` or `managed_identity`. |
+| `FLYCANON_AZURE_MODEL_PRICES` | `""` | `<deployment>=<usd-per-million-in>/<usd-per-million-out>`, comma-separated. Prices the Azure **answer** path; see below. |
+
+One set of settings serves all three Azure paths: embeddings
+(`FLYCANON_EMBEDDING_MODEL=azure:...`), the RLM answer engine
+(`FLYCANON_RLM_ROOT_MODEL` / `_SUB_MODEL`) and the RAG answer model
+(`FLYCANON_ANSWER_MODEL`). An `azure:` answer model is built from these
+settings rather than from pydantic-ai's own bare `AZURE_OPENAI_*` /
+`OPENAI_API_VERSION` contract, so one Azure account is described in one
+place.
+
+**Cost on the Azure answer path.** Azure rates are per deployment and per
+agreement, and a deployment name carries no model identity, so flycanon
+ships no price table for them. With `FLYCANON_AZURE_MODEL_PRICES` unset,
+the Azure RLM client counts tokens exactly, records `cost_usd` as `0.00`
+and logs a `WARNING` once per deployment naming the deployment and this
+setting -- an unknown cost is reported, never passed off as free. A
+malformed entry is refused at construction rather than skipped, because a
+price table that drops the row you mistyped is a bill that is quietly
+wrong.
 
 **The `model=` argument on Azure is the DEPLOYMENT name, not the model
 name.** `azure:text-embedding-3-large` works only if the deployment

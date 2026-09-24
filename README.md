@@ -191,11 +191,16 @@ LLM) is unaffected and stays.
   object store (`FLYCANON_OBJECT_STORE_BACKEND` — `localfs` for
   dev/test, `s3` for production). Sources without a stored original
   (no `object_store_key`) are skipped by the RLM corpus builder.
-- **`ANTHROPIC_API_KEY`** must be set at runtime: the RLM engine calls
-  the Anthropic Messages API directly for both RLM models
-  (`FLYCANON_RLM_ROOT_MODEL`, which also produces the final answer, and
-  `FLYCANON_RLM_SUB_MODEL` for the REPL's sub-calls; both default
-  `anthropic:claude-sonnet-4-6`).
+- **A provider credential for the RLM models.**
+  `FLYCANON_RLM_ROOT_MODEL` (which also produces the final answer) and
+  `FLYCANON_RLM_SUB_MODEL` (the REPL's sub-calls) both default to
+  `anthropic:claude-sonnet-4-6` and both accept `anthropic:<model>` or
+  `azure:<deployment>`. On `anthropic:` the engine calls the Messages API
+  directly and **`ANTHROPIC_API_KEY`** must be set at runtime; on
+  `azure:` it calls Azure OpenAI Chat Completions with the same
+  `FLYCANON_AZURE_OPENAI_ENDPOINT` / `_API_KEY` the embedding path uses.
+  Both settings must name the same provider, and any other prefix is
+  refused at boot with the supported list in the message.
 
 See [docs/deployment.md](docs/deployment.md#answer-mode-rlm-default--rag-deprecated)
 for every RLM / object-store env var and its default.

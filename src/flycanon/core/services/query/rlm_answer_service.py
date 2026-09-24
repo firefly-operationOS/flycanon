@@ -19,7 +19,8 @@ contract (``AnswerRequest`` in, ``AnswerResponse`` out), so the query
 dispatcher can swap one for the other. Instead of hybrid retrieval +
 single grounded LLM call, it builds the whole-document corpus
 (:class:`CanonCorpusBuilder`), runs the Recursive Language Model engine
-(:class:`RLMSession` driven by :class:`AnthropicClient`) inside
+(:class:`RLMSession` driven by an :class:`RlmChatClient` -- Anthropic or
+Azure OpenAI, per ``FLYCANON_RLM_ROOT_MODEL``) inside
 ``asyncio.to_thread`` so the synchronous engine never blocks the event
 loop, then maps the engine's citation dicts back to :class:`Hit` rows
 via :meth:`CanonDocStore.resolve`.
@@ -40,7 +41,7 @@ from collections.abc import Callable
 
 from flycanon.config import CanonSettings
 from flycanon.core.services.billing.cost_service import CostService
-from flycanon.core.services.query.rlm.client import AnthropicClient
+from flycanon.core.services.query.rlm.chat import RlmChatClient
 from flycanon.core.services.query.rlm.corpus import CanonCorpusBuilder, CanonDocStore, Filters
 from flycanon.core.services.query.rlm.session import RLMSession
 from flycanon.interfaces.dtos.query import AnswerRequest, AnswerResponse, Hit
@@ -73,14 +74,17 @@ class RLMAnswerService:
     """RLM answerer mirroring the RAG :class:`AnswerService` interface.
 
     ``corpus_builder`` / ``client`` are injected so tests can supply a
-    fake corpus and a fake (non-networked) Anthropic client.
+    fake corpus and a fake (non-networked) chat client. ``client`` is the
+    provider-agnostic :class:`RlmChatClient`; which provider it speaks is
+    decided once, at boot, by
+    :func:`~flycanon.core.services.query.rlm.chat.build_rlm_client`.
     """
 
     def __init__(
         self,
         *,
         corpus_builder: CanonCorpusBuilder,
-        client: AnthropicClient,
+        client: RlmChatClient,
         settings: CanonSettings,
         cost_service: CostService,
     ) -> None:

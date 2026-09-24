@@ -97,16 +97,18 @@ FLYCANON_EMBEDDING_DIMENSIONS=1536
 FLYCANON_EMBEDDING_ZERO_VECTOR_ON_FAILURE=false
 
 # ----------------------------------------------------------------------------
-# Azure OpenAI (embeddings, and the RAG answer path)
+# Azure OpenAI (embeddings, the RLM answer engine, and the RAG answer path)
 # ----------------------------------------------------------------------------
 # Required whenever any ``azure:`` model is configured -- validated at
 # config time, so a missing endpoint fails at boot with a message naming
 # the setting instead of inside the provider SDK on the first ingest.
 # Both credentials fall back to the bare AZURE_* names the Azure SDKs read.
+# ONE set of settings serves all three paths: embeddings, the RLM engine
+# (FLYCANON_RLM_ROOT_MODEL / _SUB_MODEL) and the RAG answer model.
 #
 # NOTE: Claude models are NOT served by Azure OpenAI -- an Azure deployment
-# runs the GPT family. Embeddings and answers are two independent choices;
-# the recommended shape is Azure embeddings with Anthropic answers.
+# runs the GPT family. Embeddings and answers stay two independent choices:
+# ``azure:`` on either side now means Azure on that side, and nothing else.
 # FLYCANON_AZURE_OPENAI_ENDPOINT=https://<resource>.openai.azure.com
 # FLYCANON_AZURE_OPENAI_API_VERSION=2026-05-01
 # FLYCANON_AZURE_OPENAI_API_KEY=
@@ -114,8 +116,18 @@ FLYCANON_EMBEDDING_ZERO_VECTOR_ON_FAILURE=false
 # token through DefaultAzureCredential for the cognitiveservices scope, so
 # no key exists in the environment to leak. Needs ``uv sync --extra azure``.
 # FLYCANON_AZURE_AUTH=api_key
+# Per-deployment USD prices for the Azure ANSWER path, as
+# <deployment>=<per-million-input>/<per-million-output>, comma-separated.
+# Azure rates are per deployment and per agreement and a deployment name
+# carries no model identity, so flycanon cannot infer them. Unset, the
+# Azure answer path counts tokens exactly, records cost 0.00 and warns once
+# per deployment naming this setting. A malformed entry is refused at boot.
+# FLYCANON_AZURE_MODEL_PRICES=my-gpt-5-deployment=1.25/10.00
 
 # Answer model for the RAG query endpoint. Any pydantic-ai provider id.
+# ``azure:<deployment>`` is built from the Azure settings above rather than
+# from pydantic-ai's own bare AZURE_OPENAI_* / OPENAI_API_VERSION contract,
+# so one Azure account is described in one place.
 FLYCANON_ANSWER_MODEL=anthropic:claude-sonnet-4-6
 FLYCANON_ANSWER_FALLBACK_MODEL=openai:gpt-4o
 
@@ -161,9 +173,7 @@ FLYCANON_QUERY_EXPANSION_N=3
 # Any value other than ``rag`` is normalised to ``rlm``.
 FLYCANON_ANSWER_MODE=rlm
 
-# RLM models, all in ``<provider>:<model>`` form (the ``anthropic:``
-# prefix is stripped before the id is sent to the Anthropic Messages API,
-# which reads ANTHROPIC_API_KEY from the environment -- see below).
+# RLM models, both in ``<provider>:<model>`` form.
 #   root   -- orchestrator model that drives the CodeAct REPL loop AND
 #             produces the final answer (the final(...) tool call, or the
 #             tool-less forced-final turn when the loop runs out of turns).
@@ -171,11 +181,27 @@ FLYCANON_ANSWER_MODE=rlm
 #             and for the self-consistency candidate selector.
 # There is no third "answer" model: FLYCANON_RLM_ANSWER_MODEL (26.7.0) was
 # read by nothing and is gone since 26.7.1; a value here is ignored.
-# The client shapes the request per model generation: Claude 4.6 and
-# later (claude-sonnet-5, claude-opus-5, Opus 4.6/4.7/4.8, Sonnet 4.6)
-# are called with adaptive thinking and no temperature (the API refuses
-# sampling knobs on the 5-series); Haiku 4.5 / Sonnet 4.5 keep the
-# deterministic temperature 0.0. Any of them is a valid value here.
+#
+# Two providers are supported, and BOTH settings must name the same one --
+# the engine holds one client, with one endpoint and one credential, so a
+# root on Anthropic with a sub on Azure is refused at boot. Any other
+# prefix is refused at boot too, with the supported list in the message.
+#
+#   anthropic:<model>      reads ANTHROPIC_API_KEY (see below). The request
+#                          is shaped per model generation: Claude 4.6 and
+#                          later (claude-sonnet-5, claude-opus-5, Opus
+#                          4.6/4.7/4.8, Sonnet 4.6) get adaptive thinking
+#                          and no temperature (the API refuses sampling
+#                          knobs on the 5-series); Haiku 4.5 / Sonnet 4.5
+#                          keep the deterministic temperature 0.0.
+#   azure:<deployment>     reads the FLYCANON_AZURE_OPENAI_* settings above.
+#                          The second half is the DEPLOYMENT name, not the
+#                          model name. No sampling knob is ever sent (the
+#                          deployment name does not say whether the model
+#                          behind it refuses temperature) and the budget
+#                          travels as max_completion_tokens.
+#                          FLYCANON_RLM_PROMPT_CACHE does not apply: Azure
+#                          caches long prefixes on its own.
 FLYCANON_RLM_ROOT_MODEL=anthropic:claude-sonnet-4-6
 FLYCANON_RLM_SUB_MODEL=anthropic:claude-sonnet-4-6
 
@@ -371,9 +397,10 @@ FLYCANON_OCR_LANG=eng+spa
 
 # ----------------------------------------------------------------------------
 # Provider credentials -- pulled from the standard env vars. Set only
-# the ones you need. ANTHROPIC_API_KEY is REQUIRED at runtime in the
-# default answer mode: the RLM engine calls the Anthropic Messages API
-# directly for both RLM models above.
+# the ones you need. ANTHROPIC_API_KEY is REQUIRED at runtime whenever the
+# RLM models above are on ``anthropic:`` (the default): the engine calls
+# the Anthropic Messages API directly. On ``azure:`` it is not read at all
+# and the Azure settings above are what the engine authenticates with.
 # ----------------------------------------------------------------------------
 # OPENAI_API_KEY=
 # ANTHROPIC_API_KEY=

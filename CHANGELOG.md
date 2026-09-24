@@ -4,6 +4,68 @@ All notable changes to **flycanon** are documented here.
 
 ## [Unreleased]
 
+### Added
+
+- **The answer engine is provider-agnostic.** `FLYCANON_RLM_ROOT_MODEL`
+  and `FLYCANON_RLM_SUB_MODEL` accept `azure:<deployment>` and route to
+  Azure OpenAI Chat Completions, reading the same
+  `FLYCANON_AZURE_OPENAI_ENDPOINT` / `_API_KEY` / `_API_VERSION` /
+  `FLYCANON_AZURE_AUTH` (with the bare `AZURE_*` fallbacks) that the
+  embedding path already reads. `anthropic:<model>` behaves exactly as
+  before, byte for byte on the wire.
+
+  The engine gained a seam rather than a wider client:
+  `rlm/chat.py` holds the `RlmChatClient` protocol and
+  `build_rlm_client()`, `rlm/client.py` keeps the Anthropic Messages wire
+  untouched, and `rlm/azure_client.py` translates the Chat Completions
+  wire into the Anthropic content-block vocabulary `RLMSession` speaks,
+  in both directions -- `tool_use` <-> `tool_calls`, `tool_result` <-> a
+  `role: tool` message, `finish_reason` -> `stop_reason`,
+  `prompt_tokens`/`completion_tokens` -> input/output. The CodeAct loop
+  is unchanged and does not know which provider answered.
+
+  Three deliberate differences on the Azure path, each commented where it
+  lives: no sampling knobs are ever sent (a deployment name does not
+  reveal whether the model behind it is a GPT-5 / o-series model that
+  answers `400` to `temperature`), the budget travels as
+  `max_completion_tokens`, and `FLYCANON_RLM_PROMPT_CACHE` does not apply
+  (Azure caches long prefixes automatically and has no `cache_control`
+  field).
+- **`FLYCANON_ANSWER_MODEL=azure:<deployment>` works from flycanon's own
+  settings.** pydantic-ai's `AzureProvider` reads the bare
+  `AZURE_OPENAI_ENDPOINT`, `AZURE_OPENAI_API_KEY` and
+  `OPENAI_API_VERSION`, and flycanon has no `OPENAI_API_VERSION` at all,
+  so a deployment configured the flycanon way had working Azure
+  *embeddings* and a RAG answer path that raised `UserError: Must provide
+  one of the api_version argument or the OPENAI_API_VERSION environment
+  variable` on the first query. `build_agent()` now constructs an
+  `azure:` model explicitly from `CanonSettings` (managed identity
+  included); every other provider id is still handed to pydantic-ai as a
+  string.
+- **`FLYCANON_AZURE_MODEL_PRICES`** -- `<deployment>=<usd-per-million-in>/<usd-per-million-out>`,
+  comma-separated. Azure rates are per deployment and per agreement and a
+  deployment name carries no model identity, so flycanon cannot ship a
+  table for them. Unset, the Azure answer path counts tokens exactly,
+  records `cost_usd` as `0.00` and says so once per deployment at
+  `WARNING`, naming the deployment and this setting. A malformed entry is
+  refused at construction rather than skipped.
+
+### Changed
+
+- **An unsupported RLM provider prefix is refused with the list of the
+  ones that work.** 26.8.0 refused every non-Anthropic prefix with a
+  message explaining that the engine speaks only Anthropic; that message
+  is now wrong, because `azure:` works. `parse_model_ref()` names the
+  setting, the prefix it was handed and every supported prefix.
+  `AnthropicClient` keeps its own narrower guard for the case where it is
+  constructed directly with an id it cannot serve.
+- **A root and a sub model on two different providers is refused at
+  boot.** One client carries one endpoint and one credential, so both
+  settings must name the same provider. Refused in a sentence rather than
+  half-served.
+- The pyfly bean `anthropic_client` is now `rlm_chat_client` and is typed
+  `RlmChatClient`. Nothing outside `core/configuration.py` named it.
+
 ## [26.8.0] - 2026-09-24
 
 Any embedder, and a way to change it.

@@ -14,7 +14,7 @@
 
 """The Recursive Language Model engine: a CodeAct REPL over context-as-a-variable.
 
-Faithful to alexzhang13/rlm's mechanism (adapted to Anthropic + flycanon):
+Faithful to alexzhang13/rlm's mechanism (adapted to flycanon):
 
 * The orchestrator LM runs a loop (up to ``max_iters``). Each turn it emits a
   ``python`` tool call; we ``exec`` it in a persistent, **restricted** namespace
@@ -34,6 +34,14 @@ subset (text processing, no open/import/eval) plus ``re``, ``llm``, ``rlm``,
 
 The engine is **corpus-agnostic**: ``docs`` is duck-typed via the
 :class:`DocCorpus` protocol, so no concrete document store is imported here.
+It is **provider-agnostic** the same way: ``client`` is an
+:class:`~flycanon.core.services.query.rlm.chat.RlmChatClient`, so the loop
+below is written once and runs against Anthropic or Azure OpenAI depending
+only on what ``FLYCANON_RLM_ROOT_MODEL`` names. The content-block vocabulary
+this loop speaks -- ``text`` / ``tool_use`` blocks out, ``tool_result``
+blocks back in -- is Anthropic's, and the Azure client translates to and
+from it; see :mod:`flycanon.core.services.query.rlm.chat` for why that
+direction was chosen.
 """
 
 from __future__ import annotations
@@ -46,7 +54,7 @@ from collections.abc import Callable
 from contextlib import redirect_stdout, suppress
 from typing import Any, Protocol, runtime_checkable
 
-from flycanon.core.services.query.rlm.client import AnthropicClient
+from flycanon.core.services.query.rlm.chat import RlmChatClient
 from flycanon.core.services.query.rlm.safe_builtins import _SAFE_BUILTINS
 from flycanon.core.services.query.rlm.sandbox.executor import BlockResult, SandboxExecutor
 
@@ -176,7 +184,7 @@ class RLMSession:
 
     def __init__(
         self,
-        client: AnthropicClient,
+        client: RlmChatClient,
         depth: int = 0,
         max_depth: int = 1,
         max_iters: int = 8,
