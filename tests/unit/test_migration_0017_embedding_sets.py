@@ -92,13 +92,29 @@ def test_the_partial_index_is_keyed_by_set_and_casts_to_the_set_width() -> None:
     """
     statement = _normalise(
         _load_migration().partial_hnsw_ddl(
-            set_id="es-abc", dimensions=3072, hnsw_m=24, hnsw_ef_construction=96
+            set_id="es-abc", dimensions=1536, hnsw_m=24, hnsw_ef_construction=96
         )
     )
     assert "canon_chunk_vectors_hnsw_es_abc" in statement
-    assert "USING hnsw ((embedding::vector(3072)) vector_cosine_ops)" in statement
+    assert "USING hnsw ((embedding::vector(1536)) vector_cosine_ops)" in statement
     assert "WITH (m = 24, ef_construction = 96)" in statement
     assert "WHERE set_id = 'es-abc'" in statement
+
+
+def test_above_2000_dimensions_the_index_is_half_precision() -> None:
+    """Otherwise ``text-embedding-3-large`` at its native 3072 has no index AT ALL.
+
+    pgvector refuses an HNSW on a ``vector`` column wider than 2000 --
+    ``column cannot have more than 2000 dimensions for hnsw index``, measured
+    on 0.8.6 -- and builds one happily on ``halfvec`` up to 4000. The values
+    stay full precision in the column; only the index is half.
+    """
+    statement = _normalise(
+        _load_migration().partial_hnsw_ddl(
+            set_id="es-big", dimensions=3072, hnsw_m=16, hnsw_ef_construction=64
+        )
+    )
+    assert "USING hnsw ((embedding::halfvec(3072)) halfvec_cosine_ops)" in statement
 
 
 def test_the_coherence_trigger_names_the_command_that_does_it_properly() -> None:

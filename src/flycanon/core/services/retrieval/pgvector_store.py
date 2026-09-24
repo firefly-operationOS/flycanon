@@ -77,7 +77,7 @@ from fireflyframework_agentic.vectorstores.pgvector_store import (
 from fireflyframework_agentic.vectorstores.types import SearchFilter, SearchResult, VectorDocument
 
 from flycanon.core.services.embeddings.embedding_sets import EmbeddingSetBinding, current_embedding_set
-from flycanon.models.entities.embedding_set import index_name_for
+from flycanon.models.entities.embedding_set import ann_cast, index_name_for
 
 logger = logging.getLogger(__name__)
 
@@ -275,16 +275,18 @@ class RlsPgVectorVectorStore(PgVectorVectorStore):
 
         pgvector refuses a plain HNSW on an untyped ``vector`` column
         (``column does not have dimensions``); the cast in the index
-        expression is what gives it one. The predicate is the SET, not the
-        width: two sets at the same width -- a re-embed onto the same model
-        after a bad batch -- must not share an index, or a switch degenerates
-        into filtered ANN across both and under-recalls exactly when
-        correctness matters most.
+        expression is what gives it one, and above 2000 dimensions that cast
+        has to be ``halfvec`` (see :func:`ann_cast`). The predicate is the
+        SET, not the width: two sets at the same width -- a re-embed onto the
+        same model after a bad batch -- must not share an index, or a switch
+        degenerates into filtered ANN across both and under-recalls exactly
+        when correctness matters most.
         """
         width = self._width(binding)
+        cast, ops = ann_cast(width)
         return (
             f"CREATE INDEX IF NOT EXISTS {index_name_for(binding.set_id, table=self._table)} "
-            f"ON {self._table} USING hnsw ((embedding::vector({width})) vector_cosine_ops) "
+            f"ON {self._table} USING hnsw ((embedding::{cast}({width})) {ops}) "
             f"WITH (m = {self._hnsw_m}, ef_construction = {self._hnsw_ef_construction}) "
             f"WHERE set_id = '{binding.set_id}'"
         )
@@ -437,6 +439,7 @@ class RlsPgVectorVectorStore(PgVectorVectorStore):
                 f"{binding.set_id} is {binding.embedding_model} @{width}. A query must be embedded "
                 "by the model that produced the corpus it searches."
             )
+        cast, _ops = ann_cast(width)
         params: list[Any] = [_vector_literal(query_embedding), namespace, top_k, binding.set_id]
         where = ["namespace = $2", "set_id = $4"]
         next_index = 5
@@ -446,10 +449,10 @@ class RlsPgVectorVectorStore(PgVectorVectorStore):
             params.extend(clause_params)
         sql = f"""
             SELECT id, text, metadata,
-                   1 - (embedding::vector({width}) <=> $1::vector({width})) AS score
+                   1 - (embedding::{cast}({width}) <=> $1::{cast}({width})) AS score
             FROM {self._table}
             WHERE {" AND ".join(where)}
-            ORDER BY embedding::vector({width}) <=> $1::vector({width})
+            ORDER BY embedding::{cast}({width}) <=> $1::{cast}({width})
             LIMIT $3
         """
         pool = await self._ensure_pool()

@@ -119,6 +119,22 @@ def _async_url(pg_container, *, user: str | None = None, password: str | None = 
     return f"{scheme}://{user}:{password}@{host_part}"
 
 
+def _set_id_for(tenant_id: str, workspace_id: str) -> str:
+    """One deterministic set per scope, so the seeders and the search agree."""
+    return f"es-{tenant_id}-{workspace_id}"
+
+
+def _binding_for(tenant_id: str, workspace_id: str):
+    from flycanon.core.services.embeddings.embedding_sets import EmbeddingSetBinding
+
+    return EmbeddingSetBinding(
+        set_id=_set_id_for(tenant_id, workspace_id),
+        provider="fixed",
+        model="unit",
+        dimensions=DIMENSION,
+    )
+
+
 def _seed_source_and_chunk(
     admin_engine: sa.Engine,
     *,
@@ -129,17 +145,45 @@ def _seed_source_and_chunk(
     tenant_id: str = TENANT,
     workspace_id: str = WORKSPACE,
 ) -> None:
-    """Insert a workspace, a source (with a title) and one chunk as the admin role."""
+    """Insert a workspace, its embedding set, a source (with a title) and one chunk.
+
+    Since 26.8.0 a workspace that holds vectors also holds the embedding set
+    those vectors belong to, and points at it -- that pointer is what the
+    query stage reads to decide which model to embed the query with.
+    """
+    set_id = _set_id_for(tenant_id, workspace_id)
     with admin_engine.begin() as conn:
         conn.execute(
             sa.text(
                 """
-                INSERT INTO canon_workspaces (id, tenant_id, name, status)
-                VALUES (:id, :tenant_id, :name, 'active')
+                INSERT INTO canon_workspaces (id, tenant_id, name, status, active_embedding_set_id)
+                VALUES (:id, :tenant_id, :name, 'active', :set_id)
+                ON CONFLICT (id) DO UPDATE SET active_embedding_set_id = EXCLUDED.active_embedding_set_id
+                """
+            ),
+            {
+                "id": workspace_id,
+                "tenant_id": tenant_id,
+                "name": f"{tenant_id}/{workspace_id}",
+                "set_id": set_id,
+            },
+        )
+        conn.execute(
+            sa.text(
+                """
+                INSERT INTO canon_embedding_sets
+                    (id, tenant_id, workspace_id, provider, model, dimensions, status,
+                     config_fingerprint)
+                VALUES (:id, :tenant_id, :workspace_id, 'fixed', 'unit', :dim, 'active', 'fp')
                 ON CONFLICT (id) DO NOTHING
                 """
             ),
-            {"id": workspace_id, "tenant_id": tenant_id, "name": f"{tenant_id}/{workspace_id}"},
+            {
+                "id": set_id,
+                "tenant_id": tenant_id,
+                "workspace_id": workspace_id,
+                "dim": DIMENSION,
+            },
         )
         conn.execute(
             sa.text(
@@ -199,6 +243,21 @@ class _FixedEmbedder:
         return self._Result([list(UNIT_VECTOR) for _ in texts])
 
 
+class _FixedRegistry:
+    """Every set resolves to the one fixed embedder, because the point is the
+    database's row visibility rather than the model."""
+
+    def __init__(self, embedder: Any) -> None:
+        self.default = embedder
+        self._embedder = embedder
+
+    def for_binding(self, _binding: Any) -> Any:
+        return self._embedder
+
+    def for_model(self, **_kwargs: Any) -> Any:
+        return self._embedder
+
+
 def _settings_for(database_url: str):
     from flycanon.config import CanonSettings
 
@@ -218,23 +277,30 @@ async def _seed_vector_as_admin(admin_async_url: str, *, chunk_id: str, source_i
     ``initialise`` must run no DDL here either (the admin could, but must
     not need to).
     """
+    from flycanon.core.services.embeddings.embedding_sets import bind_embedding_set
     from flycanon.core.services.retrieval.corpus_factory import build_corpus_context
 
     context = build_corpus_context(settings=_settings_for(admin_async_url))
     try:
         await context.initialise()
-        await context.vector_store.upsert(
-            [
-                VectorDocument(
-                    id=chunk_id,
-                    text=content,
-                    embedding=list(UNIT_VECTOR),
-                    metadata={"source_id": source_id, "doc_id": source_id, "section_path": "", "page": ""},
-                )
-            ],
-            tenant_id=TENANT,
-            workspace_id=WORKSPACE,
-        )
+        with bind_embedding_set(_binding_for(TENANT, WORKSPACE)):
+            await context.vector_store.upsert(
+                [
+                    VectorDocument(
+                        id=chunk_id,
+                        text=content,
+                        embedding=list(UNIT_VECTOR),
+                        metadata={
+                            "source_id": source_id,
+                            "doc_id": source_id,
+                            "section_path": "",
+                            "page": "",
+                        },
+                    )
+                ],
+                tenant_id=TENANT,
+                workspace_id=WORKSPACE,
+            )
     finally:
         await context.close()
 
@@ -244,9 +310,11 @@ async def _search_as(app_async_url: str, *, query: str, tenant_id: str, workspac
     from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
     from flycanon.core.services.embeddings.embedding_service import EmbeddingService
+    from flycanon.core.services.embeddings.embedding_sets import EmbeddingSetService
     from flycanon.core.services.retrieval.corpus_factory import build_corpus_context
     from flycanon.core.services.retrieval.retrieval_service import RetrievalService
     from flycanon.models.repositories.chunk_repository import ChunkRepository
+    from flycanon.models.repositories.embedding_set_repository import EmbeddingSetRepository
     from flycanon.models.repositories.knowledge_repository import KnowledgeRepository
     from flycanon.models.repositories.source_repository import SourceRepository
     from flycanon.web.conventions.context import TenantContext, set_tenant_context
@@ -255,16 +323,26 @@ async def _search_as(app_async_url: str, *, query: str, tenant_id: str, workspac
     install_tenant_guc_hook()
     engine = create_async_engine(app_async_url, future=True, pool_pre_ping=True)
     factory = async_sessionmaker(engine, expire_on_commit=False)
-    context = build_corpus_context(settings=_settings_for(app_async_url))
+    settings = _settings_for(app_async_url)
+    context = build_corpus_context(settings=settings)
+    embedder = EmbeddingService(embedder=_FixedEmbedder(), model="fixed:unit", dimensions=DIMENSION)
     service = RetrievalService(
         context=context,
-        embeddings=EmbeddingService(embedder=_FixedEmbedder(), model="fixed", dimensions=DIMENSION),
+        embeddings=embedder,
         source_repository=SourceRepository(factory, engine=engine),
         chunk_repository=ChunkRepository(factory, engine=engine),
         knowledge_repository=KnowledgeRepository(factory, engine=engine),
         default_top_k=10,
         default_per_query_k=10,
         rrf_k=60,
+        # Production shape: the workspace's active set decides which embedder
+        # puts the query into the corpus's embedding space. Reading that
+        # pointer runs under app_user's RLS too, which is part of what this
+        # module exists to prove.
+        embedding_sets=EmbeddingSetService(
+            repository=EmbeddingSetRepository(factory, engine=engine), settings=settings
+        ),
+        embedding_registry=_FixedRegistry(embedder),
     )
     # What TenantContextMiddleware does for a request: bind the scope so the
     # ORM sessions the hydration opens get their GUCs from after_begin.
@@ -281,11 +359,19 @@ async def _search_as(app_async_url: str, *, query: str, tenant_id: str, workspac
         await engine.dispose()
 
 
-def test_migration_0016_created_the_boot_tables_at_the_configured_width(
+def test_the_migrations_leave_the_vector_table_in_the_embedding_set_shape(
     pg_container,  # type: PostgresContainer
     pg_admin_engine: sa.Engine,
 ) -> None:
-    """After ``alembic upgrade head`` the three tables exist; the vector column is ``vector(3)``."""
+    """After ``alembic upgrade head`` the three tables exist, and the vector
+    column has NO width.
+
+    Until 26.8.0 this asserted ``vector(N)``, because 0016 baked the migrate
+    job's ``FLYCANON_EMBEDDING_DIMENSIONS`` into the column and every process
+    had to agree with it. 0017 removes the typmod and puts the width on the
+    ROW, so the schema has no dependency on anybody's environment and two
+    embedding spaces can share the table.
+    """
     with pg_admin_engine.connect() as conn:
         tables = set(
             conn.execute(
@@ -308,8 +394,34 @@ def test_migration_0016_created_the_boot_tables_at_the_configured_width(
                 """
             )
         ).one()
-        assert row.column_type == f"vector({DIMENSION})"
+        assert row.column_type == "vector", "0017 relaxes the typmod; the width lives on the row"
         assert row.relrowsecurity and row.relforcerowsecurity and row.policies == 1
+        columns = set(
+            conn.execute(
+                sa.text(
+                    "SELECT attname FROM pg_attribute a JOIN pg_class c ON c.oid = a.attrelid "
+                    "WHERE c.relname = 'canon_chunk_vectors' AND a.attnum > 0 AND NOT a.attisdropped"
+                )
+            ).scalars()
+        )
+        assert {"set_id", "dim", "model"} <= columns
+        primary_key = conn.execute(
+            sa.text(
+                "SELECT pg_get_constraintdef(oid) FROM pg_constraint "
+                "WHERE conrelid = 'canon_chunk_vectors'::regclass AND contype = 'p'"
+            )
+        ).scalar_one()
+        assert primary_key == "PRIMARY KEY (set_id, id)"
+        # And the guard that replaced the width refusal is installed.
+        assert (
+            conn.execute(
+                sa.text(
+                    "SELECT count(*) FROM pg_trigger WHERE tgrelid = 'canon_chunk_vectors'::regclass "
+                    "AND tgname = 'canon_chunk_vectors_set_coherence'"
+                )
+            ).scalar_one()
+            == 1
+        )
 
 
 def test_fused_search_finds_the_chunk_as_the_app_role(

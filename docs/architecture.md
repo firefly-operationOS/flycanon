@@ -114,12 +114,20 @@ The HNSW index stays global; queries:
 3. `LIMIT k * widening_factor` (typically 5x), then trim to `k`
    client-side after re-rank.
 
-For tenants that outgrow the global HNSW (~500k+ chunks), the
-Tier-B partition-by-tenant escape valve exists in
-`flycanon.core.services.retrieval.partition_admin`. DORMANT BY
-DEFAULT; see the module docstring for the admin-triggered
-roll-out (one-time partitioning migration + per-tenant
-`promote_tenant_to_partition()`).
+4. `AND set_id = ?`, and the distance expression cast to that set's
+   width -- `embedding::vector(N)` up to 2000 dimensions and
+   `embedding::halfvec(N)` above it, matching the per-set partial HNSW
+   character for character. A query that omits the set predicate on a
+   table holding two widths does not answer wrongly: pgvector raises
+   `expected N dimensions, not M`.
+
+For tenants that outgrow the per-set HNSW (~500k+ chunks), the escape
+valve is an operational one -- raise `maintenance_work_mem` and
+`max_parallel_maintenance_workers` for the index build, and give the
+build a maintenance window. A `partition_admin` module shipped until
+26.8.0 with a `PARTITION BY LIST (tenant_id)` recipe for a column
+migration `0014` had already dropped; it was stale, dormant and
+misleading, and was deleted rather than repaired.
 
 ### RetrievalService scope threading
 

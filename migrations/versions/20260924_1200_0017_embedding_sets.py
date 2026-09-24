@@ -89,7 +89,12 @@ import sqlalchemy as sa
 from alembic import op
 
 from flycanon.config import get_settings
-from flycanon.models.entities.embedding_set import config_fingerprint, index_name_for, new_embedding_set_id
+from flycanon.models.entities.embedding_set import (
+    ann_cast,
+    config_fingerprint,
+    index_name_for,
+    new_embedding_set_id,
+)
 
 revision = "0017_embedding_sets"
 down_revision = "0016_boot_created_tables"
@@ -189,9 +194,10 @@ def partial_hnsw_ddl(*, set_id: str, dimensions: int, hnsw_m: int, hnsw_ef_const
     into filtered ANN across both and under-recalls exactly when it matters.
     """
     index = index_name_for(set_id)
+    cast, ops = ann_cast(dimensions)
     return (
         f"CREATE INDEX IF NOT EXISTS {index} ON canon_chunk_vectors "
-        f"USING hnsw ((embedding::vector({dimensions})) vector_cosine_ops) "
+        f"USING hnsw ((embedding::{cast}({dimensions})) {ops}) "
         f"WITH (m = {hnsw_m}, ef_construction = {hnsw_ef_construction}) "
         f"WHERE set_id = '{set_id}'"
     )

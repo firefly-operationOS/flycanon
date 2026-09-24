@@ -77,6 +77,31 @@ def config_fingerprint(*, provider: str, model: str, dimensions: int, endpoint: 
     return hashlib.sha256(material.encode("utf-8")).hexdigest()
 
 
+#: pgvector will not build an HNSW index on a ``vector`` column wider than
+#: this (``column cannot have more than 2000 dimensions for hnsw index``,
+#: measured on pgvector 0.8.6). It WILL build one on ``halfvec`` up to 4000.
+HNSW_MAX_VECTOR_DIMENSIONS = 2000
+
+
+def ann_cast(dimensions: int) -> tuple[str, str]:
+    """The type an ANN index and its matching ``ORDER BY`` cast to at this width.
+
+    This is not a micro-optimisation, it is the difference between an indexed
+    search and a sequential scan on the exact configuration this release
+    exists to support: ``text-embedding-3-large`` is 3072-wide natively, and
+    pgvector refuses an HNSW on a ``vector`` column above 2000 dimensions.
+    Half precision is the documented answer -- the values are stored at full
+    precision in the column and only the INDEX is half, so the cost is a small
+    loss of ranking precision in the candidate set, not in the data.
+
+    The index expression and the query's ``ORDER BY`` have to agree character
+    for character, so both go through here.
+    """
+    if dimensions > HNSW_MAX_VECTOR_DIMENSIONS:
+        return "halfvec", "halfvec_cosine_ops"
+    return "vector", "vector_cosine_ops"
+
+
 def index_name_for(set_id: str, *, table: str = "canon_chunk_vectors") -> str:
     """The partial HNSW index that serves one set.
 

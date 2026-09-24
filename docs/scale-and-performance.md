@@ -3,7 +3,7 @@
 Capacity-planning reference for the **flycanon** Operational Knowledge
 Repository. Aimed at the SRE who has to size Postgres, dial the
 HNSW / RRF knobs, and decide when (and whether) to introduce
-per-tenant partitioning.
+embedding sets and the cost of a re-embed.
 
 For the cross-link map:
 
@@ -38,11 +38,10 @@ scaling further.
 | RAG answer p95 budget              | 5s                      |
 | Hybrid search p99 budget           | 200ms                   |
 
-These envelopes assume the default **Tier-A** vector layout (single
-shared `canon_chunk_vectors` table + global HNSW). Beyond ~500K
-chunks for a single hot tenant the
-[partition_admin module docstring](../src/flycanon/core/services/retrieval/partition_admin.py)
-recommends promoting that tenant to Tier-B (section 6).
+These envelopes assume one shared `canon_chunk_vectors` table with one
+partial HNSW per embedding set (section 6). Beyond ~500K chunks in a
+single set, plan an index rebuild as a maintenance operation rather than
+as part of a `flycanon reindex` run.
 
 ---
 
@@ -282,48 +281,41 @@ GIN-on-tsv index still gets picked by the planner.
 
 ---
 
-## 6. Per-tenant partitioning (Tier-B, dormant)
+## 6. Embedding sets, and what a large re-embed costs
 
-`canon_chunk_vectors` ships in **Tier-A** layout: a single shared
-table with a global HNSW index, scope-filtered by `WHERE tenant_id
-= ? AND workspace_id = ?`. This is the default and works
-comfortably to **~500K chunks for a single hot tenant** (the
-threshold is documented inline in
-[partition_admin.py](../src/flycanon/core/services/retrieval/partition_admin.py)).
-Past that, the global HNSW starts paying a recall tax because the
-scope filter rejects most of the candidate list.
+Since 26.8.0 `canon_chunk_vectors` holds one row per (embedding set,
+chunk): the `embedding` column has no typmod, every row carries
+`set_id` / `dim` / `model`, and each set has its own **partial**
+expression HNSW, `WHERE set_id = '<id>'`. Two consequences matter for
+capacity planning.
 
-**Tier-B** carves a dedicated partition + per-partition HNSW index
-for hot tenants. Tier-B is **dormant** by default -- it requires:
+**The ANN index cast depends on the width.** pgvector refuses an HNSW
+on a `vector` column wider than 2000 dimensions
+(`column cannot have more than 2000 dimensions for hnsw index`), so a
+set at `text-embedding-3-large`'s native 3072 is indexed as
+`halfvec(3072)`. The values stay full precision in the column; only the
+index is half. Both the index and the query's `ORDER BY` go through
+`flycanon.models.entities.embedding_set.ann_cast`, because an expression
+that does not match character for character degrades silently to a
+sequential scan.
 
-1. A one-time table conversion to `PARTITION BY LIST (tenant_id)`
-   with downtime. The full DDL recipe is in the
-   [partition_admin.py module docstring](../src/flycanon/core/services/retrieval/partition_admin.py).
-2. Per-hot-tenant `promote_tenant_to_partition(engine, tenant_id)`
-   (idempotent; creates the partition + per-partition HNSW).
-3. `demote_tenant_from_partition(engine, tenant_id)` to merge a
-   cooled-down tenant back into the default partition.
+**A re-embed doubles the table for the length of the rollback window.**
+`flycanon reindex` builds the new set alongside the old one and switches
+with a single `UPDATE canon_workspaces.active_embedding_set_id`; the old
+set's rows and index stay until `--drop-set`. Budget for:
 
-### When to promote
+| Cost | Scales with | Note |
+|---|---|---|
+| Embedding API calls | chunks x tokens | `--estimate-only` prices it, or says `cost unknown` -- never `$0.00` |
+| Storage during the window | 2x the vector table | plus both indexes |
+| HNSW build | rows x `m` | the dominant cost above ~100k chunks; raise `maintenance_work_mem` and `max_parallel_maintenance_workers`, and give it a window |
+| Recovery after `--drop-set` | -- | `VACUUM FULL` or `pg_repack` reclaims the space; neither is automated |
 
-* **Empirical threshold**: a tenant whose `canon_chunk_vectors`
-  row count crosses ~500K.
-* **Symptoms**: dense search p99 climbing past the 200ms budget on
-  one tenant's queries even though others stay fast; HNSW recall
-  drops measurably (top-1 chunks from BM25 missing from the dense
-  leg's top-30).
-
-### When to demote
-
-* When a previously hot tenant has been quiet for long enough that
-  the partition no longer pays back its index maintenance cost.
-* Routine merging of small partitions back into the default keeps
-  the table count manageable; Postgres planner overhead grows with
-  partition count.
-
-The `promote_*` / `demote_*` calls are stable and intentional
-escape valves; production clusters should expect to live on Tier-A
-indefinitely.
+Above ~500k chunks in one set, plan the index build as a maintenance
+operation rather than as part of the run. A `partition_admin` module
+shipped until 26.8.0 describing a `PARTITION BY LIST (tenant_id)`
+conversion; it partitioned on a column migration `0014` had dropped, so
+it could not have worked, and it was deleted rather than repaired.
 
 ---
 

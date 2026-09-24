@@ -170,6 +170,27 @@ class TestSearch:
         assert f"(embedding::vector({_WIDTH})) vector_cosine_ops" in store.index_statement(_SET)
         assert "WHERE set_id = 'es-aa'" in store.index_statement(_SET)
 
+    async def test_above_2000_dimensions_the_query_casts_to_halfvec_too(self) -> None:
+        """The ORDER BY and the index expression have to agree character for
+        character, or the planner drops the index. ``text-embedding-3-large``
+        at 3072 can ONLY be indexed as halfvec, so the query follows it there.
+        """
+        wide = EmbeddingSetBinding(
+            set_id="es-big", provider="azure", model="text-embedding-3-large", dimensions=3072
+        )
+        store = RlsPgVectorVectorStore(
+            database_url="postgresql+asyncpg://u:p@h/db",
+            dimension=3072,
+            table_name="canon_chunk_vectors",
+        )
+        conn = _connected(store)
+        conn.fetch.return_value = []
+        with bind_embedding_set(wide):
+            await store._search([0.1] * 3072, 5, _NAMESPACE, None)
+        sql = " ".join(conn.fetch.await_args.args[0].split())
+        assert "ORDER BY embedding::halfvec(3072) <=> $1::halfvec(3072)" in sql
+        assert "(embedding::halfvec(3072)) halfvec_cosine_ops" in store.index_statement(wide)
+
     async def test_metadata_filters_are_numbered_after_the_set(self) -> None:
         from fireflyframework_agentic.vectorstores.types import SearchFilter
 
