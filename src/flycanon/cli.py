@@ -24,6 +24,11 @@ Subcommands:
                            silently dropped from the parser otherwise so
                            a bare bootstrap install still parses.
 * ``flycanon migrate``  -- run ``alembic upgrade head`` against the DB.
+* ``flycanon reindex``  -- re-embed a corpus into a new embedding set and
+                           switch to it atomically, plus ``--list`` /
+                           ``--activate`` / ``--rollback`` / ``--drop-set``.
+                           Changing the embedder is this command, never a
+                           fresh database.
 
 ``serve`` lets uvicorn import ``flycanon.main:app`` (pyfly drives the
 lifecycle there). The worker boots a minimal :class:`PyFlyApplication`
@@ -174,6 +179,155 @@ def cmd_worker(_: argparse.Namespace) -> int:
     return 0
 
 
+#: What a reindex batch costs in one handler invocation, and why the batches
+#: run here rather than on the worker: see ``ReindexService``'s docstring.
+REINDEX_DEFAULT_BATCH_SIZE = 256
+
+
+def cmd_reindex(args: argparse.Namespace) -> int:
+    """Re-embed a corpus into a new embedding set, or manage the sets.
+
+    Boots pyfly so every dependency comes out of the container -- the same
+    discipline ``worker`` follows -- and then drives
+    :class:`ReindexService`. Scope selection is mandatory and explicit: there
+    is no bare ``flycanon reindex`` that silently means ``--all``.
+    """
+
+    async def _run() -> int:
+        from pyfly.core import PyFlyApplication
+
+        from flycanon.app import CanonApplication
+        from flycanon.core.services.embeddings import EmbeddingRegistry, EmbeddingSetService
+        from flycanon.core.services.embeddings.embedding_sets import split_embedding_model
+        from flycanon.core.services.embeddings.reindex_service import ReindexError, ReindexService
+        from flycanon.core.services.retrieval.corpus_factory import CorpusContext
+        from flycanon.models.repositories import ChunkRepository, IngestJobRepository
+
+        ensure_worker_server_contract()
+        pyfly_app = PyFlyApplication(CanonApplication)
+        await pyfly_app.startup()
+        try:
+            container = pyfly_app.context.container
+            settings = get_settings()
+            context = container.resolve(CorpusContext)
+            logger.info(
+                "reindex runs on FLYCANON_DATABASE_URL. It reads across workspaces and creates "
+                "one ANN index per set, so point it at a role that bypasses RLS and owns "
+                "canon_chunk_vectors (the migrate role). A role that cannot see a workspace's "
+                "chunks fails the run rather than activating an empty set."
+            )
+            service = ReindexService(
+                chunks=container.resolve(ChunkRepository),
+                jobs=container.resolve(IngestJobRepository),
+                sets=container.resolve(EmbeddingSetService),
+                registry=container.resolve(EmbeddingRegistry),
+                vector_store=context.vector_store,
+                dense_backend=context.dense_backend,
+                settings=settings,
+            )
+            try:
+                return await _dispatch(args, service=service, settings=settings, split=split_embedding_model)
+            except (ReindexError, ValueError) as exc:
+                print(f"error: {exc}", file=sys.stderr)
+                return 2
+        finally:
+            await pyfly_app.shutdown()
+
+    return asyncio.run(_run())
+
+
+async def _dispatch(args: argparse.Namespace, *, service, settings, split) -> int:  # noqa: ANN001
+    """Route one invocation to a mode. Exactly one mode per call."""
+    if args.list:
+        scopes = await service.resolve_scope(
+            workspace_id=args.workspace, tenant_id=args.tenant, everything=args.all
+        )
+        for entry in await service.list_sets(scopes=scopes):
+            row = entry.row
+            marker = "*" if entry.is_active else " "
+            print(
+                f"{marker} {entry.workspace_id}  {row.id}  {row.provider}:{row.model} @{row.dimensions}"
+                f"  {row.status:<9} vectors={row.vector_count}  index={row.index_name or '-'}"
+            )
+        print("\n* = the set answering this workspace's searches")
+        return 0
+
+    if args.activate:
+        retired = await service.activate(
+            tenant_id=args.tenant, workspace_id=args.workspace, set_id=args.activate
+        )
+        print(f"{args.workspace} now serves {args.activate} (retired {retired or 'nothing'})")
+        return 0
+
+    if args.rollback:
+        restored = await service.rollback(tenant_id=args.tenant, workspace_id=args.workspace)
+        print(f"{args.workspace} rolled back to {restored}")
+        return 0
+
+    if args.drop_set:
+        deleted = await service.drop_set(
+            tenant_id=args.tenant, workspace_id=args.workspace, set_id=args.drop_set
+        )
+        print(f"dropped {args.drop_set}: {deleted} vector(s) and its index removed")
+        return 0
+
+    if not args.to:
+        print("error: --to <provider>:<model> is required to run a reindex", file=sys.stderr)
+        return 2
+    provider, model = split(args.to)
+    dimensions = args.dimensions or settings.embedding_dimensions
+    scopes = await service.resolve_scope(
+        workspace_id=args.workspace, tenant_id=args.tenant, everything=args.all
+    )
+    plan = await service.plan(scopes=scopes, provider=provider, model=model, dimensions=dimensions)
+    print(plan.render())
+    if args.estimate_only:
+        return 0
+    if not _confirmed(args.yes):
+        print("aborted: nothing has been written", file=sys.stderr)
+        return 1
+
+    outcomes = await service.run(
+        plan,
+        batch_size=args.batch_size,
+        activate=not args.no_activate,
+        resume_set_id=args.resume,
+        on_progress=lambda line: print(line, flush=True),
+    )
+    throttled = [o for o in outcomes if o.status == "throttled"]
+    for outcome in outcomes:
+        print(
+            f"{outcome.workspace_id}: {outcome.embedded} vector(s) in {outcome.set_id} "
+            f"({outcome.status}, {outcome.elapsed_s:.1f}s)"
+            + (f", retired {outcome.retired_set_id}" if outcome.retired_set_id else "")
+        )
+    if throttled:
+        print(
+            "\nsome workspaces stopped on a provider rate limit. Their cursors are saved; "
+            "resume with --resume <set-id>.",
+            file=sys.stderr,
+        )
+        return 3
+    return 0
+
+
+def _confirmed(yes: bool) -> bool:
+    """``--yes``, or an interactive y. A non-tty without ``--yes`` refuses.
+
+    Assuming yes on a pipe is how an operator discovers a re-embed of every
+    tenant after it has started.
+    """
+    if yes:
+        return True
+    if not sys.stdin.isatty():
+        print(
+            "refusing to reindex without --yes: stdin is not a terminal, so there is nobody to ask.",
+            file=sys.stderr,
+        )
+        return False
+    return input("Proceed? [y/N] ").strip().lower() in ("y", "yes")
+
+
 def cmd_migrate(_: argparse.Namespace) -> int:
     """Apply Alembic migrations."""
     from alembic import command
@@ -217,6 +371,48 @@ def build_parser() -> argparse.ArgumentParser:
 
     sub_migrate = sub.add_parser("migrate", help="Apply database migrations")
     sub_migrate.set_defaults(func=cmd_migrate)
+
+    sub_reindex = sub.add_parser(
+        "reindex",
+        help="Re-embed a corpus into a new embedding set, and manage the sets",
+        description=(
+            "Re-embed one workspace, one tenant or every workspace into a new embedding set, "
+            "then switch to it atomically. The old set serves searches for the whole run and "
+            "stays available for --rollback until it is --drop-set."
+        ),
+    )
+    sub_reindex.add_argument(
+        "--to", help="target embedder, ``<provider>:<model>`` (on Azure the model is the DEPLOYMENT name)"
+    )
+    sub_reindex.add_argument(
+        "--dimensions", type=int, help="target width; defaults to FLYCANON_EMBEDDING_DIMENSIONS"
+    )
+    sub_reindex.add_argument("--workspace", help="workspace id (needs --tenant)")
+    sub_reindex.add_argument("--tenant", help="tenant id")
+    sub_reindex.add_argument("--all", action="store_true", help="every workspace that holds chunks")
+    sub_reindex.add_argument(
+        "--estimate-only", action="store_true", help="print the plan and the cost, write nothing"
+    )
+    sub_reindex.add_argument("--yes", action="store_true", help="skip the confirmation prompt")
+    sub_reindex.add_argument("--resume", metavar="SET_ID", help="continue a run from its saved cursor")
+    sub_reindex.add_argument(
+        "--batch-size",
+        type=int,
+        default=REINDEX_DEFAULT_BATCH_SIZE,
+        help=f"chunks per batch (default {REINDEX_DEFAULT_BATCH_SIZE})",
+    )
+    sub_reindex.add_argument(
+        "--no-activate", action="store_true", help="build the set but leave the workspace on its current one"
+    )
+    sub_reindex.add_argument("--list", action="store_true", help="list the embedding sets in scope")
+    sub_reindex.add_argument("--activate", metavar="SET_ID", help="switch a workspace to an existing set")
+    sub_reindex.add_argument(
+        "--rollback", action="store_true", help="switch a workspace back to its previously active set"
+    )
+    sub_reindex.add_argument(
+        "--drop-set", metavar="SET_ID", help="delete a retired set's vectors, index and row"
+    )
+    sub_reindex.set_defaults(func=cmd_reindex)
 
     return parser
 

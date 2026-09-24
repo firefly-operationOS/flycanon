@@ -181,6 +181,15 @@ class EmbeddingService:
     # without truncating typical chunked content.
     _MAX_INPUT_CHARS = 8000
 
+    @property
+    def max_input_chars(self) -> int:
+        """The per-input truncation. The reindex estimate needs it.
+
+        A cost estimate that ignores the truncation overstates the bill, and a
+        corpus with a few very long chunks overstates it by a lot.
+        """
+        return self._MAX_INPUT_CHARS
+
     async def embed(self, texts: Sequence[str]) -> list[list[float]]:
         """Embed ``texts`` in one call. Returns one vector per input.
 

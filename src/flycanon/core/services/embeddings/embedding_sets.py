@@ -263,6 +263,10 @@ class EmbeddingSetService:
             chunk_count=chunk_count,
         )
 
+    async def delete(self, *, tenant_id: str, workspace_id: str, set_id: str) -> None:
+        """Forget a set. The caller is responsible for its vectors and index."""
+        await self._repository.delete(tenant_id=tenant_id, workspace_id=workspace_id, set_id=set_id)
+
     async def activate(self, *, tenant_id: str, workspace_id: str, set_id: str) -> str | None:
         """Point the workspace at ``set_id``; retire whatever it pointed at.
 
