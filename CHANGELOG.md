@@ -4,7 +4,7 @@ All notable changes to **flycanon** are documented here.
 
 ## [Unreleased]
 
-## [26.7.1] - 2026-09-17
+## [26.7.1] - 2026-09-24
 
 Hardening for a multi-tenant caller (the dworkers control plane, which
 runs one shared flycanon for all its tenants). Every item below was

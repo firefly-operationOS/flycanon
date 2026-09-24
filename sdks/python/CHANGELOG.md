@@ -2,7 +2,7 @@
 
 All notable changes to **flycanon-sdk** (Python) are documented here.
 
-## [26.7.1] - 2026-09-17
+## [26.7.1] - 2026-09-24
 
 ### Changed -- realigned with the 26.7.x server (breaking where the old route no longer existed)
 
