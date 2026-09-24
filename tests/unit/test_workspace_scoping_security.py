@@ -522,7 +522,7 @@ class TestConversationsWorkspaceScoping:
 
         service = ConversationService(
             repository=repositories["conversation"],
-            answer_service=None,  # type: ignore[arg-type]
+            answer_dispatcher=None,  # type: ignore[arg-type]
             audit=_NoopAudit(),
             settings=CanonSettings(),
         )
@@ -551,7 +551,7 @@ class TestConversationsWorkspaceScoping:
 
         service = ConversationService(
             repository=repositories["conversation"],
-            answer_service=None,  # type: ignore[arg-type]
+            answer_dispatcher=None,  # type: ignore[arg-type]
             audit=_NoopAudit(),
             settings=CanonSettings(),
         )

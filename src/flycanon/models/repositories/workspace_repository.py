@@ -47,18 +47,49 @@ class WorkspaceRepository:
         session_factory: async_sessionmaker[AsyncSession],
         *,
         engine: AsyncEngine | None = None,
+        admin_session_factory: async_sessionmaker[AsyncSession] | None = None,
     ) -> None:
         self._session_factory = session_factory
         self._engine = engine
+        # Sessions on the BYPASSRLS engine for the one read that is
+        # legitimately cross-workspace (``list_for_tenant``). ``None``
+        # means "same engine as everything else", which is what every
+        # test and single-role deployment gets.
+        self._admin_session_factory = admin_session_factory or session_factory
 
     @property
     def engine(self) -> AsyncEngine | None:
         """Underlying ``AsyncEngine`` -- consumed by the actuator probe."""
         return self._engine
 
+    @property
+    def has_admin_engine(self) -> bool:
+        """Whether ``list_for_tenant`` runs on a separate (admin) engine."""
+        return self._admin_session_factory is not self._session_factory
+
     @classmethod
     def from_url(cls, database_url: str, *, echo: bool = False) -> WorkspaceRepository:
         factory, engine = build_session_factory(database_url, echo=echo)
+        return cls(factory, engine=engine)
+
+    @classmethod
+    def from_urls(
+        cls,
+        database_url: str,
+        *,
+        admin_database_url: str,
+        echo: bool = False,
+    ) -> WorkspaceRepository:
+        """Build with a distinct admin engine when the two DSNs differ.
+
+        Identical DSNs collapse to one engine (``build_engine`` caches by
+        URL anyway) so ``has_admin_engine`` stays ``False`` and the boot
+        log can say so.
+        """
+        factory, engine = build_session_factory(database_url, echo=echo)
+        if admin_database_url and admin_database_url != database_url:
+            admin_factory, _admin_engine = build_session_factory(admin_database_url, echo=echo)
+            return cls(factory, engine=engine, admin_session_factory=admin_factory)
         return cls(factory, engine=engine)
 
     # ------------------------------------------------------------------
@@ -136,6 +167,36 @@ class WorkspaceRepository:
             rowcount = getattr(result, "rowcount", 0) or 0
             return rowcount > 0
 
+    async def close_if_open(self, tenant_id: str, workspace_id: str) -> bool:
+        """Close the workspace only if it is not already ``closed``.
+
+        Returns ``True`` only when THIS call performed the transition.
+        This is the variant the purge uses: :meth:`close` rewrites
+        ``closed_at`` / ``updated_at`` on every call and reports
+        ``True`` each time, which made a repeated purge of an
+        already-purged workspace answer ``closed: true``, republish
+        ``WorkspaceDeleted`` and write a fresh ``workspace.purged`` audit
+        row -- three side effects for an operation whose contract is
+        "every counter is what this call erased". Guarding on
+        ``status != 'closed'`` in the statement itself keeps it a single
+        atomic UPDATE; two concurrent purges cannot both report the
+        transition.
+        """
+        now = datetime.now(UTC)
+        async with self._session_factory() as session, session.begin():
+            stmt = (
+                sa_update(Workspace)
+                .where(
+                    Workspace.tenant_id == tenant_id,
+                    Workspace.id == workspace_id,
+                    Workspace.status != "closed",
+                )
+                .values(status="closed", closed_at=now, updated_at=now)
+            )
+            result = await session.execute(stmt)
+            rowcount = getattr(result, "rowcount", 0) or 0
+            return rowcount > 0
+
     # ------------------------------------------------------------------
     # Reads
     # ------------------------------------------------------------------
@@ -161,8 +222,19 @@ class WorkspaceRepository:
 
         Sorted by ``created_at`` descending so the most-recently-opened
         workspaces surface first in the admin list view.
+
+        Runs on the ADMIN session factory. The ``canon_workspaces`` RLS
+        policy is ``tenant_id = app.tenant_id AND id = app.workspace_id``
+        (migration 0013), so on the request engine under the
+        ``flycanon_app`` role this query could only ever return the one
+        workspace named in the caller's ``X-Workspace-Id`` header --
+        which is not a listing. The migration's own docstring promised
+        "LIST is bypassed via BYPASSRLS for the workspace controller's
+        admin path"; this is that path, wired through
+        ``FLYCANON_ADMIN_DATABASE_URL``. The ``tenant_id`` WHERE clause
+        remains the isolation boundary on the admin engine.
         """
-        async with self._session_factory() as session:
+        async with self._admin_session_factory() as session:
             stmt = (
                 select(Workspace)
                 .where(Workspace.tenant_id == tenant_id)

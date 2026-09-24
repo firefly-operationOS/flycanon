@@ -31,6 +31,16 @@ that cannot generalize to a framework-level adapter:
   namespace the :class:`TenantScopedVectorStore` wrapper already encodes -- so
   every read/write/delete runs under the matching RLS predicate. An unset GUC
   matches no rows (fail-safe): the table is never reachable unscoped.
+* :meth:`_create_schema` is VERIFY-FIRST: when the table already exists (created
+  by migration ``0016`` or an earlier boot) it runs no DDL at all and only checks
+  that the column width matches ``FLYCANON_EMBEDDING_DIMENSIONS``. That is what
+  lets the serving process run as a role with neither ``CREATE`` on the schema
+  nor ownership of the table -- PostgreSQL checks the schema privilege on
+  ``CREATE TABLE IF NOT EXISTS`` and demands ownership on ``CREATE INDEX IF NOT
+  EXISTS`` BEFORE it consults the guard, so the framework's idempotent DDL is not
+  idempotent for a ``NOBYPASSRLS`` application role (measured by the dworkers
+  programme on 2026-09-17: the first ingest died with a permission error and the
+  policy step logged "install via admin role").
 
 Activated when ``FLYCANON_VECTOR_STORE=pgvector`` (the default). Requires the
 ``pgvector`` extension on the Postgres server.
@@ -41,6 +51,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from fireflyframework_agentic.exceptions import VectorStoreError
 from fireflyframework_agentic.vectorstores import PgVectorVectorStore
 
 logger = logging.getLogger(__name__)
@@ -80,7 +91,43 @@ class RlsPgVectorVectorStore(PgVectorVectorStore):
         )
 
     async def _create_schema(self, conn: Any) -> None:
-        await super()._create_schema(conn)
+        existing = await conn.fetchrow(
+            """
+            SELECT format_type(a.atttypid, a.atttypmod) AS column_type,
+                   EXISTS (
+                       SELECT 1 FROM pg_policy p
+                       WHERE p.polrelid = c.oid AND p.polname = 'tenant_workspace_isolation'
+                   ) AS has_policy
+            FROM   pg_class c
+            JOIN   pg_namespace n ON n.oid = c.relnamespace
+            JOIN   pg_attribute a ON a.attrelid = c.oid AND a.attname = 'embedding'
+            WHERE  n.nspname = current_schema() AND c.relname = $1 AND c.relkind IN ('r', 'p')
+            """,
+            self._table,
+        )
+        if existing is not None:
+            # The table is there (migration 0016, or a previous boot as the
+            # owner): verify, never create. A width mismatch is the one thing
+            # that cannot be repaired at runtime -- the column was sized at
+            # first boot and a different embedding model needs a fresh
+            # database -- so it is refused here, before the first ingest
+            # writes a vector the ANN index cannot compare.
+            expected = f"vector({self._dimension})"
+            if existing["column_type"] != expected:
+                raise VectorStoreError(
+                    f"{self._table}.embedding is {existing['column_type']} but "
+                    f"FLYCANON_EMBEDDING_DIMENSIONS asks for {expected}; the dimension is fixed "
+                    "when the table is created and a different width needs a fresh database "
+                    "(see docs/deployment.md, 'Embedding dimension')."
+                )
+            if existing["has_policy"]:
+                return
+            # Table without the policy: an older deployment created it before
+            # the policy step existed. Fall through to the DO block below,
+            # which installs it when this role owns the table and warns when
+            # it does not.
+        else:
+            await super()._create_schema(conn)
         # Install the RLS policy in-band with table creation so the table is
         # never reachable from the application without scope -- closes the
         # deploy-ordering gap where a migration's ``IF EXISTS`` guard no-ops on

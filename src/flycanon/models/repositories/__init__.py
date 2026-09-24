@@ -31,6 +31,7 @@ from flycanon.models.repositories.cost_repository import CostRepository
 from flycanon.models.repositories.ingest_job_repository import IngestJobRepository
 from flycanon.models.repositories.knowledge_repository import KnowledgeRepository
 from flycanon.models.repositories.relation_repository import RelationRepository
+from flycanon.models.repositories.scope_purge_repository import ScopePurgeRepository
 from flycanon.models.repositories.source_repository import SourceRepository
 from flycanon.models.repositories.taxonomy_repository import TaxonomyRepository
 from flycanon.models.repositories.workspace_repository import WorkspaceRepository
@@ -45,6 +46,7 @@ __all__ = [
     "IngestJobRepository",
     "KnowledgeRepository",
     "RelationRepository",
+    "ScopePurgeRepository",
     "SourceRepository",
     "TaxonomyRepository",
     "WorkspaceRepository",

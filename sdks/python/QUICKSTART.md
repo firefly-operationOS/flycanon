@@ -20,6 +20,10 @@ uv add flycanon-sdk
 
 ## 2. Ingest a source
 
+Every tenant route needs `X-Tenant-Id` / `X-Workspace-Id`, and the
+platform key once the server sets `FLYCANON_API_KEYS`; the client
+sends them on every request from its constructor:
+
 ```python
 import asyncio
 import base64
@@ -27,18 +31,20 @@ from pathlib import Path
 
 from flycanon_sdk import CanonClient, SourceMetadata, SubmitSourceJsonPayload
 
+CLIENT = dict(base_url="http://localhost:8500", tenant_id="acme", workspace_id="ws-demo", api_key=None)
+
+
 async def ingest() -> None:
-    async with CanonClient(base_url="http://localhost:8500") as client:
+    async with CanonClient(**CLIENT) as client:
         payload = SubmitSourceJsonPayload(
             content_base64=base64.b64encode(Path("sample.docx").read_bytes()).decode(),
             filename="sample.docx",
-            content_type=(
-                "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-            ),
+            content_type=("application/vnd.openxmlformats-officedocument.wordprocessingml.document"),
             metadata=SourceMetadata(title="Sample", domain="process"),
         )
         source = await client.submit_source(payload)
         print(source.model_dump_json(indent=2))
+
 
 asyncio.run(ingest())
 ```
@@ -51,7 +57,7 @@ kind, section breadcrumb, page) at the top level — no second
 
 ```python
 async def search() -> None:
-    async with CanonClient(base_url="http://localhost:8500") as client:
+    async with CanonClient(**CLIENT) as client:
         result = await client.search("what does the document say about scope?", top_k=5)
         for hit in result.hits:
             label = hit.source_filename or hit.source_title or hit.source_id
@@ -61,6 +67,7 @@ async def search() -> None:
             print(f"{hit.score:.4f}  [{hit.source_kind}] {label} -- {location}")
             print(f"        {hit.content[:120]}")
 
+
 asyncio.run(search())
 ```
 
@@ -68,14 +75,17 @@ asyncio.run(search())
 
 ```python
 async def ask() -> None:
-    async with CanonClient(base_url="http://localhost:8500") as client:
+    async with CanonClient(**CLIENT) as client:
         answer = await client.answer("Summarise the scope section in three sentences.")
         print(answer.answer)
         for citation in answer.citations:
             label = citation.source_filename or citation.source_title or citation.source_id
-            print(f"  - {label} ({citation.source_kind})"
-                  f" -- section: {citation.section_path or '-'}"
-                  f" -- score: {citation.score:.3f}")
+            print(
+                f"  - {label} ({citation.source_kind})"
+                f" -- section: {citation.section_path or '-'}"
+                f" -- score: {citation.score:.3f}"
+            )
+
 
 asyncio.run(ask())
 ```
@@ -84,10 +94,11 @@ asyncio.run(ask())
 
 ```python
 async def browse() -> None:
-    async with CanonClient(base_url="http://localhost:8500") as client:
+    async with CanonClient(**CLIENT) as client:
         items = await client.list_knowledge_items(domain=["process"])
         for item in items.items:
             print(item.title, "current_version=", item.current_version)
+
 
 asyncio.run(browse())
 ```

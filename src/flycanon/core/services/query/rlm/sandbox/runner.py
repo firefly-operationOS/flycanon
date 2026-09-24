@@ -178,9 +178,36 @@ def _make_namespace(channel: _Channel, text: str | None) -> dict:
 
 
 def _apply_rlimits() -> None:
-    """Clamp CPU, address space, and (to zero) file size for this process."""
+    """Clamp CPU, address space, and (to zero) file size for this process.
+
+    The CPU and file-size caps are mandatory on every platform: they are the
+    two limits that stop a runaway block from pinning a core or writing to
+    disk, and both are honoured by Linux (the container) and Darwin alike.
+
+    The address-space cap is applied strictly on Linux and tolerantly on
+    Darwin. macOS refuses ``setrlimit(RLIMIT_AS)`` for any finite value
+    (the XNU kernel reports EINVAL, which Python surfaces as ``ValueError:
+    current limit exceeds maximum limit``); ``RLIMIT_DATA`` and
+    ``RLIMIT_RSS`` behave the same there. Before this guard every
+    sandbox child died at startup on a developer Mac, so the whole
+    ``subprocess`` engine (and 27 unit tests) failed locally while CI on
+    Ubuntu stayed green -- a portability trap, not a security decision. On
+    Darwin the block still runs under the CPU cap, the parent's wall-clock
+    timeout and the restricted builtins; only the memory ceiling is
+    missing, which is why the fallback is scoped to that one platform and
+    the strict path stays the default everywhere else.
+    """
     resource.setrlimit(resource.RLIMIT_CPU, (_CPU_SECONDS, _CPU_SECONDS))
-    resource.setrlimit(resource.RLIMIT_AS, (_ADDRESS_SPACE, _ADDRESS_SPACE))
+    try:
+        resource.setrlimit(resource.RLIMIT_AS, (_ADDRESS_SPACE, _ADDRESS_SPACE))
+    except (ValueError, OSError):
+        if sys.platform != "darwin":
+            raise
+        print(
+            "sandbox runner: RLIMIT_AS is not settable on Darwin; "
+            "running without an address-space cap (CPU + FSIZE caps still apply)",
+            file=sys.stderr,
+        )
     resource.setrlimit(resource.RLIMIT_FSIZE, (0, 0))
 
 

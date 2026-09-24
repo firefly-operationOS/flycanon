@@ -27,7 +27,16 @@ HEADER_CORRELATION_ID = "X-Correlation-Id"
 HEADER_IDEMPOTENCY_KEY = "Idempotency-Key"
 HEADER_AGENT_TOKEN = "X-Agent-Token"
 HEADER_AUTHORIZATION = "Authorization"
+HEADER_API_KEY = "X-API-Key"
 HEADER_DEPRECATION = "X-Flycanon-Deprecation"
+# Outbound only: the HMAC signature flycanon stamps on every async-ingest
+# callback webhook. Format ``t=<unix-seconds>,v1=<hex sha256>``; see
+# ``flycanon.web.conventions.webhook_signature``.
+HEADER_WEBHOOK_SIGNATURE = "X-Flycanon-Signature"
+# ``Authorization`` scheme accepted by the API-key gate alongside
+# ``X-API-Key`` (``Authorization: ApiKey <key>``). ``Bearer`` stays the
+# JWT slot read by :func:`tenant_context_from_headers`.
+API_KEY_AUTH_SCHEME = "ApiKey"
 
 # Value emitted on the answer endpoints when the legacy RAG engine is
 # selected (``FLYCANON_ANSWER_MODE=rag``); RLM (the default) sets no header.

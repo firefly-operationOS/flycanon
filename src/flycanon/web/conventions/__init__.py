@@ -40,6 +40,11 @@ from flycanon.web.conventions.actor import (
     actor_from_jwt_claims,
     decode_jwt_unverified,
 )
+from flycanon.web.conventions.api_key_middleware import (
+    ApiKeyMiddleware,
+    ApiKeyPrincipalFilter,
+    log_api_key_mode,
+)
 from flycanon.web.conventions.context import (
     TenantContext,
     current_tenant_context,
@@ -53,22 +58,29 @@ from flycanon.web.conventions.deps import (
 from flycanon.web.conventions.errors import ProblemDetail
 from flycanon.web.conventions.exceptions import (
     BudgetExceeded,
+    CallbackUrlNotAllowed,
     FireflyHTTPException,
     IdempotencyKeyConflict,
+    InvalidApiKey,
     InvalidRequest,
+    MissingApiKey,
     MissingIdempotencyKey,
     MissingTenantContext,
     ResourceNotFound,
     TenantClaimMismatch,
     WorkspaceNotFound,
+    WorkspaceScopeMismatch,
 )
 from flycanon.web.conventions.handlers import register_exception_handlers
 from flycanon.web.conventions.headers import (
+    API_KEY_AUTH_SCHEME,
     HEADER_AGENT_TOKEN,
+    HEADER_API_KEY,
     HEADER_AUTHORIZATION,
     HEADER_CORRELATION_ID,
     HEADER_IDEMPOTENCY_KEY,
     HEADER_TENANT_ID,
+    HEADER_WEBHOOK_SIGNATURE,
     HEADER_WORKSPACE_ID,
 )
 from flycanon.web.conventions.http_client import (
@@ -90,6 +102,10 @@ from flycanon.web.conventions.validation import (
 )
 
 __all__ = [
+    # api key gate
+    "ApiKeyMiddleware",
+    "ApiKeyPrincipalFilter",
+    "log_api_key_mode",
     # actor
     "Actor",
     "actor_from_agent_token",
@@ -107,22 +123,29 @@ __all__ = [
     "ProblemDetail",
     # exceptions
     "BudgetExceeded",
+    "CallbackUrlNotAllowed",
     "FireflyHTTPException",
     "IdempotencyKeyConflict",
+    "InvalidApiKey",
     "InvalidRequest",
+    "MissingApiKey",
     "MissingIdempotencyKey",
     "MissingTenantContext",
     "ResourceNotFound",
     "TenantClaimMismatch",
     "WorkspaceNotFound",
+    "WorkspaceScopeMismatch",
     # handlers
     "register_exception_handlers",
     # headers
+    "API_KEY_AUTH_SCHEME",
     "HEADER_AGENT_TOKEN",
+    "HEADER_API_KEY",
     "HEADER_AUTHORIZATION",
     "HEADER_CORRELATION_ID",
     "HEADER_IDEMPOTENCY_KEY",
     "HEADER_TENANT_ID",
+    "HEADER_WEBHOOK_SIGNATURE",
     "HEADER_WORKSPACE_ID",
     # http_client
     "MissingOutboundContextError",

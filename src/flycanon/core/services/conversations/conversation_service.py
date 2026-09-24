@@ -21,11 +21,20 @@ Owns the chat session lifecycle:
   answer → persist).
 * :meth:`get` -- fetch the session + its turn history.
 
-The per-turn answer call goes through the existing
-:class:`AnswerService` (PR-D's reranker + expander apply
-transparently). The rolling ``summary`` field on the
-conversation row is updated after every turn so future turns
-stay within the model's context window even after 20+ turns.
+The per-turn answer call goes through the :class:`AnswerDispatcher`
+-- the SAME engine selection as ``POST /api/v1/query`` -- so a
+multi-turn conversation answers with RLM by default and with the
+deprecated RAG engine only when ``FLYCANON_ANSWER_MODE=rag``. Until
+26.7.1 this service was wired straight to the RAG
+:class:`AnswerService`, which meant ``/query`` and
+``/conversations/{id}/turn`` on the same deployment used different
+engines, needed different credentials (an agentic answer model plus
+chunk embeddings versus ``ANTHROPIC_API_KEY`` plus stored originals)
+and produced citations of different shapes -- a caller could not
+switch a single question from one-shot to conversational without
+changing what it got back. The rolling ``summary`` derived from the
+turn rows keeps future turns within the model's context window even
+after 20+ turns.
 
 **Memory architecture.** Conversations are persisted to
 ``canon_conversations`` + ``canon_conversation_turns`` (Postgres
@@ -53,7 +62,7 @@ from sqlalchemy.exc import IntegrityError
 
 from flycanon.config import CanonSettings
 from flycanon.core.services.audit import AuditService
-from flycanon.core.services.query.answer_service import AnswerService
+from flycanon.core.services.query.answer_dispatcher import AnswerDispatcher
 from flycanon.interfaces.dtos.conversation import (
     Conversation,
     ConversationTurn,
@@ -85,14 +94,19 @@ class ConversationService:
     def __init__(
         self,
         repository: ConversationRepository,
-        answer_service: AnswerService,
+        answer_dispatcher: AnswerDispatcher,
         audit: AuditService,
         settings: CanonSettings,
     ) -> None:
         self._repository = repository
-        self._answer = answer_service
+        self._answer = answer_dispatcher
         self._audit = audit
         self._settings = settings
+
+    @property
+    def is_rag(self) -> bool:
+        """Whether turns run on the deprecated RAG engine (mirrors the dispatcher)."""
+        return self._answer.is_rag
 
     # ------------------------------------------------------------------
     # Lifecycle

@@ -58,7 +58,7 @@ COPY --from=fireflyframework-agentic  /fireflyframework_agentic /build/fireflyfr
 WORKDIR /app
 COPY pyproject.toml /app/pyproject.toml
 COPY README.md      /app/README.md
-COPY uv.lock*       /app/
+COPY uv.lock        /app/uv.lock
 
 # Rewrite path-source entries so uv resolves siblings inside the container.
 RUN sed -i \
@@ -66,8 +66,11 @@ RUN sed -i \
         -e 's|path = "\.\./\.\./fireflyframework/fireflyframework-agentic"|path = "/build/fireflyframework-agentic"|' \
         /app/pyproject.toml
 
+# ``--locked`` refuses to build if uv.lock and pyproject.toml disagree,
+# so the image can never silently resolve a newer framework tag than
+# the one the test suite ran against (uv.lock is committed since 26.7.1).
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --no-install-project --no-dev --no-editable
+    uv sync --locked --no-install-project --no-dev --no-editable
 
 # Copy the application source + migrations and finalise the install.
 COPY src/         /app/src/
@@ -78,7 +81,7 @@ COPY docker-entrypoint.sh /app/docker-entrypoint.sh
 RUN chmod +x /app/docker-entrypoint.sh
 
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --no-dev --no-editable
+    uv sync --locked --no-dev --no-editable
 
 
 # ---- Stage 2: runtime -----------------------------------------------------
@@ -135,14 +138,33 @@ RUN find /app -type f -exec chmod a+r {} + \
     && find /app -type d -exec chmod a+rx {} + \
     && chmod a+x /app/docker-entrypoint.sh
 
-# Stateful directory that the runtime writes to (BM25 SQLite corpus +
-# any other on-disk projection). Pre-created with canon ownership so
-# the named volume mount inherits the right permissions on first
-# use; FLYCANON_CORPUS_PATH defaults to /app/canon-data/corpus.db in
-# the compose stack.
-RUN mkdir -p /app/canon-data && chown -R canon:canon /app/canon-data
+# Stateful directories the runtime writes to, pre-created with canon
+# ownership so a named volume mounted on top inherits the permissions
+# on first use:
+#
+# * /app/canon-data         -- BM25 SQLite corpus (FLYCANON_CORPUS_PATH
+#                              defaults to /app/canon-data/corpus.db in
+#                              the compose stack) and, since 26.7.1, the
+#                              localfs object store under objects/.
+# * /app/var/objects        -- the CHECKOUT default of
+#                              FLYCANON_OBJECT_STORE_LOCALFS_ROOT
+#                              (``./var/objects`` relative to WORKDIR).
+#
+# Why both: the settings default ``./var/objects`` is right for a
+# developer running from a checkout, but inside the image WORKDIR is
+# /app, owned by root, and the process runs as ``canon``. The first
+# ingest therefore died with EACCES on ``mkdir /app/var`` and the
+# container never served -- that is what stopped the dworkers stack at
+# first boot. The ENV below repoints the store at the volume-backed
+# state directory so originals survive a container replace, and
+# /app/var is created writable anyway so an operator who overrides the
+# variable back to the relative default still lands on a writable path
+# instead of the same crash.
+RUN mkdir -p /app/canon-data/objects /app/var/objects \
+    && chown -R canon:canon /app/canon-data /app/var
 
-ENV PYTHONPATH=/app/src
+ENV PYTHONPATH=/app/src \
+    FLYCANON_OBJECT_STORE_LOCALFS_ROOT=/app/canon-data/objects
 
 USER canon
 EXPOSE 8500

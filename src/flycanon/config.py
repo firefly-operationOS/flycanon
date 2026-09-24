@@ -45,6 +45,29 @@ class CanonSettings(BaseSettings):
 
     # -- Persistence ----------------------------------------------------
     database_url: str = "postgresql+asyncpg://canon:canon@localhost:5432/flycanon"
+    # Optional second DSN bound to the BYPASSRLS role (``flycanon_admin``
+    # in docs/deployment.md). Under the production ``flycanon_app`` role
+    # every session is filtered by the ``app.tenant_id`` /
+    # ``app.workspace_id`` GUCs, and the ``canon_workspaces`` policy is
+    # ``id = app.workspace_id`` -- so ``GET /api/v1/workspaces`` through
+    # the request engine could only ever return the ONE workspace named
+    # in the caller's ``X-Workspace-Id`` header. The tenant-wide listing
+    # is a legitimate cross-workspace read, and this is the engine it
+    # runs on. Empty (the default) falls back to ``database_url``, which
+    # is correct wherever that DSN already carries BYPASSRLS (dev, test,
+    # single-role deployments) and is announced at boot otherwise.
+    admin_database_url: str = Field(
+        default="",
+        description=(
+            "DSN of the BYPASSRLS role used for tenant-wide reads such as "
+            "GET /api/v1/workspaces. Empty = reuse ``database_url``."
+        ),
+    )
+
+    @property
+    def effective_admin_database_url(self) -> str:
+        """``admin_database_url`` when set, else ``database_url``."""
+        return self.admin_database_url.strip() or self.database_url
 
     # -- Queue / EDA ----------------------------------------------------
     # The actual EventPublisher is built by pyfly's EdaAutoConfiguration
@@ -252,7 +275,7 @@ class CanonSettings(BaseSettings):
     # The Recursive Language Model query engine (``core/services/query/
     # rlm/``) is a CodeAct REPL: a root orchestrator that writes Python
     # against the document corpus, makes recursive sub-calls on slices,
-    # and finishes by citing the filings/pages it used. All three models
+    # and finishes by citing the filings/pages it used. Both models
     # are in ``<provider>:<model>`` form; the ``anthropic:`` prefix is
     # stripped before the id is sent to the Anthropic Messages API.
     #
@@ -275,10 +298,18 @@ class CanonSettings(BaseSettings):
         default="anthropic:claude-sonnet-4-6",
         description="Model for flat recursive sub-calls made from REPL code.",
     )
-    rlm_answer_model: str = Field(
-        default="anthropic:claude-sonnet-4-6",
-        description="Model for the final single-shot answer synthesis.",
-    )
+    # There is deliberately NO third "answer" model. The RLM's final answer
+    # is produced by the ROOT model: either as the ``final(...)`` tool call
+    # of the CodeAct loop (a ``chat_raw`` turn on ``rlm_root_model``) or, when
+    # the loop runs out of turns, as the tool-less forced-final turn, which is
+    # also a ``chat_raw`` on the root model. The sub model serves only the
+    # ``llm()`` / ``rlm()`` helpers called from REPL code and the
+    # self-consistency candidate selector. A ``rlm_answer_model`` field
+    # shipped with the RLM settings in 26.7.0 and was read by nothing, so an
+    # operator who set it to a cheaper or stronger model got neither; it was
+    # removed in 26.7.1 rather than wired, because there is no single-shot
+    # synthesis step for it to drive. ``extra="ignore"`` above means an env
+    # file that still carries ``FLYCANON_RLM_ANSWER_MODEL`` boots unchanged.
     # Max orchestrator turns before the loop gives up and asks for a
     # plain-text answer from the transcript.
     rlm_max_iters: int = Field(default=8, ge=1, le=64)
@@ -346,7 +377,17 @@ class CanonSettings(BaseSettings):
         default="localfs",
         description="Object-store backend: ``localfs`` (default) or ``s3``.",
     )
-    # localfs backend (FLYCANON_OBJECT_STORE_LOCALFS_ROOT).
+    # localfs backend (FLYCANON_OBJECT_STORE_LOCALFS_ROOT). ``./var/objects``
+    # is relative to the process working directory, which is what a
+    # developer running ``uv run flycanon serve`` from a checkout expects.
+    # Inside the shipped image the working directory is ``/app`` (owned
+    # by root, read-only to the ``canon`` user) so the same default made
+    # the first ingest -- and the RLM answer path that reads originals
+    # back -- fail with EACCES; the Dockerfile therefore exports
+    # ``FLYCANON_OBJECT_STORE_LOCALFS_ROOT=/app/canon-data/objects`` (the
+    # writable, volume-backed state directory) and pre-creates ``/app/var``
+    # so an operator who overrides the variable back to the checkout
+    # default still lands on a writable path.
     object_store_localfs_root: str = Field(default="./var/objects")
     # s3 backend (FLYCANON_OBJECT_STORE_S3_*). Requires ``uv sync --extra s3``.
     object_store_s3_bucket: str = Field(default="")
@@ -377,6 +418,28 @@ class CanonSettings(BaseSettings):
     # pinning a request worker indefinitely. Connect timeout is
     # capped at min(total, 10s).
     url_fetch_timeout_s: float = Field(default=60.0, gt=0.0)
+    # Server-side request forgery guard for ``uri`` fetches and
+    # ``callback_url`` webhooks. Off (the default) means every hostname
+    # is resolved before it is dialled and any address in a loopback,
+    # private (RFC 1918 / ULA), link-local (169.254/16 -- the cloud
+    # metadata range -- and fe80::/10), multicast, reserved or
+    # unspecified block is refused with ``url_fetch_forbidden_host``;
+    # each redirect hop is checked again. ``True`` disables the
+    # denylist for the one legitimate case: a test or dev stack whose
+    # document origins and webhook receivers live on the same private
+    # network as flycanon (e.g. the dworkers control plane on the
+    # compose network). Never set it on a deployment reachable by
+    # tenants -- it hands them a proxy into the operator's network.
+    url_fetch_allow_private: bool = Field(default=False)
+
+    # -- Outbound webhooks ----------------------------------------------
+    # Shared secret for the HMAC-SHA256 ``X-Flycanon-Signature`` stamped
+    # on every async-ingest callback (``POST /api/v1/sources?mode=async&
+    # callback_url=...``). Empty (the default) sends callbacks UNSIGNED
+    # and is announced at boot; receivers then have no way to tell a
+    # flycanon delivery from a forged one, so any production receiver
+    # must set this and verify (see docs/async-ingest.md).
+    webhook_secret: str = Field(default="")
 
     # -- Binary normalisation -------------------------------------------
     # The binary normaliser (``core/services/binary/``) routes every
@@ -414,9 +477,18 @@ class CanonSettings(BaseSettings):
     )
 
     # -- Security -------------------------------------------------------
+    # Comma-separated static keys enforced by
+    # :class:`flycanon.web.conventions.api_key_middleware.ApiKeyMiddleware`
+    # on every ``/api/v1/*`` route (except ``/api/v1/version``) and on
+    # the admin dashboard. Empty / unset = OPEN user tier (logged at boot).
+    # Until 26.7.1 this value was parsed and read by nothing, so a
+    # deployment that "set the key" was not gated at all.
     api_keys: str | None = Field(
         default=None,
-        description="Comma-separated list of static API keys that grant access. None = unauthenticated.",
+        description=(
+            "Comma-separated list of static API keys that grant access to "
+            "/api/v1/* and /admin. Empty = open (unauthenticated) user tier."
+        ),
     )
 
     @property

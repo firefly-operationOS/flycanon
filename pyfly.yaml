@@ -38,15 +38,19 @@ pyfly:
     metrics:
       enabled: true
 
-  # Admin dashboard -- embedded management UI at /admin/. Read-only by
-  # default; toggle ``require-auth: true`` before exposing it to the
-  # public internet.
+  # Admin dashboard -- embedded management UI at /admin/. Authentication
+  # is REQUIRED by default: pyfly's gate checks the request-scoped
+  # SecurityContext, which flycanon populates from a valid FLYCANON_API_KEYS
+  # key (see ``flycanon.web.conventions.api_key_middleware``). With no keys
+  # configured the dashboard API answers 401 to everyone; a developer on a
+  # loopback-only box can export FLYCANON_ADMIN_REQUIRE_AUTH=false to open
+  # it. Never ship that override on a host other people can reach.
   admin:
     enabled: true
     path: /admin
     title: "flycanon -- PyFly Admin"
     theme: auto
-    require-auth: false
+    require-auth: ${FLYCANON_ADMIN_REQUIRE_AUTH:true}
     refresh-interval: 5000
 
   # AOP -- required for @authorize / @cacheable / @retry decorators.
@@ -74,11 +78,22 @@ pyfly:
   eda:
     enabled: true
     provider: ${FLYCANON_EDA_ADAPTER:postgres}
-    # Comma-separated destinations the in-process subscriber listens
-    # to. The worker container overrides this to ``flycanon.ingest``
-    # alone so the offset advances independently.
+    # Comma-separated destinations the in-process subscriber listens to.
     destinations: ${FLYCANON_EDA_DESTINATIONS:flycanon.ingest,flycanon.knowledge,flycanon.audit}
-    group: ${FLYCANON_EDA_GROUP:flycanon-workers}
+    # Consumer group == the Postgres outbox CURSOR. Offsets are kept per
+    # group (one row in ``pyfly_eda_offsets``), NOT per destination, so
+    # every process that shares a group also shares -- and advances --
+    # the same cursor. pyfly's CQRS auto-configuration subscribes an
+    # ``EdaCacheInvalidationBridge`` on ``*`` in EVERY process, which
+    # makes the API a consumer too: with api and worker on one group the
+    # API drained ``IngestSourceRequested`` events into a no-op bridge and
+    # the worker never saw them, so ``POST /api/v1/sources?mode=async``
+    # jobs sat at ``queued`` forever (found on the dworkers dev stack,
+    # 26.7.1). The API therefore defaults to its own group and
+    # ``flycanon worker`` defaults to ``flycanon-workers`` (see
+    # ``flycanon.cli``). Override only to run several API replicas or
+    # several workers on ONE cursor each, never to make them share.
+    group: ${FLYCANON_EDA_GROUP:flycanon-api}
     postgres:
       dsn: ${FLYCANON_DATABASE_URL:postgresql+asyncpg://canon:canon@localhost:5432/flycanon}
       channel: flycanon_eda

@@ -33,6 +33,7 @@ the bookend events (``ingest.queued`` + the terminal outcome).
 from __future__ import annotations
 
 import base64
+import json
 import logging
 import uuid
 from datetime import UTC, datetime, timedelta
@@ -49,6 +50,8 @@ from flycanon.interfaces.dtos.source import SubmitSourceRequest
 from flycanon.interfaces.enums import SourceKind
 from flycanon.models.entities.ingest_job import IngestJobRow
 from flycanon.models.repositories.ingest_job_repository import IngestJobRepository
+from flycanon.web.conventions.headers import HEADER_CORRELATION_ID, HEADER_WEBHOOK_SIGNATURE
+from flycanon.web.conventions.webhook_signature import sign_payload
 
 logger = logging.getLogger(__name__)
 
@@ -149,7 +152,12 @@ class AsyncIngestService:
                 "uri": request.uri,
             },
         )
-        await self._publish_requested(stored.id, correlation_id)
+        await self._publish_requested(
+            stored.id,
+            correlation_id,
+            tenant_id=scope_tenant,
+            workspace_id=scope_workspace,
+        )
         logger.info(
             "ingest job queued id=%s filename=%s bytes=%d",
             stored.id,
@@ -158,14 +166,39 @@ class AsyncIngestService:
         )
         return stored
 
-    async def _publish_requested(self, job_id: str, correlation_id: str | None) -> None:
+    async def _publish_requested(
+        self,
+        job_id: str,
+        correlation_id: str | None,
+        *,
+        tenant_id: str,
+        workspace_id: str,
+    ) -> None:
+        """Publish ``IngestSourceRequested`` for ``job_id`` with its scope.
+
+        Scope travels on the ingest topic (26.7.1) so a consumer on a
+        shared broker can route by tenant without a DB lookup; the
+        worker itself still reads the row for the scope. The two
+        arguments are keyword-only and required, not optional with a
+        "when both are passed" branch: the first cut had that branch,
+        and the stuck-job sweep -- which had only ids in hand -- took
+        it, so the one republish path that fires after something has
+        already gone wrong was also the one path that published an
+        unscoped event. A caller that has no scope has no business
+        publishing this event; make it read the row first.
+        """
         if self._publisher is None:
             return
+        payload: dict[str, Any] = {
+            "job_id": job_id,
+            "tenant_id": tenant_id,
+            "workspace_id": workspace_id,
+        }
         try:
             await self._publisher.publish(  # type: ignore[attr-defined]
                 destination=self._settings.ingest_topic,
                 event_type=INGEST_REQUESTED_EVENT,
-                payload={"job_id": job_id},
+                payload=payload,
                 headers={"correlation-id": correlation_id} if correlation_id else None,
             )
         except Exception as exc:
@@ -329,7 +362,12 @@ class AsyncIngestService:
             await self._publish_finish(
                 event_type="IngestSourceFinished",
                 job_id=job_id,
-                payload={"source_id": source.id, "n_chunks": source.n_chunks},
+                payload={
+                    "source_id": source.id,
+                    "n_chunks": source.n_chunks,
+                    "tenant_id": job.tenant_id,
+                    "workspace_id": job.workspace_id,
+                },
             )
             logger.info("ingest job succeeded id=%s source_id=%s", job_id, source.id)
 
@@ -376,7 +414,12 @@ class AsyncIngestService:
             await self._publish_finish(
                 event_type="IngestSourceFailed",
                 job_id=job_id,
-                payload={"code": str(code), "message": str(exc)},
+                payload={
+                    "code": str(code),
+                    "message": str(exc),
+                    "tenant_id": job.tenant_id,
+                    "workspace_id": job.workspace_id,
+                },
             )
             logger.warning("ingest job failed id=%s code=%s error=%s", job_id, code, exc)
             if job.callback_url:
@@ -419,9 +462,18 @@ class AsyncIngestService:
             return
         if not reclaimed:
             return
-        logger.info("stuck-job sweep reclaimed %d job(s): %s", len(reclaimed), reclaimed)
-        for job_id in reclaimed:
-            await self._publish_requested(job_id, correlation_id=None)
+        logger.info(
+            "stuck-job sweep reclaimed %d job(s): %s",
+            len(reclaimed),
+            [job.job_id for job in reclaimed],
+        )
+        for job in reclaimed:
+            await self._publish_requested(
+                job.job_id,
+                correlation_id=None,
+                tenant_id=job.tenant_id,
+                workspace_id=job.workspace_id,
+            )
 
     async def _publish_finish(self, *, event_type: str, job_id: str, payload: dict[str, Any]) -> None:
         if self._publisher is None:
@@ -444,26 +496,52 @@ class AsyncIngestService:
         error_code: str | None = None,
         error_message: str | None = None,
     ) -> None:
+        """POST the terminal outcome to ``job.callback_url``, signed.
+
+        The payload carries ``tenant_id`` / ``workspace_id`` so a
+        receiver serving many tenants can route the callback without
+        first looking the job up. The body is serialised ONCE and those
+        exact bytes are both signed and sent (see
+        :mod:`flycanon.web.conventions.webhook_signature` for why the
+        MAC must cover the raw bytes). When ``FLYCANON_WEBHOOK_SECRET``
+        is empty the request goes out unsigned, which the boot log has
+        already warned about. Delivery is best-effort and single-shot;
+        the durable record is the audit row and the job row, so a
+        receiver that missed a delivery polls ``GET /api/v1/ingest-jobs/
+        {id}``.
+
+        ``callback_url`` was vetted by the host policy at submit time
+        (see :meth:`SourcesController.submit_json`); it is not re-checked
+        here because the worker may legitimately run with
+        ``FLYCANON_URL_FETCH_ALLOW_PRIVATE`` set differently from the API
+        and the submit-time decision is the one the caller was told.
+        """
+        if not job.callback_url:
+            return
         try:
             import httpx
         except ImportError:  # pragma: no cover
             return
         payload = {
             "job_id": job.id,
+            "tenant_id": job.tenant_id,
+            "workspace_id": job.workspace_id,
             "status": status,
             "source_id": source_id,
             "error_code": error_code,
             "error_message": error_message,
             "occurred_at": datetime.now(UTC).isoformat(),
         }
-        headers = {}
+        body = json.dumps(payload, separators=(",", ":"), sort_keys=True).encode("utf-8")
+        headers = {"Content-Type": "application/json"}
         if job.correlation_id:
-            headers["X-Correlation-Id"] = job.correlation_id
-        if not job.callback_url:
-            return
+            headers[HEADER_CORRELATION_ID] = job.correlation_id
+        secret = self._settings.webhook_secret
+        if secret:
+            headers[HEADER_WEBHOOK_SIGNATURE] = sign_payload(secret, body)
         try:
             async with httpx.AsyncClient(timeout=10.0) as client:
-                await client.post(job.callback_url, json=payload, headers=headers)
+                await client.post(job.callback_url, content=body, headers=headers)
         except Exception as exc:  # noqa: BLE001
             logger.warning(
                 "webhook delivery failed job_id=%s url=%s: %s",

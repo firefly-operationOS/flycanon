@@ -24,6 +24,7 @@ from pyfly.kernel import ResourceNotFoundException
 from pyfly.observability.correlation import get_correlation_id
 from pyfly.web import Body, PathVar, Valid, get_mapping, post_mapping, request_mapping
 from starlette.requests import Request
+from starlette.responses import JSONResponse
 
 from flycanon.core.services.conversations import (
     ConversationNotFound,
@@ -36,6 +37,7 @@ from flycanon.interfaces.dtos.conversation import (
     TurnResponse,
 )
 from flycanon.web.conventions import TenantContext, tenant_context_from_request
+from flycanon.web.conventions.headers import DEPRECATION_RAG_MESSAGE, HEADER_DEPRECATION
 
 logger = logging.getLogger(__name__)
 
@@ -124,7 +126,16 @@ class ConversationsController:
             _turn_to_dto,
         )
 
-        return TurnResponse(
+        response = TurnResponse(
             conversation_id=conversation_id,
             turn=_turn_to_dto(turn),
+        )
+        # Same signal as POST /api/v1/query: the deprecated RAG engine
+        # announces itself with a header; RLM (the default) adds none.
+        if not self._service.is_rag:
+            return response
+        return JSONResponse(  # type: ignore[return-value]
+            response.model_dump(mode="json"),
+            status_code=201,
+            headers={HEADER_DEPRECATION: DEPRECATION_RAG_MESSAGE},
         )

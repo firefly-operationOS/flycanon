@@ -2,6 +2,36 @@
 
 All notable changes to **flycanon-sdk** (Python) are documented here.
 
+## [26.7.1] - 2026-09-24
+
+### Changed -- realigned with the 26.7.x server (breaking where the old route no longer existed)
+
+- `api_key` is sent as `X-API-Key` (the server reads `Authorization:
+  Bearer` as an operator JWT, so the previous form never authenticated).
+- `submit_source_async` posts to `POST /api/v1/sources?mode=async`
+  (`sources:async` was never served) and accepts `callback_url`.
+- `submit_sources_bulk` sends the body key the server reads (`sources`).
+- `stream_job(after_id=)` replaces `cursor=`; `cancel_job` is removed
+  (no such route).
+- `stream_answer` uses `POST /api/v1/query/stream`; frames are
+  `status` / `hit` / `final` / `error`.
+- `add_turn` posts to `/conversations/{id}/turn`, sends `question`,
+  and unwraps the server's `{conversation_id, turn}` envelope;
+  `ConversationTurn` / `Conversation` / `CreateConversationRequest`
+  carry the server's fields (`question`, `turn_index`, `elapsed_ms`,
+  `no_answer`, `model`, `metadata`). `list_turns` reads them from
+  `get_conversation`.
+- `suggest_questions(SuggestRequest)` posts to `/query/suggest`.
+- `remove_relation(item_id, relation_id)` uses the nested route.
+- `IngestJob` carries the server's fields (`attempts`, `callback_url`,
+  `started_at`, `finished_at`, ...).
+
+### Added
+
+- `delete_source(source_id)` -- user-tier `DELETE /api/v1/sources/{id}`.
+- `purge_workspace(workspace_id)` -> `WorkspacePurgeResult`.
+- `SuggestRequest`, `WorkspacePurgeResult` models.
+
 ## [26.5.7] - 2026-05-22
 
 ### Added -- 12-plan unification surface (non-breaking, additive)

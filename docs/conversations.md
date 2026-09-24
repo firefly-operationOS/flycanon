@@ -26,6 +26,17 @@ chat.
 | `GET`  | `/api/v1/conversations/{id}` | Fetch header + derived rolling summary + every turn. |
 | `POST` | `/api/v1/conversations/{id}/turn` | Submit a user turn. Body: `CreateTurnRequest` (`question`, `top_k`, `instructions`). Returns `{ conversation_id, turn }`. |
 
+## Engine
+
+Since 26.7.1 every turn goes through the same `AnswerDispatcher` as
+`POST /api/v1/query`: RLM by default, the deprecated RAG engine only
+when `FLYCANON_ANSWER_MODE=rag` (in which case the turn response
+carries the `X-Flycanon-Deprecation` header exactly like `/query`).
+Earlier releases wired conversations straight to the RAG
+`AnswerService`, so a one-shot question and its conversational
+follow-up ran on different engines with different credentials and
+citation shapes.
+
 ## Context strategy
 
 Each turn the conversation service feeds the answer agent two layers

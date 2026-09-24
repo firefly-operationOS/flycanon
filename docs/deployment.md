@@ -106,7 +106,13 @@ required for production:
 | Provider API keys | `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `VOYAGEAI_API_KEY`, `COHERE_API_KEY`, ... -- read by `fireflyframework-agentic` from env at boot. **`ANTHROPIC_API_KEY` is required at runtime in the default RLM mode** (the RLM engine calls the Anthropic Messages API directly). | As needed for your provider mix. |
 | `FLYCANON_VECTOR_STORE` | Dense backend: `pgvector` (default), `qdrant` (`--extra qdrant`), or `chroma` (`--extra chroma`). | Defaults to `pgvector`. |
 | `FLYCANON_EDA_ADAPTER` | `postgres` (default -- durable outbox + LISTEN/NOTIFY), `memory`, `redis`, `kafka`. | Defaults to `postgres`. |
-| `FLYCANON_API_KEYS` | Comma-separated static API keys. When set, every `/api/v1/*` request requires `Authorization: Bearer <key>`. | Optional. |
+| `FLYCANON_API_KEYS` | Comma-separated static API keys. When set, every `/api/v1/*` request (except `GET /api/v1/version`) and the admin dashboard require `X-API-Key: <key>` or `Authorization: ApiKey <key>`; agent-tier requests carrying `X-Agent-Token` are exempt. Empty = open user tier (logged at boot). | **Yes in production.** |
+| `FLYCANON_ADMIN_DATABASE_URL` | DSN of the BYPASSRLS role (`flycanon_admin`) used for the tenant-wide `GET /api/v1/workspaces` listing. Empty = reuse `FLYCANON_DATABASE_URL`, which under the `flycanon_app` role collapses the listing to the caller's own workspace. | Yes when the API runs as `flycanon_app`. |
+| `FLYCANON_WEBHOOK_SECRET` | HMAC-SHA256 secret for the `X-Flycanon-Signature` header on async-ingest callbacks (`?callback_url=`). Empty = unsigned callbacks (logged at boot). Same value on api and worker. | Yes when `callback_url` is used. |
+| `FLYCANON_URL_FETCH_ALLOW_PRIVATE` | `true` disables the outbound host denylist (every non-globally-routable address: loopback / private / link-local / shared address space / reserved) for `uri` fetches and `callback_url`. Only for dev stacks whose origins live on the same private network. | Defaults to `false`; keep it there. |
+| `FLYCANON_ADMIN_REQUIRE_AUTH` | `false` opens the admin dashboard API without a key (loopback dev only). | Defaults to `true`. |
+| `FLYCANON_EDA_GROUP` | Postgres-outbox consumer group. The API defaults to `flycanon-api`, `flycanon worker` to `flycanon-workers`; they must never share one (see [async-ingest.md](async-ingest.md)). | Leave unset. |
+| `FLYCANON_OBJECT_STORE_LOCALFS_ROOT` | Directory for stored originals with the `localfs` backend. The image sets `/app/canon-data/objects` (volume-backed, writable by the `canon` user); the checkout default `./var/objects` is relative to the working directory. | Set only to relocate. |
 | `FLYCANON_CORS_ORIGINS` | Comma-separated origins for `Access-Control-Allow-Origin`. | Optional. |
 
 For a complete list with defaults and inline docs, run:
@@ -120,16 +126,15 @@ docker run --rm ghcr.io/firefly-operationos/flycanon:latest cat /app/env_templat
 ## Answer mode (RLM default / RAG deprecated)
 
 `FLYCANON_ANSWER_MODE` selects the engine for the non-streaming answer
-path (`/api/v1/query`, `/api/v1/query:stream`, and the agent-tier
+path (`/api/v1/query`, `/api/v1/query/stream`, `/api/v1/conversations/{id}/turn`, and the agent-tier
 equivalents). `rlm` is the default; `rag` is opt-in and deprecated. Any
 value other than `rag` is normalised to `rlm`.
 
 | Key | What it is | Default |
 |-----|------------|---------|
 | `FLYCANON_ANSWER_MODE` | `rlm` (default) routes to the Recursive Language Model answerer; `rag` routes to the legacy hybrid-retrieval answerer. | `rlm` |
-| `FLYCANON_RLM_ROOT_MODEL` | Orchestrator model that drives the CodeAct REPL loop. `<provider>:<model>`. | `anthropic:claude-sonnet-4-6` |
-| `FLYCANON_RLM_SUB_MODEL` | Model for flat recursive sub-calls made from REPL code. | `anthropic:claude-sonnet-4-6` |
-| `FLYCANON_RLM_ANSWER_MODEL` | Model for the final single-shot answer synthesis. | `anthropic:claude-sonnet-4-6` |
+| `FLYCANON_RLM_ROOT_MODEL` | Orchestrator model that drives the CodeAct REPL loop. `<provider>:<model>`. Claude 4.6 and later (`claude-sonnet-5`, `claude-opus-5`, Opus 4.6/4.7/4.8, Sonnet 4.6) are called with adaptive thinking and no sampling knobs; Haiku 4.5 / Sonnet 4.5 with the deterministic `temperature: 0.0`. | `anthropic:claude-sonnet-4-6` |
+| `FLYCANON_RLM_SUB_MODEL` | Model for the flat `llm()` / `rlm()` sub-calls made from REPL code and for the self-consistency candidate selector. Same generation rule as the root model. The **final answer** is the root model's, whether it comes from the `final(...)` tool call or from the tool-less forced-final turn after `FLYCANON_RLM_MAX_ITERS`; there is no third model. (`FLYCANON_RLM_ANSWER_MODEL`, documented in 26.7.0 as the model for "the final single-shot answer synthesis", was read by nothing and was removed in 26.7.1; an env file that still sets it is ignored.) | `anthropic:claude-sonnet-4-6` |
 | `FLYCANON_RLM_MAX_ITERS` | Max orchestrator turns before the loop gives up and asks for a plain-text answer from the transcript. | `8` |
 | `FLYCANON_RLM_SUB_BUDGET` | Total recursive sub-call budget across one root session. | `12` |
 | `FLYCANON_RLM_MAX_DEPTH` | How deep `rlm(...)` may nest before degrading to a flat `llm`. | `1` |
@@ -156,7 +161,7 @@ chunks, which is why it depends on the object store below.
   key on the source row. Sources without a stored original (no
   `object_store_key`) are silently skipped by the RLM corpus builder.
 - **`ANTHROPIC_API_KEY` at runtime.** The RLM engine calls the
-  Anthropic Messages API directly for all three RLM models; the
+  Anthropic Messages API directly for both RLM models; the
   `anthropic:` prefix is stripped before the id is sent.
 
 ### RAG deprecation
@@ -333,11 +338,45 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA public
 ```
 
 Wire `FLYCANON_DATABASE_URL` at `flycanon_app` for the `serve` role
-and at `flycanon_admin` for the `migrate` + `worker` roles. See
+and at `flycanon_admin` for the `migrate` + `worker` roles, and give
+the `serve` role `FLYCANON_ADMIN_DATABASE_URL` at `flycanon_admin` as
+well: the tenant-wide `GET /api/v1/workspaces` listing runs on that
+second engine because the `canon_workspaces` policy limits the request
+engine to the caller's own workspace. See
 [architecture.md -> Row-level security](architecture.md#deployment-requirement)
 for the rationale; the integration suite
-(`tests/integration/test_rls_isolation.py`) exercises the
-`BYPASSRLS` vs. `app_user` contract end-to-end.
+(`tests/integration/test_rls_isolation.py`,
+`tests/integration/test_search_under_app_role.py`) exercises the
+`BYPASSRLS` vs. `app_user` contract end-to-end, the second one through
+the real `RetrievalService.search`.
+
+**What the serving role creates: nothing (since 26.7.1).** Migration
+`0016_boot_created_tables` creates `canon_chunk_vectors` (sized by the
+`FLYCANON_EMBEDDING_DIMENSIONS` / `FLYCANON_PGVECTOR_HNSW_*` values in
+the environment of the **migrate** job -- give it the same values as
+`serve`), `pyfly_eda_outbox` and `pyfly_eda_offsets`, so the dense store
+finds its table and only verifies it. Before 26.7.1 every process created
+those lazily, and PostgreSQL refuses that for `flycanon_app`: it checks
+`CREATE` on the schema before it honours `CREATE TABLE IF NOT EXISTS`, and
+demands ownership before `CREATE INDEX IF NOT EXISTS`. One piece of that
+lazy DDL remains, in PyFly rather than flycanon: `PostgresEventBus.start()`
+still runs the outbox `CREATE TABLE / INDEX IF NOT EXISTS` in every
+process. Until PyFly skips it on existing tables, a `serve` process that
+runs as `flycanon_app` needs the two statements below on top of the
+grants above; they widen nothing else (the role stays NOBYPASSRLS, and
+the two outbox tables hold no tenant rows):
+
+```sql
+-- Temporary, for PyFly's outbox DDL at boot (see the note above).
+GRANT CREATE ON SCHEMA public TO flycanon_app;
+ALTER TABLE pyfly_eda_outbox  OWNER TO flycanon_app;   -- or a NOLOGIN role
+ALTER TABLE pyfly_eda_offsets OWNER TO flycanon_app;   -- both roles belong to
+```
+
+A deployment that prefers a shared NOLOGIN owner (so the admin role keeps
+writing the outbox too) makes both login roles members of it and hands
+the two tables to that role instead -- the dworkers programme's
+`postgres-init.sql` is one worked example.
 
 ### BM25 projection
 
@@ -398,25 +437,35 @@ id, the dimensions, and the provider's API key env var.
 | Mistral | `mistral:mistral-embed` | 1024 | `MISTRAL_API_KEY` |
 | Ollama (local) | `ollama:nomic-embed-text` | 768 | (none -- needs `OLLAMA_HOST`) |
 
-**Dimensions must match the `pgvector` column.** flycanon's
-migrations create `canon_chunk_vectors.embedding` as `vector(<dim>)`
-at first boot using `FLYCANON_EMBEDDING_DIMENSIONS`. **Changing the
-embedding model after data is loaded is a re-index** -- not a hot
-swap.
+**Dimensions must match the `pgvector` column.** Migration
+`0016_boot_created_tables` creates `canon_chunk_vectors.embedding` as
+`vector(<dim>)` from the `FLYCANON_EMBEDDING_DIMENSIONS` in the migrate
+job's environment (before 26.7.1 the dense store created it at first
+boot). The width is locked at that moment: a `serve` process configured
+for another width refuses to boot (`VectorStoreError: ... needs a fresh
+database`) rather than write a vector the index cannot compare.
+**Changing the embedding model after data is loaded is a re-index on a
+fresh database** -- not a hot swap.
 
 ---
 
 ## Authentication
 
-flycanon ships two complementary auth modes; both come from pyfly:
+Three credentials, enforced by flycanon itself (since 26.7.1;
+earlier releases parsed `FLYCANON_API_KEYS` and enforced nothing):
 
-| Mode | When | Config |
-|------|------|--------|
-| **Static API keys** | The simplest production gate. | `FLYCANON_API_KEYS=key1,key2,...` -- callers send `Authorization: Bearer <key>`. |
-| **OAuth2 resource server** | Integrating with an existing IdP (Keycloak / Auth0 / Cognito / ...). | Set `pyfly.security.oauth2.resource-server.enabled=true` plus the provider's issuer URI in `pyfly.yaml`. |
+| Credential | Where | Gate |
+|------------|-------|------|
+| **Platform API key** -- `FLYCANON_API_KEYS=key1,key2,...` | `X-API-Key: <key>` or `Authorization: ApiKey <key>` | `ApiKeyMiddleware` on every `/api/v1/*` route except `GET /api/v1/version`, and on the admin dashboard. Missing -> `401 missing_api_key`, unknown -> `401 invalid_api_key`, both RFC 7807. Constant-time comparison; several keys allow rotation without downtime. |
+| **Agent token** -- minted by `POST /api/v1/agent-tokens` | `X-Agent-Token: agt_...` | Verified per request on `/api/v1/agent/*` (tenant, allowlist, scope, expiry, rate limit). A request carrying it does not need the platform key. |
+| **Operator JWT** -- `Authorization: Bearer <jwt>` | optional | Decoded without signature verification for the `actor` label and the `tenant` claim cross-check only. Not a gate: terminate and verify JWTs at a gateway if you need identity-based auth. |
 
-Default deployment: both off (open). Production deployments **must**
-enable at least one before exposing `/api/v1/*` to the network.
+Default deployment: no key (open user tier). The boot log states the
+mode (`api-key gate ENABLED: n key(s)` / `api-key gate DISABLED`).
+Production deployments **must** set `FLYCANON_API_KEYS` (or front the
+service with a verifying gateway) before exposing `/api/v1/*` to any
+network other tenants can reach, and should set
+`FLYCANON_WEBHOOK_SECRET` if `callback_url` is used.
 
 ---
 

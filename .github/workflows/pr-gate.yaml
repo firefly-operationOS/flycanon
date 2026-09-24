@@ -34,10 +34,11 @@ concurrency:
 
 env:
   PYTHON_VERSION: "3.13"
-  # Pin pyfly + agentic to a matching git ref. When the framework
-  # repos publish releases we'll switch to ``pip install ...`` here.
-  PYFLY_REF: v26.05.05
-  AGENTIC_REF: v26.05.21
+  # Sibling checkouts staged as BuildKit / path contexts. The Python
+  # dependency itself resolves from the git tags in pyproject.toml
+  # (locked in uv.lock), so keep these equal to those tags.
+  PYFLY_REF: v26.09.04
+  AGENTIC_REF: v26.06.14
 
 jobs:
   lint:
@@ -67,7 +68,7 @@ jobs:
             -e 's|path = "\.\./\.\./fireflyframework/fireflyframework-agentic"|path = "./vendor/fireflyframework-agentic"|' \
             pyproject.toml
       - name: uv sync (dev)
-        run: uv sync --extra dev
+        run: uv sync --locked --extra dev
       - name: ruff check
         run: uv run ruff check .
       - name: ruff format --check
@@ -101,7 +102,7 @@ jobs:
             -e 's|path = "\.\./\.\./fireflyframework/fireflyframework-agentic"|path = "./vendor/fireflyframework-agentic"|' \
             pyproject.toml
       - name: uv sync (dev)
-        run: uv sync --extra dev
+        run: uv sync --locked --extra dev
       - name: pyright
         run: uv run pyright src/flycanon
 
@@ -132,7 +133,7 @@ jobs:
             -e 's|path = "\.\./\.\./fireflyframework/fireflyframework-agentic"|path = "./vendor/fireflyframework-agentic"|' \
             pyproject.toml
       - name: uv sync (dev)
-        run: uv sync --extra dev
+        run: uv sync --locked --extra dev
       - name: pytest tests/unit
         env:
           # The unit suite runs against in-memory SQLite + stubbed
@@ -172,7 +173,7 @@ jobs:
             -e 's|path = "\.\./\.\./fireflyframework/fireflyframework-agentic"|path = "./vendor/fireflyframework-agentic"|' \
             pyproject.toml
       - name: uv sync (dev)
-        run: uv sync --extra dev
+        run: uv sync --locked --extra dev
       - name: pytest tests/integration
         env:
           # Integration tests boot a real pgvector container via
@@ -238,7 +239,7 @@ jobs:
         with:
           python-version: ${{ env.PYTHON_VERSION }}
       - name: uv sync (dev)
-        run: uv sync --extra dev
+        run: uv sync --locked --extra dev
       - name: ruff check
         run: uv run ruff check src tests
       - name: pytest

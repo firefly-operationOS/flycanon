@@ -95,10 +95,12 @@ from flycanon.models.repositories import (
     IngestJobRepository,
     KnowledgeRepository,
     RelationRepository,
+    ScopePurgeRepository,
     SourceRepository,
     TaxonomyRepository,
     WorkspaceRepository,
 )
+from flycanon.web.conventions.api_key_middleware import ApiKeyPrincipalFilter
 from flycanon.web.conventions.idempotency import (
     IdempotencyStore,
     InMemoryIdempotencyStore,
@@ -174,7 +176,28 @@ class CanonCoreConfiguration:
 
     @bean
     def workspace_repository(self, settings: CanonSettings) -> WorkspaceRepository:
-        return WorkspaceRepository.from_url(settings.database_url)
+        """Workspace CRUD on the request engine, tenant-wide reads on the admin engine.
+
+        ``list_for_tenant`` is a cross-workspace read; under the
+        production ``flycanon_app`` role the ``canon_workspaces`` policy
+        (``id = app.workspace_id``) would collapse it to the single
+        workspace in the caller's header. It therefore runs on the
+        BYPASSRLS engine named by ``FLYCANON_ADMIN_DATABASE_URL``. When
+        that is unset the request DSN is reused (correct wherever it
+        already bypasses RLS) and the fact is logged so an operator who
+        sees a one-row listing in production knows which knob to turn.
+        """
+        admin_url = settings.effective_admin_database_url
+        if not settings.admin_database_url.strip():
+            logger.info(
+                "FLYCANON_ADMIN_DATABASE_URL is empty -- GET /api/v1/workspaces lists through the "
+                "request engine; under a non-BYPASSRLS role it returns only the header workspace"
+            )
+        return WorkspaceRepository.from_urls(settings.database_url, admin_database_url=admin_url)
+
+    @bean
+    def scope_purge_repository(self, settings: CanonSettings) -> ScopePurgeRepository:
+        return ScopePurgeRepository.from_url(settings.database_url)
 
     @bean
     def agent_token_repository(self, settings: CanonSettings) -> AgentTokenRepository:
@@ -232,6 +255,18 @@ class CanonCoreConfiguration:
             client = _build_redis_client(settings)
             return RedisIdempotencyStore(client)
         return InMemoryIdempotencyStore()
+
+    @bean
+    def api_key_principal_filter(self) -> ApiKeyPrincipalFilter:
+        """Bridge a validated API key into pyfly's ``SecurityContext``.
+
+        Declared as a bean so pyfly's late ``WebFilter`` discovery (run
+        after context start) appends it to the request filter chain;
+        that is the only way to populate the security context the admin
+        dashboard's ``require-auth`` gate reads. The gate itself is the
+        outer :class:`ApiKeyMiddleware` in ``flycanon.main``.
+        """
+        return ApiKeyPrincipalFilter()
 
     @bean(name="database_health")
     def database_health(self, source_repository: SourceRepository) -> SqlAlchemyHealthIndicator:

@@ -27,6 +27,18 @@ Missing or malformed headers -> `400 missing_tenant_context`
 `X-Correlation-Id` / `X-Request-Id` propagation headers from pyfly
 are unchanged.
 
+### Authentication (since 26.7.1)
+
+| Header | When | Notes |
+|--------|------|-------|
+| `X-API-Key: <key>` or `Authorization: ApiKey <key>` | `FLYCANON_API_KEYS` is non-empty | Platform key for every `/api/v1/*` route except `GET /api/v1/version`, and for the admin dashboard. `X-API-Key` wins when both are present. Missing -> `401 missing_api_key`; unknown -> `401 invalid_api_key`. With the setting empty the user tier is OPEN and the boot log says so. |
+| `X-Agent-Token: agt_...` | `/api/v1/agent/*` | The agent tier's own credential; a request carrying it does not need the platform key (the route verifies the token: `401 missing_agent_token`, `403 invalid_agent_token` / `agent_scope_denied` / ...). |
+| `Authorization: Bearer <jwt>` | optional | Decoded WITHOUT signature verification purely to derive the `actor` label and cross-check an optional `tenant` claim (`403 tenant_claim_mismatch`). It is not an authentication gate; put a verifying gateway in front if you need JWT auth. |
+
+`openapi.json` carries the matching `securitySchemes` (`ApiKeyHeader`,
+`ApiKeyAuthorization`, `AgentToken`) and the header parameters on every
+operation, so generated clients send them.
+
 ## Workspace scope enforcement
 
 **Workspace scope is enforced on every read-by-id route.** A caller who
@@ -49,9 +61,18 @@ consistent even when a future repository forgets the WHERE clause.
 |--------|------|-------------|
 | `POST` | `/api/v1/sources` | Submit a source. Body: `SubmitSourceJsonPayload` (base64 bytes via `content_base64` **or** `uri` to fetch). Default sync 201 returns `SourceRecord`; add `?mode=async` for the queued path (returns `IngestJob`, see `/api/v1/ingest-jobs/{id}`). Optional `?callback_url=…` fires a webhook on terminal state. Same-content submissions dedup on `(tenant_id, workspace_id, content_sha256)`. |
 | `POST` | `/api/v1/sources:bulk` | Bulk-submit an array of sources. Returns per-item `BulkSourceResult`s. |
-| `PUT`  | `/api/v1/sources/{id}` | Replace an existing source's content in place. Body: `SubmitSourceJsonPayload`. |
+| `PUT`  | `/api/v1/sources/{id}` | Replace an existing source's content in place. Body: `SubmitSourceJsonPayload` (`content_base64` required). |
+| `DELETE` | `/api/v1/sources/{id}` | Remove a source: BM25 rows + dense vectors purged, chunk rows deleted, the stored original deleted from the object store, the row deleted, `source.removed` audited and `SourceRemoved` published. 204. Unknown id -> `404 source_not_found`. (26.7.1) |
 | `GET`  | `/api/v1/sources` | Paginated list. Query: `status`, `kind` (csv), `limit`, `offset`. |
 | `GET`  | `/api/v1/sources/{id}` | Fetch a single source. 404 → `resource_not_found` (RFC 7807). |
+
+`uri` fetches and `callback_url` webhooks go through the outbound host
+policy: `http`/`https` only, no loopback, private (RFC 1918 / ULA),
+link-local (instance metadata), multicast or reserved address, whether
+given literally or reached through DNS or a redirect. Refusals are
+`400 url_fetch_forbidden_host` (uri) and `400 callback_url_not_allowed`
+(callback). `FLYCANON_URL_FETCH_ALLOW_PRIVATE=true` lifts the denylist
+for private dev stacks only.
 
 ## Knowledge
 
@@ -134,13 +155,13 @@ The `/api/v1/ingest-jobs/*` surface parallels flyradar's
 |--------|------|-------------|
 | `GET`  | `/api/v1/ingest-jobs` | Paginated list. Query: `status` (csv), `limit`, `offset`. |
 | `GET`  | `/api/v1/ingest-jobs/{id}` | Job header — `status`, `attempts`, `source_id` once succeeded, `error_code`/`error_message` on failure. |
-| `GET`  | `/api/v1/ingest-jobs/{id}/stream` | Server-Sent Events feed of job events (cursor-based; resume with `?after_id=N`). |
+| `GET`  | `/api/v1/ingest-jobs/{id}/stream` | Server-Sent Events feed of job events. Every `event` frame carries an `id:`; resume with `?after_id=N` or the `Last-Event-ID` request header (both honoured since 26.7.1). |
 
 ## Workspaces
 
-CRUD over the `canon_workspaces` table. All five endpoints
-require the standard tenant headers; list / get / update / close
-scope by `X-Tenant-Id`.
+CRUD over the `canon_workspaces` table. All six endpoints
+require the standard tenant headers; list / get / update / close /
+purge scope by `X-Tenant-Id`.
 
 | Method | Path | Description |
 |--------|------|-------------|
@@ -148,7 +169,13 @@ scope by `X-Tenant-Id`.
 | `GET`  | `/api/v1/workspaces` | List within tenant. Query: `status`, `limit`, `offset`. |
 | `GET`  | `/api/v1/workspaces/{id}` | Fetch one. 404 → `resource_not_found`. |
 | `PATCH` | `/api/v1/workspaces/{id}` | Sparse update. Body: `WorkspaceUpdate`. |
-| `POST` | `/api/v1/workspaces/{id}:close` | Close (idempotent; sets `status=closed` + `closed_at`). |
+| `POST` | `/api/v1/workspaces/{id}:close` | Close (idempotent; sets `status=closed` + `closed_at`). Data stays. |
+| `POST` | `/api/v1/workspaces/{id}:purge` | Erase everything the workspace holds, then close it: every source through the full removal pipeline (vectors, chunks, stored originals, audit + event each), then knowledge items / versions / citations / relations, candidates, conversations / turns, ingest jobs / events and cost events in one transaction; emits `WorkspaceDeleted`; audit rows are kept and a `workspace.purged` row records the counts. `X-Workspace-Id` must equal the path id (`400 workspace_scope_mismatch`). Returns `WorkspacePurgeResult` -- every counter is what this call erased, `originals_deleted` only objects actually found in the store, `closed` only when this call closed the row; a repeat is all zeros, `closed: false`, no event, no audit row. (26.7.1) |
+
+`GET /api/v1/workspaces` is a tenant-wide read and runs on the
+BYPASSRLS engine named by `FLYCANON_ADMIN_DATABASE_URL`; under the
+production `flycanon_app` role without that setting it can only return
+the workspace named in the caller's own `X-Workspace-Id` header.
 
 ## Billing
 
@@ -209,20 +236,27 @@ callers (whose actor begins with `agent:`) are refused with
 
 Every agent route requires three headers together: `X-Tenant-Id`,
 `X-Workspace-Id`, and `X-Agent-Token: <secret>` (the raw token as
-returned by the mint endpoint, shape: `agt_<8hex>_<32hex>`). The
-`X-Agent-Token` header is mutually exclusive with `Authorization` --
-presenting both is rejected at the conventions layer.
+returned by the mint endpoint, shape: `agt_<8hex>_<32hex>`). A request
+carrying `X-Agent-Token` is exempt from the platform API key, and the
+platform key is not accepted in the token's place (a platform-key-only
+call to an agent route is `401 missing_agent_token`); the OpenAPI
+document lists `AgentToken` as the sole security requirement on these
+operations. When an `Authorization: Bearer` JWT is also present its
+`sub` wins as the `actor` label and the agent token is still verified
+for authorisation.
 
-`Idempotency-Key` is **mandatory** on every agent-tier POST.
-Missing -> `400 missing_idempotency_key`. (The user-tier POSTs
-accept the header optionally; the agent surface is stricter so
+`Idempotency-Key` is **mandatory** on every agent-tier POST, PUT and
+DELETE. Missing -> `400 missing_idempotency_key`. (The user-tier
+routes do not read the header; the agent surface is stricter so
 duplicate machine calls can never silently create extra sources,
 candidates, or queries.)
 
 | Method | Path | Scope | Description |
 |--------|------|-------|-------------|
-| `POST` | `/api/v1/agent/sources` | `agent.sources:ingest` | Ingest a Source (sync default; `?mode=async` allowed). Body: `SubmitSourceJsonPayload`. **`Idempotency-Key` mandatory.** Reuses the same handler as the user-tier `POST /api/v1/sources`. |
+| `POST` | `/api/v1/agent/sources` | `agent.sources:ingest` | Ingest a Source (always synchronous -- no `mode=async` on this tier). Body: `SubmitSourceJsonPayload`. **`Idempotency-Key` mandatory.** Reuses the same handler as the user-tier `POST /api/v1/sources`. |
 | `GET`  | `/api/v1/agent/sources/{id}` | `agent.sources:read` | Retrieve a Source row. 404 -> `resource_not_found`. |
+| `PUT`  | `/api/v1/agent/sources/{id}` | `agent.sources:ingest` | Replace in place (`content_base64` required). **`Idempotency-Key` mandatory.** |
+| `DELETE` | `/api/v1/agent/sources/{id}` | `agent.sources:ingest` | Remove a source incl. its stored original. 204. **`Idempotency-Key` mandatory**; a replay returns the original 204. |
 | `POST` | `/api/v1/agent/query` | `agent.query:run` | Answer with citations (engine per `FLYCANON_ANSWER_MODE`; RLM by default). Body: `AnswerRequest`. **`Idempotency-Key` mandatory.** Same dispatcher as the user-tier `POST /api/v1/query`. |
 | `POST` | `/api/v1/agent/query/stream` | `agent.query:run` | Streaming answer (Server-Sent Events). Body: `AnswerRequest`. **`Idempotency-Key` mandatory.** Same wire format as the user-tier `POST /api/v1/query/stream`. |
 | `POST` | `/api/v1/agent/search` | `agent.query:run` | Hybrid retrieval (BM25 + vector + RRF), no LLM. Body: `SearchRequest`. **`Idempotency-Key` mandatory.** Reuses the user-tier `POST /api/v1/search` handler. |
@@ -275,7 +309,7 @@ raises:
 | `GET`  | `/openapi.json` | The full OpenAPI 3 document. |
 | `GET`  | `/docs` | Swagger UI. |
 | `GET`  | `/redoc` | ReDoc UI. |
-| `GET`  | `/admin/` | pyfly admin dashboard (read-only by default). |
+| `GET`  | `/admin/` | pyfly admin dashboard. Its API requires authentication: a valid platform key (`X-API-Key`) when `FLYCANON_API_KEYS` is set; otherwise it answers 401 unless `FLYCANON_ADMIN_REQUIRE_AUTH=false`. |
 
 ## Error responses
 
@@ -307,6 +341,13 @@ Field-level validation details land under `errors[]`.
 | Status | Code slug | When |
 |--------|-----------|------|
 | 400 | `missing_tenant_context` | `X-Tenant-Id` / `X-Workspace-Id` header missing or malformed. |
+| 401 | `missing_api_key` / `invalid_api_key` | `FLYCANON_API_KEYS` is set and the request carried no key / an unknown key (`X-API-Key` or `Authorization: ApiKey`). |
+| 400 | `callback_url_not_allowed` | `callback_url` targets a non-globally-routable host (private, loopback, link-local, shared address space `100.64.0.0/10`, reserved) or a non-http scheme. |
+| 400 | `url_fetch_forbidden_host` / `url_fetch_unsupported_scheme` | `uri` targets a refused host / a non-http scheme. |
+| 413 | `url_fetch_too_large` | The origin's document exceeds `FLYCANON_MAX_BYTES`. |
+| 502 | `url_fetch_http_error` / `url_fetch_failed` / `url_fetch_too_many_redirects` | The origin answered 4xx/5xx, could not be reached, or redirected more than five times. |
+| 400 | `workspace_scope_mismatch` | `POST /workspaces/{id}:purge` with an `X-Workspace-Id` that differs from the path id. |
+| 404 | `source_not_found` | `DELETE`/`PUT` on an unknown source id (either tier). |
 | 400 | `invalid_request` | Pydantic validation, missing-field `ValueError` raised inside a controller helper. |
 | 404 | `resource_not_found` | Generic missing resource (knowledge item, source, conversation, candidate, job, workspace). |
 | 404 | `knowledge_item_not_found` / `knowledge_version_not_found` / `candidate_not_found` | Typed not-found variants for callers that prefer the specific slug. |

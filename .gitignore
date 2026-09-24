@@ -32,9 +32,9 @@ wheels/
 .uv/
 .pip/
 
-# uv.lock is generated locally; CI runs ``uv sync`` (not ``uv sync
-# --frozen``) so the lockfile doesn't need to ride in git.
-uv.lock
+# uv.lock IS committed (since 26.7.1): CI, the Dockerfile and every
+# developer resolve the exact same framework commits behind the pyfly /
+# agentic git tags and the same transitive wheels (``uv sync --locked``).
 
 # --- Java SDK build artefacts ------------------------------------------------
 sdks/java/target/

@@ -4,6 +4,214 @@ All notable changes to **flycanon** are documented here.
 
 ## [Unreleased]
 
+## [26.7.1] - 2026-09-24
+
+Hardening for a multi-tenant caller (the dworkers control plane, which
+runs one shared flycanon for all its tenants). Every item below was
+found by wiring that caller against 26.7.0.
+
+### Security
+
+- **`FLYCANON_API_KEYS` is now enforced.** The setting existed since
+  the first release and was read by nothing: anyone who could reach
+  port 8500 could read or write any tenant and mint agent tokens for
+  it. `ApiKeyMiddleware` now requires `X-API-Key: <key>` or
+  `Authorization: ApiKey <key>` on every `/api/v1/*` route except
+  `GET /api/v1/version`, and on the admin dashboard, whenever at least
+  one key is configured (`401 missing_api_key` / `401 invalid_api_key`,
+  RFC 7807, constant-time comparison). `/api/v1/agent/*` requests that
+  carry `X-Agent-Token` are exempt -- the token is their credential.
+  With the setting empty the service stays open as before and the boot
+  log says so (`api-key gate DISABLED`); with keys it logs
+  `api-key gate ENABLED: n key(s)`.
+- **Admin dashboard requires authentication** (`pyfly.admin.require-auth`
+  defaults to `true`, overridable with `FLYCANON_ADMIN_REQUIRE_AUTH=false`
+  for loopback dev). A validated platform key is bridged into pyfly's
+  `SecurityContext` (`ApiKeyPrincipalFilter`) so the dashboard answers
+  to the key and refuses everything else.
+- **Outbound host policy (SSRF guard).** `uri` fetches and
+  `callback_url` webhooks refuse every address that is not globally
+  routable -- loopback, private (RFC 1918 / ULA), link-local (instance
+  metadata), multicast, reserved, unspecified, RFC 6598 shared address
+  space (`100.64.0.0/10`: CGNAT, Tailscale, the pod CIDR of most
+  managed Kubernetes clusters), site-local, documentation and
+  benchmarking blocks; the decision is `ipaddress`'s `is_global`, the
+  named checks only shape the message -- literal, DNS-resolved, and on
+  every redirect hop (redirects are now followed by hand, at most
+  five) -- with `400 url_fetch_forbidden_host`
+  / `400 callback_url_not_allowed`. `FLYCANON_URL_FETCH_ALLOW_PRIVATE=true`
+  lifts the denylist for private dev stacks. Fetcher failures now render
+  as problem+json (`url_fetch_*` codes, 400 / 413 / 502) instead of the
+  framework 500. Documented gap: DNS rebinding between check and dial.
+- **Signed webhooks.** Async-ingest callbacks carry
+  `X-Flycanon-Signature: t=<unix>,v1=<hex HMAC-SHA256 over the raw
+  body>` when `FLYCANON_WEBHOOK_SECRET` is set (unsigned + boot warning
+  otherwise), and the payload now carries `tenant_id` / `workspace_id`.
+  `verify_signature` ships in `flycanon.web.conventions.webhook_signature`.
+
+### Added
+
+- **User-tier `DELETE /api/v1/sources/{id}`** (204; `404
+  source_not_found`). Both it and the agent-tier DELETE now **delete the
+  stored original from the object store** as well as the index, chunks
+  and row -- before, an "erased" document stayed readable by the RLM
+  corpus. `IntakeService.remove` returns a `SourceRemoval`, and its
+  `original_deleted` is a fact, not a promise: the store is asked
+  whether the object exists before the (no-op-on-missing) delete, and a
+  key that is not in this process's store is logged as a warning and
+  reported `false` -- the audit payload, the `SourceRemoved` event and
+  the purge counter all carry that same value.
+- **`POST /api/v1/workspaces/{id}:purge`** -> `WorkspacePurgeResult`.
+  Removes every source through the full pipeline, then knowledge items
+  / versions / citations / relations, candidates, conversations /
+  turns, ingest jobs / events and cost events in one transaction,
+  closes the workspace and emits `WorkspaceDeleted`; audit rows are
+  kept and a `workspace.purged` row records the counts. `X-Workspace-Id`
+  must equal the path id (`400 workspace_scope_mismatch`). Idempotent
+  in the literal sense: every counter is what this call erased,
+  `originals_deleted` counts objects actually found and deleted, and
+  `closed` is `true` only for the call that moved the row to `closed`
+  (`WorkspaceRepository.close_if_open`); a repeat is all zeros with
+  `closed: false`, restamps nothing, publishes no second
+  `WorkspaceDeleted` and writes no second audit row.
+- **Job-stream resume.** `GET /api/v1/ingest-jobs/{id}/stream` accepts
+  `?after_id=<id>` and the standard `Last-Event-ID` header, and stamps
+  `id:` on every `event` frame, so a reconnect no longer replays the
+  whole history (the docs had promised `after_id` since 26.5).
+- **`FLYCANON_ADMIN_DATABASE_URL`.** `WorkspaceRepository.list_for_tenant`
+  (`GET /api/v1/workspaces`) runs on this BYPASSRLS engine; under the
+  production `flycanon_app` role the request engine could only ever
+  return the caller's own header workspace.
+- **OpenAPI wire contract.** `openapi.json` declares `securitySchemes`
+  (`ApiKeyHeader`, `ApiKeyAuthorization`, `AgentToken`) and reusable
+  header parameters (`X-Tenant-Id`, `X-Workspace-Id`, `X-Correlation-Id`,
+  `Idempotency-Key`) attached to every operation, so a generated client
+  sends the mandatory headers. `security` describes what satisfies the
+  operation, not what the middleware lets through: `/api/v1/agent/*`
+  lists `AgentToken` alone (the platform key is neither required nor
+  accepted there -- the route answers `401 missing_agent_token`), every
+  other tenant operation lists the two platform-key forms.
+- **Scope on ingest events.** Every `flycanon.ingest` payload
+  (`SourceIngested`, `SourceReplaced`, `SourceRemoved`,
+  `SourceIngestionFailed`, `IngestSourceRequested`, `IngestSourceFinished`,
+  `IngestSourceFailed`) carries `tenant_id` / `workspace_id` -- including
+  the `IngestSourceRequested` the stuck-job sweep republishes:
+  `IngestJobRepository.reclaim_stuck` returns `ReclaimedJob(job_id,
+  tenant_id, workspace_id)` and the service has no unscoped publish path.
+
+### Changed
+
+- **Conversations use the same engine as `/query`.** `ConversationService`
+  is wired to `AnswerDispatcher`, so `POST /conversations/{id}/turn`
+  answers with RLM by default and only with the deprecated RAG engine
+  under `FLYCANON_ANSWER_MODE=rag` (then with the `X-Flycanon-Deprecation`
+  header, like `/query`).
+- **Framework pins moved** to pyfly `v26.09.04` and fireflyframework-agentic
+  `v26.06.14`; the unit suite, ruff and pyright pass unchanged on them.
+  **`uv.lock` is now committed** and CI / the Dockerfile run
+  `uv sync --locked`.
+- **API and worker no longer share a Postgres-outbox consumer group.**
+  pyfly's CQRS auto-configuration subscribes a cache-invalidation
+  bridge on `*` in every process, so an API on the worker's group
+  advanced the shared cursor past `IngestSourceRequested` events and
+  `?mode=async` jobs stayed `queued` forever. The API defaults to
+  `flycanon-api`, `flycanon worker` to `flycanon-workers`
+  (`FLYCANON_EDA_GROUP` overrides either).
+- **`FLYCANON_RLM_ANSWER_MODEL` removed.** `CanonSettings.rlm_answer_model`
+  shipped with the RLM settings in 26.7.0, documented as "the model for
+  the final single-shot answer synthesis", and was read by nothing: the
+  RLM's final answer is produced by the **root** model, either as the
+  `final(...)` tool call of the CodeAct loop or as the tool-less
+  forced-final turn when the loop runs out (both `chat_raw` turns on
+  `FLYCANON_RLM_ROOT_MODEL`); the sub model serves the `llm()` / `rlm()`
+  helpers and the self-consistency selector. There is no single-shot
+  synthesis step for a third model to drive, so the knob is gone rather
+  than wired; `CanonSettings` ignores unknown `FLYCANON_*` variables, so
+  an env file that still sets it boots unchanged. The docs, `env_template`
+  and the README now name two RLM models and say which one answers
+  (`tests/unit/rlm/test_which_model_answers.py` records the request
+  bodies of a whole session and pins it).
+- **Both entry points export pyfly's `_PYFLY_SERVER_*` variables.**
+  pyfly logs `server_started` in every process with `0.0.0.0:8080` as
+  the fallback. `flycanon serve` exports `uvicorn` / `0.0.0.0` /
+  `FLYCANON_PORT` so the line reports the real socket; `flycanon worker`,
+  which runs no server, exports `none` / `-` / `0` so the line cannot
+  claim a listener the process does not hold, and logs its own "no HTTP
+  listener in this process" line beside it.
+
+### Fixed
+
+- **The shipped image could not ingest.** The localfs object-store
+  default `./var/objects` resolved to the root-owned `/app/var` under the
+  `canon` user, so the first ingest failed with EACCES. The image now
+  exports `FLYCANON_OBJECT_STORE_LOCALFS_ROOT=/app/canon-data/objects`
+  (volume-backed) and pre-creates `/app/canon-data/objects` and
+  `/app/var/objects` with `canon` ownership.
+- **Sandbox child on macOS.** `RLIMIT_AS` is not settable on Darwin;
+  the RLM sandbox runner now tolerates that refusal there (CPU and
+  file-size caps still apply) instead of dying at startup, which had
+  failed 27 unit tests on every developer Mac.
+- **Zero search hits under the application role.** `PostgresCorpus`
+  (the BM25 channel) ran its reads on a bare Core connection of its own
+  engine, where the ORM `after_begin` listener that sets the
+  `app.tenant_id` / `app.workspace_id` GUCs never fires; under FORCE
+  RLS a `NOBYPASSRLS` serving role (`flycanon_app`, as
+  `docs/deployment.md` prescribes) therefore saw no chunk on the
+  lexical channel and no row on the RRF hydration, and `/search` and
+  `/agent/search` answered `hits: []` while the vector channel alone
+  found the chunk. Invisible in a stack where every process is the
+  database owner. Every scoped corpus read now binds the GUCs itself,
+  from the explicit `(tenant_id, workspace_id)` it is handed, through
+  `set_config(..., is_local => true)` inside the read's own transaction.
+  `tests/integration/test_search_under_app_role.py` runs the real
+  `RetrievalService.search` as a NOBYPASSRLS role and gets the row;
+  `tests/unit/test_postgres_corpus_scope_filter.py` pins the corpus
+  alone, with the bare-connection control that returns nothing.
+- **DDL at boot under the serving role.** `canon_chunk_vectors`
+  (framework `PgVectorVectorStore`: extension, table, HNSW + namespace
+  indexes, flycanon's RLS policy) and PyFly's `pyfly_eda_outbox` /
+  `pyfly_eda_offsets` were created lazily by whichever process first
+  touched them. PostgreSQL checks `CREATE` on the schema before it
+  honours `CREATE TABLE IF NOT EXISTS`, and demands ownership before
+  `CREATE INDEX IF NOT EXISTS`, so a serving role with USAGE + DML could
+  not boot the dense store (its first ingest died with
+  `permission denied for schema public`). New migration
+  `0016_boot_created_tables` creates all three as the migration role
+  (the vector table sized by `FLYCANON_EMBEDDING_DIMENSIONS` and the
+  `FLYCANON_PGVECTOR_HNSW_*` settings of the migrate job, the outbox
+  tables from PyFly's own DDL constants), and
+  `RlsPgVectorVectorStore._create_schema` is verify-first: on an
+  existing table it runs no DDL and refuses a width other than the
+  configured one (`VectorStoreError`, before the first vector is
+  written). PyFly's outbox DDL still runs in `start()` -- an upstream
+  ask -- so a non-owner serving role keeps `CREATE` on the schema and
+  membership of the owning role until it ships (`docs/deployment.md`).
+- **`temperature` refused by Claude 5 / 4.7 / 4.8.** The RLM client sent
+  `temperature: 0.0` on every Messages call; `claude-sonnet-5` answers
+  `400 temperature is deprecated for this model`, so `FLYCANON_RLM_*_MODEL`
+  could not name a current model. `request_shape(model)` now classifies
+  the id: Claude 4.6 and later (`claude-*-5*`, Opus 4.6/4.7/4.8, Sonnet
+  4.6) get `thinking: {"type": "adaptive"}`, no sampling knobs, and a
+  `max_tokens` floor of 8192 (thinking tokens count against the budget;
+  the old 1500 tool-turn ceiling came back as `stop_reason: max_tokens`
+  with no `tool_use`, which the session read as an empty plain-text
+  answer); Haiku 4.5, Sonnet 4.5 and any id that does not parse keep
+  the deterministic `temperature: 0.0` byte for byte. Price rows added
+  for Sonnet 5, Opus 5, Opus 4.6/4.7; Opus 4.8 corrected from the old
+  Opus tier (15/75) to 5/25.
+
+### Docs + SDK
+
+- README, QUICKSTART, `docs/payload-reference.md`, `docs/api-reference.md`,
+  `docs/async-ingest.md`, `docs/security-model.md`, `docs/deployment.md`,
+  `docs/eda-events.md`, `docs/conversations.md`, `docs/pipeline.md` and
+  `env_template` describe the routes that exist (JSON `content_base64`
+  intake, `?mode=async`, `/query/stream`, `/conversations/{id}/turn`,
+  `/query/suggest`, `/ingest-jobs/{id}/stream?after_id=`), the new
+  verbs, headers and settings, and the `no_answer` contract.
+- The Python SDK is realigned with the served routes and bumped to
+  `26.7.1` (see `sdks/python/CHANGELOG.md`).
+
 ## [26.7.0] - 2026-07-23
 
 ### Added

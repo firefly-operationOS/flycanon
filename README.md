@@ -14,7 +14,7 @@ over whole documents with citations — all behind a single HTTP service.
 [![agentic](https://img.shields.io/badge/genai-fireflyframework--agentic-purple)](https://github.com/fireflyframework/fireflyframework-agentic)
 [![OpenAPI](https://img.shields.io/badge/api-openapi%203.1-green)](docs/api-reference.md)
 [![vector store](https://img.shields.io/badge/vector--store-pgvector%20%7C%20qdrant%20%7C%20chroma-336791)](docs/architecture.md#retrieval-backend-pluggable-dense-store)
-[![Version](https://img.shields.io/badge/version-26.7.0-green.svg)](#)
+[![Version](https://img.shields.io/badge/version-26.7.1-green.svg)](#)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 
 </div>
@@ -69,10 +69,10 @@ object that carries, for every interaction:
 | **Knowledge graph**         | Typed edges between items (`related` / `depends_on` / `conflicts_with` / `replaces`) over `/api/v1/knowledge/{id}/relations`, plus a whole-canon view at `/api/v1/knowledge:graph` (JSON or `Accept: text/vnd.mermaid`). Conflict detection materialises `conflicts_with` edges automatically. |
 | **Candidates**              | Pre-canonical LLM proposals tied to a source. Accept / reject lifecycle materialises them into the knowledge chain.                            |
 | **Hybrid retrieval**        | `SearchResponse` with BM25 (Postgres `tsvector` + GIN) + dense vectors (`pgvector`) fused via Reciprocal Rank Fusion (RRF), optional cross-encoder rerank (Cohere / Voyage), and optional LLM query expansion. Each hit carries `chunk_id`, `source_id`, `source_filename`, `source_title`, `source_kind`, `source_uri`, `section_path`, `page`, the matching `content`, and the fused `score` — UIs can render citation labels without a second `GET /api/v1/sources/{id}`. |
-| **Grounded RAG answers**    | `AnswerResponse` with the answer + citation list (same enriched `Hit` shape — filename / title / kind / section / page populated), `model`, `elapsed_ms`. `POST /api/v1/query:stream` emits the same payload as Server-Sent Events. A grounded "I don't know" is `answer == ""` with empty citations — flycanon never hallucinates. |
+| **Grounded RAG answers**    | `AnswerResponse` with the answer + citation list (same enriched `Hit` shape — filename / title / kind / section / page populated), `model`, `elapsed_ms`, `no_answer`. `POST /api/v1/query/stream` emits the same payload as Server-Sent Events. A grounded "I don't know" is `no_answer: true` — flycanon never hallucinates. |
 | **Conversations**           | Multi-turn threads at `/api/v1/conversations/...` with rolling summary + last-N-turn context windowing. Each turn returns the same enriched citation set as `/query`; `:suggest` proposes 3-5 grounded follow-up questions. |
 | **Provenance**              | Resolved citation graph for one knowledge version plus the source summaries it touches plus the version chain of its item.                     |
-| **Async ingest jobs**       | `IngestJob` row + SSE event stream for any large or bulk ingest. Status / stage / progress / source id / RFC 7807 error envelope all surface through `GET /api/v1/ingest-jobs/{id}` and `GET /api/v1/ingest-jobs/{id}/stream` (cursor-resumable). |
+| **Async ingest jobs**       | `IngestJob` row + SSE event stream for any large or bulk ingest. Status / stage / progress / source id / RFC 7807 error envelope all surface through `GET /api/v1/ingest-jobs/{id}` and `GET /api/v1/ingest-jobs/{id}/stream` (resume with `?after_id=` or `Last-Event-ID`). |
 | **Knowledge quality**       | `GET /api/v1/knowledge:stale` returns per-item staleness scores (cosine vs fresh sources, 6h cached); `POST /api/v1/knowledge:detect-conflicts` runs an LLM-judged pairwise conflict scan, queues confirmed conflicts as candidates, and auto-creates the matching `conflicts_with` edges. |
 | **PII guardrail**           | Configurable regex scanner with four policies (`disabled` / `warn` / `redact` / `reject`). Runs on every intake path (initial submit, bulk, async, replace). `reject` returns RFC 7807 + `findings[]` so callers can surface a precise diagnostic. |
 | **Billing + cost stream**   | `/api/v1/billing` aggregates spend; `/events` drills into per-call breadcrumbs (correlation id, subject, latency); `/summary` returns 24h / 7d / 30d snapshots; `/top` and `/by-subject` answer "who" and "where did it go"; `/latency` returns p50 / p95 / p99 from the same cost-event stream. |
@@ -149,7 +149,7 @@ Fusion over the two channels.
 ## Answer modes (RLM default / RAG deprecated)
 
 The non-streaming answer path (`POST /api/v1/query`, `POST
-/api/v1/query:stream`, and the agent-tier equivalents) is served by one
+/api/v1/query/stream`, and the agent-tier equivalents) is served by one
 of two engines, selected by `FLYCANON_ANSWER_MODE`:
 
 | Mode | Engine | Status |
@@ -175,9 +175,10 @@ LLM) is unaffected and stays.
   dev/test, `s3` for production). Sources without a stored original
   (no `object_store_key`) are skipped by the RLM corpus builder.
 - **`ANTHROPIC_API_KEY`** must be set at runtime: the RLM engine calls
-  the Anthropic Messages API directly for all three RLM models
-  (`FLYCANON_RLM_ROOT_MODEL` / `FLYCANON_RLM_SUB_MODEL` /
-  `FLYCANON_RLM_ANSWER_MODEL`, all default `anthropic:claude-sonnet-4-6`).
+  the Anthropic Messages API directly for both RLM models
+  (`FLYCANON_RLM_ROOT_MODEL`, which also produces the final answer, and
+  `FLYCANON_RLM_SUB_MODEL` for the REPL's sub-calls; both default
+  `anthropic:claude-sonnet-4-6`).
 
 See [docs/deployment.md](docs/deployment.md#answer-mode-rlm-default--rag-deprecated)
 for every RLM / object-store env var and its default.
@@ -189,14 +190,16 @@ for every RLM / object-store env var and its default.
 | Concern                                                          | Endpoint(s)                                |
 | ---------------------------------------------------------------- | ------------------------------------------ |
 | Source intake (any format, bytes / base64 / URL)                 | `POST /api/v1/sources`                     |
-| Bulk + async intake (jobs + SSE progress)                        | `POST /api/v1/sources:bulk`, `:async`, `GET /api/v1/ingest-jobs/{id}/stream` |
+| Bulk + async intake (jobs + SSE progress)                        | `POST /api/v1/sources:bulk`, `POST /api/v1/sources?mode=async`, `GET /api/v1/ingest-jobs/{id}/stream` |
+| Source removal + workspace purge (originals included)            | `DELETE /api/v1/sources/{id}`, `POST /api/v1/workspaces/{id}:purge` |
 | Source re-ingest (preserves the row id)                          | `PUT /api/v1/sources/{id}`                 |
 | Source lookup / pagination                                       | `GET /api/v1/sources[/{id}]`               |
 | Knowledge-item lifecycle (draft / published / superseded / retired) | `/api/v1/knowledge/...`                 |
 | Versioned diff between two knowledge versions                    | `GET /api/v1/knowledge/{id}/diff`          |
 | Knowledge graph (typed edges + JSON / Mermaid view)              | `/api/v1/knowledge/{id}/relations`, `GET /api/v1/knowledge:graph` |
 | Hybrid retrieval (+ optional rerank + query expansion)           | `POST /api/v1/search`                      |
-| Answer with citations (RLM by default, RAG opt-in; + streaming)  | `POST /api/v1/query`, `POST /api/v1/query:stream` |
+| Answer with citations (RLM by default, RAG opt-in; + streaming)  | `POST /api/v1/query`, `POST /api/v1/query/stream` |
+| Multi-turn conversations on the same engine                       | `POST /api/v1/conversations`, `POST /api/v1/conversations/{id}/turn` |
 | Multi-turn conversations + suggested follow-ups                  | `/api/v1/conversations/...`                |
 | Candidate proposals (pre-canonical)                              | `/api/v1/candidates/...`                   |
 | Provenance graph                                                 | `GET /api/v1/knowledge/{id}/provenance`    |
@@ -231,34 +234,54 @@ task docker:up             # api + worker + postgres(pgvector) + redis
 curl -fsS http://localhost:8500/actuator/health | jq .
 ```
 
-Ingest a sample DOCX (the binary normaliser handles every format —
-this is just the simplest curl):
+Every tenant route needs two scope headers and, when
+`FLYCANON_API_KEYS` is set, the platform key. Export them once:
 
 ```bash
-curl -fsS -X POST http://localhost:8500/api/v1/sources \
-  -F "file=@./tests/fixtures/sample.docx" \
-  -F 'metadata={"title":"Sample","domain":"process_owner"};type=application/json' \
-  | jq .
+export CANON_HEADERS=(-H 'X-Tenant-Id: acme' -H 'X-Workspace-Id: ws-demo' \
+                      -H 'X-API-Key: change-me' -H 'Content-Type: application/json')
+```
+
+Ingest a sample DOCX. The intake endpoint is **JSON only** -- the bytes
+travel base64-encoded in `content_base64` (there is no multipart form;
+the binary normaliser sniffs the real format from the bytes):
+
+```bash
+curl -fsS -X POST http://localhost:8500/api/v1/sources "${CANON_HEADERS[@]}" \
+  -d "{\"filename\":\"sample.docx\",
+       \"content_base64\":\"$(base64 < ./tests/fixtures/sample.docx | tr -d '\\n')\",
+       \"metadata\":{\"title\":\"Sample\",\"domain\":\"process\"}}" | jq .
+```
+
+Large or bulk uploads go through the queued path -- the same body with
+`?mode=async` returns an `IngestJob` you can poll or stream:
+
+```bash
+JOB=$(curl -fsS -X POST 'http://localhost:8500/api/v1/sources?mode=async' \
+  "${CANON_HEADERS[@]}" -d @payload.json | jq -r .id)
+curl -fsS -N "http://localhost:8500/api/v1/ingest-jobs/$JOB/stream" "${CANON_HEADERS[@]}"
 ```
 
 Search the corpus:
 
 ```bash
-curl -fsS -X POST http://localhost:8500/api/v1/search \
-  -H 'Content-Type: application/json' \
+curl -fsS -X POST http://localhost:8500/api/v1/search "${CANON_HEADERS[@]}" \
   -d '{"query":"what does the document say about scope","top_k":5}' | jq .
 ```
 
-Ask a grounded question:
+Ask a grounded question (`POST /api/v1/query/stream` emits the same
+answer as Server-Sent Events):
 
 ```bash
-curl -fsS -X POST http://localhost:8500/api/v1/query \
-  -H 'Content-Type: application/json' \
+curl -fsS -X POST http://localhost:8500/api/v1/query "${CANON_HEADERS[@]}" \
   -d '{"question":"Summarise the scope section in three sentences."}' | jq .
 ```
 
-A grounded "I don't know" looks like `{"answer":"","citations":[]}`
-— flycanon never hallucinates.
+A grounded "I don't know" is `no_answer: true` (the `answer` text may
+still explain what was searched) -- branch on `no_answer`, not on an
+empty string. Multi-turn: `POST /api/v1/conversations` opens a session
+and `POST /api/v1/conversations/{id}/turn` appends a question; turns
+run on the same answer engine as `/query`.
 
 ---
 
@@ -283,8 +306,15 @@ task openapi             # /openapi.json
 
 ## SDKs
 
-Both SDKs pin their version to the service's CalVer (`26.5.6`), so
-the client and server upgrade in lockstep.
+Both SDKs are published at `26.5.7` and target the route set of that
+release. The 26.7.x server keeps every route they call except the ones
+renamed since (`sources:async` -> `sources?mode=async`,
+`query:stream` -> `query/stream`, `conversations/{id}/turns` ->
+`conversations/{id}/turn`); the Python SDK is realigned in this
+release, the Java SDK follows with its next tag. Generate fresh clients
+from `openapi.json`, which since 26.7.1 declares the `X-Tenant-Id` /
+`X-Workspace-Id` / `X-Agent-Token` / `Idempotency-Key` headers and the
+API-key security schemes.
 
 | SDK | Highlights |
 |-----|------------|

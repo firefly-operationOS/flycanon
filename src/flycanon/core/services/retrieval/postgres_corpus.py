@@ -41,16 +41,37 @@ stable:
 
 This module never reads or writes ``canon_chunk_vectors`` -- the
 dense projection lives on :class:`PgVectorVectorStore`.
+
+Row-level security
+------------------
+
+``canon_chunks`` and ``canon_sources`` are FORCE-RLS tables (migration
+``0013``): a role without ``BYPASSRLS`` sees only the rows whose
+``(tenant_id, workspace_id)`` equal the ``app.tenant_id`` /
+``app.workspace_id`` GUCs of the current transaction, and sees NOTHING
+when they are unset. The ORM path sets them through the ``after_begin``
+listener in :mod:`flycanon.web.conventions.db`; this corpus, however,
+runs its reads on a bare Core connection of its own engine, where no
+Session -- and so no listener -- is involved. Until 26.7.1 that meant
+the BM25 channel returned zero rows under the application role, and
+the fused ``/search`` answered ``hits: []`` while the vector channel
+alone found the chunk (measured by the dworkers programme on
+2026-09-17 against a ``flycanon_app`` role; invisible in a stack where
+every process is the database owner). Every scoped read here therefore
+binds the GUCs itself, from the explicit scope it is handed, inside the
+same transaction as the query -- see :meth:`_scoped_connection`.
 """
 
 from __future__ import annotations
 
 import asyncio
 import logging
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from typing import Any
 
 from sqlalchemy import text
-from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
+from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine, create_async_engine
 
 from flycanon.core.services.retrieval.fusion import ChunkHit, StoredChunk
 
@@ -75,6 +96,44 @@ class PostgresCorpus:
                 if self._engine is None:
                     self._engine = create_async_engine(self._database_url, pool_pre_ping=True)
         return self._engine
+
+    @asynccontextmanager
+    async def _scoped_connection(
+        self, *, tenant_id: str, workspace_id: str
+    ) -> AsyncIterator[AsyncConnection]:
+        """Open a transaction with the RLS GUCs bound to *tenant_id* / *workspace_id*.
+
+        ``SET LOCAL`` cannot take bind parameters, so the values go through
+        ``set_config(name, value, is_local => true)``, which can -- no SQL
+        literal is ever assembled from a caller-supplied slug, whatever the
+        validator upstream did. ``is_local`` ties the setting to the
+        transaction ``engine.begin()`` opened, so it rolls off at commit and
+        never leaks into the next checkout of the pooled connection (the
+        ``after_begin`` listener relies on the same property).
+
+        The scope is the explicit ``(tenant_id, workspace_id)`` the read was
+        handed, not the request ContextVar: :class:`_ScopedCorpus` binds the
+        request scope onto every call already, the same pair the SQL
+        ``WHERE`` clause filters on, so the policy and the predicate can never
+        disagree, and a caller outside a request (a test, an admin tool)
+        gets exactly the scope it named.
+
+        On a non-Postgres dialect (SQLite in unit tests) nothing is set: the
+        GUCs are a Postgres concept and the ``WHERE`` clause alone scopes the
+        read, as before.
+        """
+        engine = await self._ensure_engine()
+        async with engine.begin() as conn:
+            if conn.dialect.name == "postgresql":
+                await conn.execute(
+                    text("SELECT set_config('app.tenant_id', :tenant_id, true)"),
+                    {"tenant_id": tenant_id},
+                )
+                await conn.execute(
+                    text("SELECT set_config('app.workspace_id', :workspace_id, true)"),
+                    {"workspace_id": workspace_id},
+                )
+            yield conn
 
     # ------------------------------------------------------------------
     # Lifecycle (no-ops -- the schema is owned by Alembic)
@@ -103,6 +162,13 @@ class PostgresCorpus:
         return 0
 
     async def clear_all(self) -> None:
+        """Delete every chunk of every scope -- an operator's reset, not a request path.
+
+        Deliberately unscoped and without GUCs: under a ``NOBYPASSRLS``
+        role the FORCE-RLS policy makes this a no-op (zero rows match an
+        unset GUC), which is the right outcome -- only the BYPASSRLS
+        maintenance role can wipe the corpus, and it does so on purpose.
+        """
         engine = await self._ensure_engine()
         async with engine.begin() as conn:
             await conn.execute(text("DELETE FROM canon_chunks"))
@@ -133,12 +199,13 @@ class PostgresCorpus:
         ``tsvector @@ plainto_tsquery`` match so a foreign-scope
         chunk can never bleed into another workspace's hit list. The
         composite is selective enough that the GIN-on-tsv index still
-        gets picked for the match.
+        gets picked for the match. The same pair is bound as the RLS
+        GUCs for the transaction (:meth:`_scoped_connection`), so the
+        query returns rows under a ``NOBYPASSRLS`` role too.
         """
         q = (query or "").strip()
         if not q:
             return []
-        engine = await self._ensure_engine()
         sql = text(
             """
             SELECT
@@ -159,7 +226,7 @@ class PostgresCorpus:
             LIMIT :k
             """
         )
-        async with engine.connect() as conn:
+        async with self._scoped_connection(tenant_id=tenant_id, workspace_id=workspace_id) as conn:
             result = await conn.execute(
                 sql,
                 {
@@ -212,11 +279,11 @@ class PostgresCorpus:
         ``tenant_id`` / ``workspace_id`` are filtered on the SQL side
         so a caller that presents a foreign chunk id (whether by bug
         or by malice) cannot read content from a workspace they don't
-        own.
+        own -- and bound as the RLS GUCs of the transaction, so the
+        hydration works under a ``NOBYPASSRLS`` role.
         """
         if not chunk_ids:
             return []
-        engine = await self._ensure_engine()
         sql = text(
             """
             SELECT
@@ -235,7 +302,7 @@ class PostgresCorpus:
               AND c.id = ANY(:ids)
             """
         )
-        async with engine.connect() as conn:
+        async with self._scoped_connection(tenant_id=tenant_id, workspace_id=workspace_id) as conn:
             result = await conn.execute(
                 sql,
                 {

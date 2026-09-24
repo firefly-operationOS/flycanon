@@ -80,6 +80,64 @@ class InvalidRequest(FireflyHTTPException):
     title = "Invalid request"
 
 
+# -- 401 -------------------------------------------------------------
+
+
+class MissingApiKey(FireflyHTTPException):
+    """``FLYCANON_API_KEYS`` is configured and the request carried no key.
+
+    Raised (rendered, in fact -- see :class:`ApiKeyMiddleware`) for
+    every ``/api/v1/*`` and ``/admin/*`` request that presents neither
+    ``X-API-Key`` nor ``Authorization: ApiKey <key>`` while the
+    service runs in keyed mode. Agent-tier routes that carry
+    ``X-Agent-Token`` are exempt: the token is their credential.
+    """
+
+    status = 401
+    code = "missing_api_key"
+    title = "Missing API key"
+
+
+class InvalidApiKey(FireflyHTTPException):
+    """A key was presented but matches none of ``FLYCANON_API_KEYS``."""
+
+    status = 401
+    code = "invalid_api_key"
+    title = "Invalid API key"
+
+
+class CallbackUrlNotAllowed(FireflyHTTPException):
+    """``callback_url`` points at a private, loopback or link-local host.
+
+    The async-ingest webhook is an outbound POST the service makes on
+    the caller's behalf; letting it target ``127.0.0.1``, RFC 1918
+    space or the cloud metadata endpoint would turn the ingest API
+    into a server-side request forgery primitive. The same host policy
+    that guards ``uri`` fetches (:class:`UrlFetcher`) rejects it at
+    submit time so the job is never queued.
+    """
+
+    status = 400
+    code = "callback_url_not_allowed"
+    title = "Callback URL not allowed"
+
+
+class WorkspaceScopeMismatch(FireflyHTTPException):
+    """The path ``{workspace_id}`` and ``X-Workspace-Id`` disagree.
+
+    Raised by the destructive workspace verbs (``:purge``). Under the
+    production RLS role every row visible to the request is already
+    filtered by the header workspace, so a purge addressed to a
+    different path id would silently touch nothing -- or, under a
+    BYPASSRLS dev role, touch the wrong workspace. Refusing the
+    ambiguity up front keeps the verb deterministic on both roles.
+    """
+
+    status = 400
+    code = "workspace_scope_mismatch"
+    title = "Workspace scope mismatch"
+
+
 # -- 402 -------------------------------------------------------------
 
 
@@ -134,6 +192,65 @@ class IdempotencyKeyConflict(FireflyHTTPException):
     status = 409
     code = "idempotency_key_conflict"
     title = "Idempotency-Key conflict"
+
+
+# -- URL fetch (400 / 413 / 502) ---------------------------------------
+#
+# ``UrlFetcher`` raises a plain ``UrlFetchError`` carrying one of these
+# codes; the conventions handler bridges it to the matching class so a
+# refused ``uri`` renders as the documented problem+json instead of the
+# framework's generic 500. Client-side mistakes (scheme, forbidden host)
+# are 400s, an oversize origin is 413, and anything the ORIGIN did wrong
+# (4xx/5xx, network failure, redirect loop) is 502 Bad Gateway -- the
+# caller's request was fine, the upstream was not.
+
+
+class UrlFetchForbiddenHost(FireflyHTTPException):
+    status = 400
+    code = "url_fetch_forbidden_host"
+    title = "URL host not allowed"
+
+
+class UrlFetchUnsupportedScheme(FireflyHTTPException):
+    status = 400
+    code = "url_fetch_unsupported_scheme"
+    title = "URL scheme not supported"
+
+
+class UrlFetchTooLarge(FireflyHTTPException):
+    status = 413
+    code = "url_fetch_too_large"
+    title = "Fetched document too large"
+
+
+class UrlFetchUpstreamError(FireflyHTTPException):
+    status = 502
+    code = "url_fetch_http_error"
+    title = "Origin returned an error"
+
+
+class UrlFetchFailed(FireflyHTTPException):
+    status = 502
+    code = "url_fetch_failed"
+    title = "Origin could not be fetched"
+
+
+class UrlFetchTooManyRedirects(FireflyHTTPException):
+    status = 502
+    code = "url_fetch_too_many_redirects"
+    title = "Origin redirected too many times"
+
+
+#: ``UrlFetchError.code`` -> rendered class. Unknown codes fall back to
+#: :class:`UrlFetchFailed` so a future fetcher code still renders as 502.
+URL_FETCH_EXCEPTIONS: dict[str, type[FireflyHTTPException]] = {
+    UrlFetchForbiddenHost.code: UrlFetchForbiddenHost,
+    UrlFetchUnsupportedScheme.code: UrlFetchUnsupportedScheme,
+    UrlFetchTooLarge.code: UrlFetchTooLarge,
+    UrlFetchUpstreamError.code: UrlFetchUpstreamError,
+    UrlFetchFailed.code: UrlFetchFailed,
+    UrlFetchTooManyRedirects.code: UrlFetchTooManyRedirects,
+}
 
 
 # -- 500 -------------------------------------------------------------

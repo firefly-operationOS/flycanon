@@ -50,6 +50,7 @@ import logging
 import mimetypes
 import os
 import uuid
+from dataclasses import dataclass
 from typing import Any
 
 from fireflyframework_agentic.content.binary import BinaryArtifact, BinaryNormalizer
@@ -80,6 +81,24 @@ from flycanon.models.repositories.chunk_repository import ChunkRepository
 from flycanon.models.repositories.source_repository import SourceRepository
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True, slots=True)
+class SourceRemoval:
+    """What :meth:`IntakeService.remove` actually did.
+
+    ``original_deleted`` is the fact the audit row, the ``SourceRemoved``
+    event and the workspace purge counter all report. It is returned
+    rather than left implicit so no caller has to guess it from the
+    row it read before the call: the purge service did exactly that in
+    the first 26.7.1 cut (counted ``object_store_key`` being set) and
+    reported ``originals_deleted: 2`` for two originals that were still
+    on disk, because the API process's object store was not the one the
+    worker had written to.
+    """
+
+    source_id: str
+    original_deleted: bool
 
 
 @service
@@ -469,6 +488,8 @@ class IntakeService:
                     event_type="SourceReplaced",
                     payload={
                         "source_id": updated_row.id,
+                        "tenant_id": tenant_id,
+                        "workspace_id": workspace_id,
                         "kind": updated_row.kind,
                         "content_sha256": updated_row.content_sha256,
                         "n_chunks": updated_row.n_chunks,
@@ -497,8 +518,12 @@ class IntakeService:
         workspace_id: str,
         actor: str | None = None,
         correlation_id: str | None = None,
-    ) -> None:
+    ) -> SourceRemoval:
         """Remove a source and every indexed projection for it.
+
+        Returns a :class:`SourceRemoval` stating whether a stored
+        original was actually deleted, so callers that aggregate
+        (the workspace purge) report the same fact the audit row does.
 
         The flow:
 
@@ -514,12 +539,20 @@ class IntakeService:
         3. Delete the chunk rows
            (:meth:`ChunkRepository.replace_for_source` with an empty
            set) and then the source row itself.
-        4. Audit ``source.removed`` + publish a ``SourceRemoved`` EDA
+        4. Delete the stored original from the object store when the
+           row carries an ``object_store_key``. Until 26.7.1 removal
+           left the bytes behind, which for a tenant's off-boarding or
+           a retention delete meant the document the caller asked to
+           erase stayed readable by the RLM answer path (it reads
+           originals, not chunks) and stayed on disk / in the bucket.
+           The delete is attempted BEFORE the row goes so a failure
+           leaves a row that still points at the object and can be
+           retried, rather than an orphaned object nobody references.
+           A missing object (``FileNotFoundError``) is not an error --
+           the store port defines delete as idempotent.
+        5. Audit ``source.removed`` + publish a ``SourceRemoved`` EDA
            event so downstream projections can re-sync, mirroring
            ``SourceIngested`` / ``SourceReplaced``.
-
-        Object-store originals are intentionally NOT touched --
-        removal only covers the searchable projections + the row.
         """
         existing = await self._sources.get(
             source_id,
@@ -535,6 +568,7 @@ class IntakeService:
             workspace_id=workspace_id,
         )
         await self._chunks.replace_for_source(source_id, [])
+        original_deleted = await self._delete_original(existing)
         await self._sources.delete(existing)
 
         await self._audit.record(
@@ -548,6 +582,7 @@ class IntakeService:
             payload={
                 "kind": existing.kind,
                 "content_sha256": existing.content_sha256,
+                "original_deleted": original_deleted,
             },
         )
         if self._publisher is not None:
@@ -557,8 +592,11 @@ class IntakeService:
                     event_type="SourceRemoved",
                     payload={
                         "source_id": source_id,
+                        "tenant_id": tenant_id,
+                        "workspace_id": workspace_id,
                         "kind": existing.kind,
                         "content_sha256": existing.content_sha256,
+                        "original_deleted": original_deleted,
                     },
                     headers={"correlation-id": correlation_id} if correlation_id else None,
                 )
@@ -568,7 +606,53 @@ class IntakeService:
                     source_id,
                     exc,
                 )
-        logger.info("intake removed id=%s kind=%s", source_id, existing.kind)
+        logger.info(
+            "intake removed id=%s kind=%s original_deleted=%s",
+            source_id,
+            existing.kind,
+            original_deleted,
+        )
+        return SourceRemoval(source_id=source_id, original_deleted=original_deleted)
+
+    async def _delete_original(self, source: SourceRow) -> bool:
+        """Delete the stored original for ``source``; return whether one was removed.
+
+        ``False`` when the row never had a key (``store_originals`` was
+        off at ingest, or the put failed and the ingest continued) or
+        when the object is not in the store. Any other store failure
+        propagates so the caller's row is left intact and the removal
+        can be retried -- see :meth:`remove`.
+
+        The existence check comes first because the :class:`ObjectStore`
+        port defines ``delete`` as a no-op on a missing key (localfs
+        unlinks with ``missing_ok``, S3's ``DeleteObject`` is silent), so
+        ``delete`` alone cannot tell "erased" from "was never here". The
+        difference matters: a row whose key is not in this process's
+        store means the API and the worker are looking at different
+        stores (a localfs root that is not a shared volume, a bucket
+        mismatch) and the bytes the caller asked to erase are still
+        wherever the worker put them. That is logged as a warning with
+        the key, and reported as ``original_deleted=False`` rather than
+        claimed as done. The check-then-delete pair is not atomic; a
+        concurrent delete of the same key can only turn a ``True`` into
+        an over-report of one object that is gone either way.
+        """
+        key = getattr(source, "object_store_key", None)
+        if not key:
+            return False
+        if not await self._object_store.exists(key):
+            logger.warning(
+                "intake remove: source %s points at object %r that is not in the object store; "
+                "the original was NOT deleted here (is the API's object store the worker's?)",
+                source.id,
+                key,
+            )
+            return False
+        try:
+            await self._object_store.delete(key)
+        except FileNotFoundError:
+            return False
+        return True
 
     def _apply_pii_policy(
         self,
@@ -730,6 +814,8 @@ class IntakeService:
                 event_type=self._settings.source_ingested_event,
                 payload={
                     "source_id": source.id,
+                    "tenant_id": source.tenant_id,
+                    "workspace_id": source.workspace_id,
                     "kind": source.kind,
                     "content_sha256": source.content_sha256,
                     "n_chunks": source.n_chunks,
@@ -754,6 +840,8 @@ class IntakeService:
                 event_type=self._settings.source_ingestion_failed_event,
                 payload={
                     "source_id": source.id,
+                    "tenant_id": source.tenant_id,
+                    "workspace_id": source.workspace_id,
                     "kind": source.kind,
                     "code": getattr(exc, "code", "ingestion_failed"),
                     "message": str(exc),

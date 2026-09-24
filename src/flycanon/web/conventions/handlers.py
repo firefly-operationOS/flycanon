@@ -45,10 +45,12 @@ from pyfly.kernel import (
 from flycanon.web.conventions.context import current_tenant_context
 from flycanon.web.conventions.errors import ProblemDetail
 from flycanon.web.conventions.exceptions import (
+    URL_FETCH_EXCEPTIONS,
     CommandProcessingError,
     FireflyHTTPException,
     InvalidRequest,
     ResourceNotFound,
+    UrlFetchFailed,
 )
 
 _MEDIA_TYPE = "application/problem+json"
@@ -75,6 +77,19 @@ def _problem_response(problem: ProblemDetail) -> JSONResponse:
         content=problem.model_dump(mode="json"),
         media_type=_MEDIA_TYPE,
     )
+
+
+def problem_response_for(exc: FireflyHTTPException, request: Request) -> JSONResponse:
+    """Render ``exc`` as the canonical ``application/problem+json`` response.
+
+    Public counterpart of the private handlers above for code that runs
+    *outside* FastAPI's ``ExceptionMiddleware`` -- an outer Starlette
+    middleware such as :class:`ApiKeyMiddleware` cannot raise and expect
+    ``register_exception_handlers`` to catch it (the exception would
+    escape to ``ServerErrorMiddleware`` and surface as a bare 500), so it
+    builds the very same envelope through this helper instead.
+    """
+    return _problem_response(_to_problem(exc, request))
 
 
 def _trim_loc(loc: tuple[Any, ...] | list[Any]) -> tuple[Any, ...]:
@@ -126,6 +141,24 @@ async def _on_pyfly_invalid_request(request: Request, exc: Exception) -> JSONRes
     return _problem_response(_to_problem(wrapped, request))
 
 
+def url_fetch_error_to_http(exc: Exception) -> FireflyHTTPException:
+    """Map a fetcher refusal (``UrlFetchError``, duck-typed on ``code``) to its rendered class."""
+    code = getattr(exc, "code", "")
+    cls = URL_FETCH_EXCEPTIONS.get(code, UrlFetchFailed)
+    return cls(str(exc))
+
+
+async def _on_url_fetch(request: Request, exc: Exception) -> JSONResponse:
+    """Bridge ``UrlFetchError`` (a plain service exception) to problem+json.
+
+    ``POST /api/v1/sources`` with ``uri`` (user and agent tiers) is the
+    only raiser. Without this bridge a refused host surfaced as the
+    framework's generic 500 and the caller could not tell "you pointed
+    me at 169.254.169.254" from "the service crashed".
+    """
+    return _problem_response(_to_problem(url_fetch_error_to_http(exc), request))
+
+
 async def _on_pyfly_command_processing(request: Request, exc: Exception) -> JSONResponse:
     """Unwrap ``CommandProcessingException`` and render its cause.
 
@@ -175,3 +208,11 @@ def register_exception_handlers(app: FastAPI) -> None:
     app.add_exception_handler(ResourceNotFoundException, _on_pyfly_resource_not_found)
     app.add_exception_handler(InvalidRequestException, _on_pyfly_invalid_request)
     app.add_exception_handler(CommandProcessingException, _on_pyfly_command_processing)
+    # Imported here, not at module top: ``flycanon.core.services.sources``
+    # (the fetcher's package) imports the ingestion errors, which import
+    # this conventions package -- a top-level import would be circular.
+    # ``register_exception_handlers`` runs from ``flycanon.main`` once
+    # every module is loaded, so the deferred import is safe.
+    from flycanon.core.services.sources.url_fetcher import UrlFetchError
+
+    app.add_exception_handler(UrlFetchError, _on_url_fetch)

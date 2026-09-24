@@ -375,16 +375,23 @@ class BulkSourcesResponse(BaseModel):
 
 
 class IngestJob(BaseModel):
-    """Header view of an async ingest job."""
+    """Header view of an async ingest job (``queued | running | succeeded | failed``)."""
 
     id: str
     status: str
-    progress: float = 0.0
-    stage: str | None = None
     source_id: str | None = None
+    attempts: int = 0
+    filename: str | None = None
+    content_type: str | None = None
+    uri: str | None = None
+    actor: str | None = None
+    correlation_id: str | None = None
+    callback_url: str | None = None
     error_code: str | None = None
     error_message: str | None = None
     created_at: datetime
+    started_at: datetime | None = None
+    finished_at: datetime | None = None
     updated_at: datetime
 
 
@@ -467,12 +474,17 @@ class ConversationHeader(BaseModel):
 
 
 class ConversationTurn(BaseModel):
-    id: str
+    """One turn, as ``POST /api/v1/conversations/{id}/turn`` returns it (26.7.1 shape)."""
+
+    id: int
     conversation_id: str
-    query: str
-    answer: str
+    turn_index: int = 1
+    question: str
+    answer: str | None = None
     citations: list[Hit] = Field(default_factory=list)
     model: str | None = None
+    elapsed_ms: int | None = None
+    no_answer: bool = False
     created_at: datetime
 
 
@@ -480,6 +492,8 @@ class Conversation(BaseModel):
     id: str
     title: str | None = None
     summary: str | None = None
+    actor: str | None = None
+    model: str | None = None
     turns: list[ConversationTurn] = Field(default_factory=list)
     created_at: datetime
     updated_at: datetime
@@ -487,14 +501,24 @@ class Conversation(BaseModel):
 
 class CreateConversationRequest(BaseModel):
     title: str | None = None
-    actor: str | None = None
+    model: str | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 class CreateConversationTurnRequest(BaseModel):
-    query: str
-    max_chunks: int | None = None
-    hybrid_mode: str | None = None
-    actor: str | None = None
+    """Body of ``POST /api/v1/conversations/{id}/turn``."""
+
+    question: str
+    top_k: int | None = None
+    instructions: str | None = None
+
+
+class SuggestRequest(BaseModel):
+    """Body of ``POST /api/v1/query/suggest``."""
+
+    question: str
+    answer: str | None = None
+    n: int = 3
 
 
 class SuggestionsResponse(BaseModel):
@@ -759,6 +783,27 @@ class WorkspaceSummary(BaseModel):
     created_at: datetime
     updated_at: datetime
     closed_at: datetime | None = None
+
+
+class WorkspacePurgeResult(BaseModel):
+    """Response of ``POST /api/v1/workspaces/{id}:purge`` (26.7.1)."""
+
+    tenant_id: str
+    workspace_id: str
+    sources_removed: int = 0
+    originals_deleted: int = 0
+    chunks_removed: int = 0
+    knowledge_items_removed: int = 0
+    knowledge_versions_removed: int = 0
+    citations_removed: int = 0
+    knowledge_relations_removed: int = 0
+    candidates_removed: int = 0
+    conversations_removed: int = 0
+    conversation_turns_removed: int = 0
+    ingest_jobs_removed: int = 0
+    ingest_job_events_removed: int = 0
+    cost_events_removed: int = 0
+    closed: bool = False
 
 
 # ----------------------------------------------------------------------

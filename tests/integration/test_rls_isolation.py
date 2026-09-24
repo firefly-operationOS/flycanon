@@ -392,11 +392,12 @@ def test_canon_agent_tokens_tenant_only_policy(
 
 
 # ---------------------------------------------------------------------------
-# Runtime-created table: canon_chunk_vectors. The dense projection now uses the
-# framework's namespace-based pgvector adapter; flycanon's
-# ``RlsPgVectorVectorStore`` installs a NAMESPACE-keyed RLS policy in-band with
-# CREATE TABLE (``app.scope_namespace`` GUC). This drives that real bootstrap
-# and verifies the policy isolates by namespace and fails closed when unset.
+# canon_chunk_vectors: created by migration 0016 since 26.7.1 (namespace shape,
+# HNSW index, FORCEd namespace-keyed RLS policy on the ``app.scope_namespace``
+# GUC), no longer at boot. flycanon's ``RlsPgVectorVectorStore`` is verify-first
+# on an existing table: ``initialise`` runs no DDL and only checks the width.
+# This drives that boot path against the migrated table and verifies the
+# policy isolates by namespace and fails closed when unset.
 # ---------------------------------------------------------------------------
 
 
@@ -405,18 +406,21 @@ def test_canon_chunk_vectors_namespace_rls_isolation(
     pg_admin_engine: sa.Engine,
     pg_app_engine: sa.Engine,
 ) -> None:
-    """Boot the pgvector table via RlsPgVectorVectorStore; verify namespace RLS."""
+    """Boot the dense store on the migrated pgvector table; verify namespace RLS."""
     import asyncio
 
+    from flycanon.config import get_settings
     from flycanon.core.services.retrieval.pgvector_store import RlsPgVectorVectorStore
 
-    # Drive the production bootstrap path -- ``initialise`` creates the table
-    # AND installs the namespace-keyed RLS policy. The store accepts the
-    # container's ``+psycopg2`` URL and coerces it to an asyncpg DSN itself.
+    # The width 0016 baked into the column when the module fixture ran alembic
+    # (FLYCANON_EMBEDDING_DIMENSIONS, or the settings default). The store must
+    # be asked for the same width -- any other is refused, by design.
+    dimension = get_settings().embedding_dimensions
+
     async def _bootstrap() -> None:
         store = RlsPgVectorVectorStore(
             database_url=pg_container.get_connection_url(),
-            dimension=3,
+            dimension=dimension,
             table_name="canon_chunk_vectors",
         )
         try:
@@ -426,9 +430,13 @@ def test_canon_chunk_vectors_namespace_rls_isolation(
 
     asyncio.run(_bootstrap())
 
-    # The runtime-created table needs an explicit grant for app_user (the
-    # conftest ALTER DEFAULT PRIVILEGES only covers tables created after it ran).
+    def _unit(axis: int) -> str:
+        return "[" + ",".join("1.0" if i == axis else "0.0" for i in range(dimension)) + "]"
+
     with pg_admin_engine.begin() as conn:
+        # The migration created the table before the conftest's ALTER DEFAULT
+        # PRIVILEGES ran? No -- alembic ran first, so the blanket GRANT ON ALL
+        # TABLES covered it. Repeated here so the test states its own needs.
         conn.execute(sa.text("GRANT ALL ON canon_chunk_vectors TO app_user"))
 
         # Seed two scopes (admin role -- bypasses RLS).
@@ -437,11 +445,12 @@ def test_canon_chunk_vectors_namespace_rls_isolation(
                 """
                 INSERT INTO canon_chunk_vectors (id, namespace, embedding, text)
                 VALUES
-                    ('vec-a', 't/acme/w/ws-a', CAST('[1.0,0.0,0.0]' AS vector), 'alpha'),
-                    ('vec-b', 't/acme/w/ws-b', CAST('[0.0,1.0,0.0]' AS vector), 'bravo')
+                    ('vec-a', 't/acme/w/ws-a', CAST(:vec_a AS vector), 'alpha'),
+                    ('vec-b', 't/acme/w/ws-b', CAST(:vec_b AS vector), 'bravo')
                 ON CONFLICT (id) DO NOTHING
                 """
-            )
+            ),
+            {"vec_a": _unit(0), "vec_b": _unit(1)},
         )
 
     with pg_app_engine.begin() as conn:

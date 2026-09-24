@@ -34,6 +34,7 @@ Path conventions:
 * ``GET    /api/v1/workspaces/{workspace_id}``  -- fetch
 * ``PATCH  /api/v1/workspaces/{workspace_id}``  -- sparse update
 * ``POST   /api/v1/workspaces/{workspace_id}:close`` -- close
+* ``POST   /api/v1/workspaces/{workspace_id}:purge`` -- erase all data + close
 
 The DTO field ``scope`` maps to the row column ``scope_json`` (same
 shape, different name -- the column suffix marks the storage as
@@ -50,19 +51,27 @@ import logging
 from typing import Any
 
 from pyfly.container import rest_controller
+from pyfly.observability.correlation import get_correlation_id
 from pyfly.web import Body, PathVar, Valid, get_mapping, patch_mapping, post_mapping, request_mapping
 from starlette.requests import Request
 
 from flycanon.core.services.events import WorkspaceEventPublisher
+from flycanon.core.services.workspaces import WorkspacePurgeService
 from flycanon.interfaces.dtos.workspace import (
     WorkspaceCreate,
+    WorkspacePurgeResult,
     WorkspaceSpec,
     WorkspaceSummary,
     WorkspaceUpdate,
 )
 from flycanon.interfaces.enums.workspace_status import WorkspaceStatus
 from flycanon.models.repositories import WorkspaceRepository
-from flycanon.web.conventions import TenantContext, WorkspaceNotFound, tenant_context_from_request
+from flycanon.web.conventions import (
+    TenantContext,
+    WorkspaceNotFound,
+    WorkspaceScopeMismatch,
+    tenant_context_from_request,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -76,9 +85,11 @@ class WorkspacesController:
         self,
         repository: WorkspaceRepository,
         event_publisher: WorkspaceEventPublisher,
+        purge_service: WorkspacePurgeService,
     ) -> None:
         self._repository = repository
         self._event_publisher = event_publisher
+        self._purge = purge_service
 
     @post_mapping("", status_code=201)
     async def create(
@@ -216,6 +227,68 @@ class WorkspacesController:
             workspace_id=workspace_id,
         )
         return _to_spec(row)
+
+    @post_mapping("/{workspace_id}:purge")
+    async def purge(
+        self,
+        http_request: Request,
+        workspace_id: PathVar[str],
+    ) -> WorkspacePurgeResult:
+        """Erase everything the workspace holds, then close it.
+
+        The destructive sibling of ``:close`` (which only flips the
+        status). Every source is removed through the full pipeline --
+        dense vectors, chunks, the stored original in the object store,
+        the row, an audit entry and a ``SourceRemoved`` event each --
+        then knowledge items with their versions, citations and
+        relations, candidates, conversations and turns, ingest jobs and
+        events, and cost events are deleted in one transaction, the
+        workspace row is moved to ``closed`` and a ``WorkspaceDeleted``
+        event is emitted. Audit rows are kept (the log is append-only)
+        and a ``workspace.purged`` row records the counts.
+
+        ``X-Workspace-Id`` MUST equal the path id
+        (``400 workspace_scope_mismatch`` otherwise): under the
+        production RLS role the header is what scopes every row the
+        request can see, so a purge aimed at a different path id would
+        silently do nothing -- or, on a BYPASSRLS dev role, hit the
+        wrong workspace. Requiring agreement makes the verb mean the
+        same thing on both roles.
+
+        Idempotent: a workspace with nothing left (or one that never had
+        a ``canon_workspaces`` row) returns ``200`` with zero counts and
+        ``closed=false``, so an off-boarding job can retry.
+        """
+        ctx: TenantContext = tenant_context_from_request(http_request)
+        if workspace_id != ctx.workspace_id:
+            raise WorkspaceScopeMismatch(
+                f"X-Workspace-Id {ctx.workspace_id!r} must equal the path workspace {workspace_id!r}."
+            )
+        report = await self._purge.purge(
+            tenant_id=ctx.tenant_id,
+            workspace_id=workspace_id,
+            actor=ctx.actor,
+            correlation_id=get_correlation_id(),
+        )
+        counts = report.counts
+        return WorkspacePurgeResult(
+            tenant_id=report.tenant_id,
+            workspace_id=report.workspace_id,
+            sources_removed=report.sources_removed,
+            originals_deleted=report.originals_deleted,
+            chunks_removed=counts.get("chunks", 0),
+            knowledge_items_removed=counts.get("knowledge_items", 0),
+            knowledge_versions_removed=counts.get("knowledge_versions", 0),
+            citations_removed=counts.get("citations", 0),
+            knowledge_relations_removed=counts.get("knowledge_relations", 0),
+            candidates_removed=counts.get("candidates", 0),
+            conversations_removed=counts.get("conversations", 0),
+            conversation_turns_removed=counts.get("conversation_turns", 0),
+            ingest_jobs_removed=counts.get("ingest_jobs", 0),
+            ingest_job_events_removed=counts.get("ingest_job_events", 0),
+            cost_events_removed=counts.get("cost_events", 0),
+            closed=report.closed,
+        )
 
 
 # ----------------------------------------------------------------------
