@@ -245,6 +245,8 @@ for every RLM / object-store env var and its default.
 
 ## Quickstart
 
+For a standalone release-wheel installation, follow [Install the released server](docs/released-server-install.md). It includes the required framework Git references, runtime configuration and migration scaffold.
+
 > **Want the 10-minute curl tour instead?** &nbsp;See [`QUICKSTART.md`](QUICKSTART.md)
 > — `task docker:up:test` + one curl call against a mock LLM, no API keys.
 

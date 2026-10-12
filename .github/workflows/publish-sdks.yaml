@@ -262,6 +262,21 @@ jobs:
           PYTHON
       - name: Build server wheel and source archive
         run: uv build
+      - name: Prepare versioned standalone runtime files
+        run: |
+          python - <<'PYTHON'
+          import pathlib, tomllib
+          project = tomllib.loads(pathlib.Path("pyproject.toml").read_text())
+          version = project["project"]["version"]
+          wheel_version = ".".join(str(int(part)) for part in version.split("."))
+          requirements = [f"flycanon @ https://github.com/firefly-operationOS/flycanon/releases/download/v{version}/flycanon-{wheel_version}-py3-none-any.whl"]
+          for name in ("pyfly", "fireflyframework-agentic"):
+              source = project["tool"]["uv"]["sources"][name]
+              requirements.append(f"{name} @ git+{source['git']}@{source['tag']}")
+          pathlib.Path(f"dist/runtime-requirements-{version}.txt").write_text("\n".join(requirements) + "\n")
+          pathlib.Path(f"dist/pyfly-{version}.yaml").write_bytes(pathlib.Path("pyfly.yaml").read_bytes())
+          pathlib.Path(f"dist/INSTALL-SERVER-{version}.md").write_bytes(pathlib.Path("docs/released-server-install.md").read_bytes())
+          PYTHON
       - name: Attach server packages to the GitHub Release
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
@@ -269,6 +284,9 @@ jobs:
           files: |
             dist/*.whl
             dist/*.tar.gz
+            dist/runtime-requirements-*.txt
+            dist/pyfly-*.yaml
+            dist/INSTALL-SERVER-*.md
 
   publish-checksums:
     name: Verify release inventory and publish SHA256SUMS
@@ -277,13 +295,14 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - name: Download the five published release packages
+      - name: Download the published packages and runtime files
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           RELEASE_TAG: ${{ github.ref_name }}
         run: |
           gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --dir release \
-            --pattern '*.whl' --pattern '*.tar.gz' --pattern '*.jar'
+            --pattern '*.whl' --pattern '*.tar.gz' --pattern '*.jar' \
+            --pattern 'runtime-requirements-*.txt' --pattern 'pyfly-*.yaml' --pattern 'INSTALL-SERVER-*.md'
           python - <<'PYTHON'
           import os, pathlib
           version = os.environ["RELEASE_TAG"].removeprefix("v")
@@ -292,6 +311,7 @@ jobs:
               f"flycanon-{wheel_version}-py3-none-any.whl", f"flycanon-{wheel_version}.tar.gz",
               f"flycanon_sdk-{wheel_version}-py3-none-any.whl", f"flycanon_sdk-{wheel_version}.tar.gz",
               f"flycanon-sdk-{version}.jar",
+              f"runtime-requirements-{version}.txt", f"pyfly-{version}.yaml", f"INSTALL-SERVER-{version}.md",
           }
           actual = {path.name for path in pathlib.Path("release").iterdir()}
           assert actual == expected, f"Unexpected release inventory: {actual ^ expected}"
@@ -302,6 +322,6 @@ jobs:
           RELEASE_TAG: ${{ github.ref_name }}
         run: |
           cd release
-          sha256sum ./*.whl ./*.tar.gz ./*.jar > SHA256SUMS
+          sha256sum ./*.whl ./*.tar.gz ./*.jar ./runtime-requirements-*.txt ./pyfly-*.yaml ./INSTALL-SERVER-*.md > SHA256SUMS
           sha256sum --check SHA256SUMS
           gh release upload "$RELEASE_TAG" SHA256SUMS --repo "$GITHUB_REPOSITORY" --clobber
