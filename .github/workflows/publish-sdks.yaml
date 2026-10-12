@@ -91,6 +91,12 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: mvn -B -ntp deploy
 
+      - name: Attach Java JAR to the GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: sdks/java/target/flycanon-sdk-*.jar
+
       - name: Summary
         run: |
           {
@@ -235,3 +241,67 @@ jobs:
               </repository>
             </repositories>
             ```
+
+  publish-server:
+    name: Publish flycanon server packages
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - uses: astral-sh/setup-uv@v5
+      - name: Require the server version to match the release tag
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          python - <<'PYTHON'
+          import os, pathlib, tomllib
+          version = tomllib.loads(pathlib.Path("pyproject.toml").read_text())["project"]["version"]
+          assert version == os.environ["GITHUB_REF_NAME"].removeprefix("v"), "Server version differs from release tag"
+          PYTHON
+      - name: Build server wheel and source archive
+        run: uv build
+      - name: Attach server packages to the GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/*.whl
+            dist/*.tar.gz
+
+  publish-checksums:
+    name: Verify release inventory and publish SHA256SUMS
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [publish-server, publish-python-sdk, publish-java-sdk]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Download the five published release packages
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --dir release \
+            --pattern '*.whl' --pattern '*.tar.gz' --pattern '*.jar'
+          python - <<'PYTHON'
+          import os, pathlib
+          version = os.environ["RELEASE_TAG"].removeprefix("v")
+          wheel_version = ".".join(str(int(part)) for part in version.split("."))
+          expected = {
+              f"flycanon-{wheel_version}-py3-none-any.whl", f"flycanon-{wheel_version}.tar.gz",
+              f"flycanon_sdk-{wheel_version}-py3-none-any.whl", f"flycanon_sdk-{wheel_version}.tar.gz",
+              f"flycanon-sdk-{version}.jar",
+          }
+          actual = {path.name for path in pathlib.Path("release").iterdir()}
+          assert actual == expected, f"Unexpected release inventory: {actual ^ expected}"
+          PYTHON
+      - name: Upload and verify checksums
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          cd release
+          sha256sum ./*.whl ./*.tar.gz ./*.jar > SHA256SUMS
+          sha256sum --check SHA256SUMS
+          gh release upload "$RELEASE_TAG" SHA256SUMS --repo "$GITHUB_REPOSITORY" --clobber

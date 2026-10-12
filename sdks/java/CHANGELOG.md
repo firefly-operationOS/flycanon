@@ -6,6 +6,13 @@ The SDK uses CalVer (`YY.MM.Patch`). Breaking changes are signalled
 in the entry header and the **Breaking** section, not in the version
 number (CalVer has no "major" axis to bump).
 
+## [26.10.0] - 2026-10-12
+
+### Changed
+
+- Align Maven coordinates and the SDK User-Agent version with the `26.10.0` server release. The HTTP contract is unchanged.
+- The server's phone PII scanner now distinguishes hexadecimal revision/digest identifiers from standalone phone numbers; strict real-PII rejection remains enabled.
+
 ## [26.8.0] - 2026-09-24
 
 ### Added

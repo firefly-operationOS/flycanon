@@ -51,6 +51,7 @@ from __future__ import annotations
 import json as _jsonlib
 from collections.abc import AsyncIterator, Iterable
 from datetime import datetime
+from importlib.metadata import version
 from types import TracebackType
 from typing import Any
 
@@ -171,7 +172,7 @@ class CanonClient:
         """
         merged_headers: dict[str, str] = {
             "Accept": "application/json",
-            "User-Agent": "flycanon-sdk-python/26.7.1",
+            "User-Agent": f"flycanon-sdk-python/{version('flycanon-sdk')}",
         }
         if api_key:
             merged_headers[_HEADER_API_KEY] = api_key

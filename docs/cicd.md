@@ -15,8 +15,8 @@ publish triggers another, and a manual escape hatch covers the rest.
 | Workflow | File | Trigger | What it produces |
 |----------|------|---------|------------------|
 | **PR gate** | [`.github/workflows/pr-gate.yaml`](../.github/workflows/pr-gate.yaml) | `pull_request` against `main`/`develop`, `workflow_dispatch` | Status checks only -- nothing published. |
-| **Docker publish (multi-arch)** | [`.github/workflows/docker-publish.yaml`](../.github/workflows/docker-publish.yaml) | `push` to `main`, `push` of a `v*.*.*` tag, `workflow_dispatch` | `ghcr.io/firefly-operationos/flycanon` multi-arch image (`linux/amd64` + `linux/arm64`), provenance + SBOM. |
-| **Publish SDKs** | [`.github/workflows/publish-sdks.yaml`](../.github/workflows/publish-sdks.yaml) | `push` of a `v*.*.*` tag, `workflow_dispatch` | Java SDK to GitHub Packages (`com.firefly:flycanon-sdk:<version>`); Python SDK wheel + sdist attached to the GitHub Release. |
+| **Docker publish (multi-arch)** | [`.github/workflows/docker-publish.yaml`](../.github/workflows/docker-publish.yaml) | `push` to `main`, `push` of a `v*.*.*` tag, `workflow_dispatch` | `ghcr.io/firefly-operationos/flycanon` multi-arch image (`linux/amd64` + `linux/arm64`); provenance upload is advisory and SBOM publication is disabled. |
+| **Publish SDKs** | [`.github/workflows/publish-sdks.yaml`](../.github/workflows/publish-sdks.yaml) | `push` of a `v*.*.*` tag, `workflow_dispatch` | Java SDK to GitHub Packages (`com.firefly:flycanon-sdk:<version>`); server and Python SDK wheels/source archives, Java JAR, and `SHA256SUMS` attached to the GitHub Release. |
 
 The same three workflows ship with every Firefly OperationOS service
 (flydocs, flycanon, ...) so the release loop is identical across the
@@ -41,13 +41,12 @@ never tags. Its only job is to gate the merge.
 | `sdk-java` | `mvn -B -ntp verify` under `sdks/java` with Temurin Java 25 | Yes |
 
 **Sibling repos.** flycanon depends on `fireflyframework-pyfly` and
-`fireflyframework-agentic` as **path dependencies** in
-`pyproject.toml`. The PR gate clones both into `./vendor/` so `uv
-sync` resolves them the same way it does on a developer's laptop.
+`fireflyframework-agentic` through **tagged git sources** in
+`pyproject.toml`. The PR gate clones both into `./vendor/` for Docker build contexts; `uv sync` uses the committed lockfile.
 
-**uv.lock is gitignored** -- the `unit` and `sdk-python` jobs run
-`uv sync` (not `uv sync --frozen`) so the resolver picks the matching
-sibling-repo SHAs at CI time.
+**Lockfiles are committed.** Server and Python SDK CI run
+`uv sync --locked --extra dev`; server framework dependencies resolve
+from the exact git tags and commits in `uv.lock`.
 
 **Skipped on docs-only commits.** The trigger filter strips `**.md`,
 `LICENSE`, `.gitignore`, and `docs/**` -- a typo fix in a `.md` file
@@ -98,9 +97,10 @@ pyfly=../../fireflyframework/fireflyframework-pyfly ...` invocations.
 
 ### Provenance + SBOM
 
-`build-push-action@v6` is invoked with `provenance: true` +
-`sbom: true`, so the published image ships SLSA build provenance and
-a CycloneDX SBOM by default. The optional
+`build-push-action@v6` is invoked with `provenance: false` and
+`sbom: false` because the organization does not support the required
+attestation persistence. Do not treat a published image as signed or
+SBOM-attested. The optional
 `actions/attest-build-provenance@v2` step is marked
 `continue-on-error: true` -- if the org doesn't have GitHub
 Attestations enabled (free-tier orgs, private repos without the
