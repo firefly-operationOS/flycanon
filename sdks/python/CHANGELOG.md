@@ -2,6 +2,13 @@
 
 All notable changes to **flycanon-sdk** (Python) are documented here.
 
+## [26.10.0] - 2026-10-12
+
+### Changed
+
+- Align the package and runtime version with the `26.10.0` server release. The HTTP contract is unchanged.
+- The server's phone PII scanner now distinguishes hexadecimal revision/digest identifiers from standalone phone numbers; strict real-PII rejection remains enabled.
+
 ## [26.8.0] - 2026-09-24
 
 ### Added

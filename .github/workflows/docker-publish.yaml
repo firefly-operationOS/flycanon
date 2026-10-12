@@ -58,7 +58,7 @@ concurrency:
 env:
   REGISTRY: ghcr.io
   PYFLY_REF: v26.09.04
-  AGENTIC_REF: v26.06.14
+  AGENTIC_REF: v26.06.16
 
 jobs:
   publish:
@@ -146,9 +146,8 @@ jobs:
 
       # ``actions/attest-build-provenance`` requires Build & Validate
       # Attestations to be enabled on the GitHub organisation (paid /
-      # Enterprise feature, or public repo). The image is already
-      # signed via buildkit's ``provenance: true`` flag above; this
-      # extra attestation is a belt-and-braces upload that is not
+      # Enterprise feature, or public repo). BuildKit provenance and
+      # SBOM publication are disabled above. This advisory upload is not
       # mandatory. Make it advisory so a free-tier org doesn't fail
       # the whole publish workflow.
       - name: Attest build provenance (advisory)

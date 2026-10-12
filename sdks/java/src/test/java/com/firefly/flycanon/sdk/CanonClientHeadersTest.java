@@ -132,7 +132,7 @@ class CanonClientHeadersTest {
         client.version();
 
         wireMock.verify(getRequestedFor(urlEqualTo("/api/v1/version"))
-                .withHeader("User-Agent", matching("flycanon-sdk-java/26\\.5\\.7")));
+                .withHeader("User-Agent", equalTo("flycanon-sdk-java/" + CanonClient.SDK_VERSION)));
     }
 
     @Test

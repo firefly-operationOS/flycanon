@@ -24,10 +24,11 @@ Knowledge Repository service.
 
 ## Wire-contract compatibility
 
-Compatible with **flycanon service version `26.7.x`**.
+Compatible with **flycanon service version `26.10.x`**.
 
 | SDK | Service |
 |-----|---------|
+| `26.10.0` | `26.10.x` (unchanged HTTP contract; identifier-aware PII matching) |
 | `26.8.0` | `26.8.x` (embedding sets, `flycanon reindex`, `ChunkStats.by_embedding_model`) |
 | `26.7.1` | `26.7.x` (routes realigned: `?mode=async`, `/query/stream`, `/conversations/{id}/turn`, `/query/suggest`, `?after_id=`; `X-API-Key`; `delete_source`, `purge_workspace`) |
 | `26.5.7` | `26.5.x` |
@@ -35,9 +36,9 @@ Compatible with **flycanon service version `26.7.x`**.
 ## Install
 
 ```bash
-uv add flycanon-sdk==26.8.0
+uv add https://github.com/firefly-operationOS/flycanon/releases/download/v26.10.0/flycanon_sdk-26.10.0-py3-none-any.whl
 # or
-pip install flycanon-sdk==26.8.0
+pip install https://github.com/firefly-operationOS/flycanon/releases/download/v26.10.0/flycanon_sdk-26.10.0-py3-none-any.whl
 ```
 
 ## Quick start

@@ -2,6 +2,18 @@
 
 All notable changes to **flycanon** are documented here.
 
+## [26.10.0] - 2026-10-12
+
+### Fixed
+
+- Phone PII matching respects hexadecimal identifier boundaries. Numeric substrings in revision and digest identifiers no longer reject canonical memory writes; standalone US and international phone numbers remain detected. Regression coverage includes strict-policy rejection of real phone numbers.
+- Release manifests, SDK runtime version strings and package coordinates now agree on `26.10.0`.
+- Docker publication uses the same `fireflyframework-agentic` tag as the locked server and PR gate.
+
+### Distribution
+
+- GitHub Releases include server and Python SDK wheels/source archives, the Java SDK JAR, and `SHA256SUMS`. Java SDK publication to GitHub Packages and multi-architecture GHCR builds retain their existing workflows.
+
 ## [26.9.0] - 2026-09-24
 
 ### Fixed
