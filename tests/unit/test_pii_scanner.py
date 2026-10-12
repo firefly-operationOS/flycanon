@@ -16,17 +16,39 @@
 
 from __future__ import annotations
 
+from unittest.mock import Mock
+
 import pytest
 
+from flycanon.config import CanonSettings
 from flycanon.core.services.pii.scanner import (
     PiiPolicy,
+    PiiPolicyViolation,
     RegexPiiScanner,
     build_pii_scanner,
     redact,
 )
+from flycanon.core.services.sources.intake_service import IntakeService
+
+IDENTIFIERS = [
+    "123456789abcdef0123456789abcdef0",
+    "abcdef0123456789" * 2,
+    "abcdef01" * 3 + "abcdef" + "0123456789",
+    "123456789" + "abcdef" * 5 + "a",
+]
+PHONES = ["+1 415-555-0137", "4155550137", "+34 612 345 678", "(415) 555-0137"]
 
 
 class TestRegexPatterns:
+    @pytest.mark.parametrize("identifier", IDENTIFIERS)
+    def test_hexadecimal_identifiers_are_not_phone_numbers(self, identifier):
+        assert RegexPiiScanner().scan(f'{{"revision": "{identifier}"}}') == []
+
+    @pytest.mark.parametrize("phone", PHONES)
+    def test_detects_standalone_us_and_international_phones(self, phone):
+        findings = RegexPiiScanner().scan(f"Call {phone} for details.")
+        assert any(f.kind == "phone" for f in findings)
+
     def test_detects_email(self):
         findings = RegexPiiScanner().scan("contact me at alice@example.com please")
         kinds = {f.kind for f in findings}
@@ -93,3 +115,34 @@ class TestPolicyEnum:
     def test_unknown_policy_raises(self):
         with pytest.raises(ValueError):
             PiiPolicy("nope")
+
+
+class TestStrictIntakePolicy:
+    @pytest.fixture
+    def service(self):
+        return IntakeService(
+            binary_normalizer=Mock(),
+            ingestion=Mock(),
+            loaders=Mock(),
+            embeddings=Mock(),
+            indexer=Mock(),
+            metadata_extractor=Mock(),
+            source_repository=Mock(),
+            chunk_repository=Mock(),
+            audit=Mock(),
+            event_publisher=Mock(),
+            object_store=Mock(),
+            settings=CanonSettings(pii_policy="reject", pii_scanner="regex"),
+        )
+
+    @pytest.mark.parametrize("identifier", IDENTIFIERS)
+    def test_reject_policy_admits_unchanged_identifier_content(self, service, identifier):
+        content = f'{{"revision": "{identifier}"}}'.encode()
+        admitted, metadata = service._apply_pii_policy(content, {"domain": "engineering"})
+        assert admitted == content
+        assert metadata == {"domain": "engineering"}
+
+    @pytest.mark.parametrize("personal_data", PHONES + ["alice@example.com"])
+    def test_reject_policy_still_refuses_personal_data(self, service, personal_data):
+        with pytest.raises(PiiPolicyViolation):
+            service._apply_pii_policy(f"Contact {personal_data} for details.".encode(), {})
