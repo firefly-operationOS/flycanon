@@ -30,12 +30,16 @@ all three. The differences are how you wire the dependencies.
 
 ---
 
+## Install from release packages
+
+For a host installation using the released wheel, follow [Install the released server](released-server-install.md). A wheel install needs explicit framework Git references and the matching source archive for `pyfly.yaml` and migrations.
+
 ## Pull the image
 
 ```bash
 docker pull ghcr.io/firefly-operationos/flycanon:latest          # latest main
-docker pull ghcr.io/firefly-operationos/flycanon:26.5.6          # specific release
-docker pull ghcr.io/firefly-operationos/flycanon:26.5            # latest 26.5.x
+docker pull ghcr.io/firefly-operationos/flycanon:26.10.0          # specific release
+docker pull ghcr.io/firefly-operationos/flycanon:26.10            # latest 26.10.x
 ```
 
 Multi-arch manifest: pulling `:latest` on Apple Silicon /
