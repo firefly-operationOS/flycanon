@@ -43,7 +43,7 @@ For a host installation using the released wheel, follow [Install the released s
 
 ```bash
 docker pull ghcr.io/fireflyframework/flycanon:latest          # latest main
-docker pull ghcr.io/fireflyframework/flycanon:26.10.1          # specific release
+docker pull ghcr.io/fireflyframework/flycanon:26.10.2          # specific release
 docker pull ghcr.io/fireflyframework/flycanon:26.10            # latest 26.10.x
 ```
 
@@ -681,12 +681,12 @@ The recommended upgrade dance:
 
 ```bash
 # 1. Pull the new image
-docker pull ghcr.io/fireflyframework/flycanon:26.10.1
+docker pull ghcr.io/fireflyframework/flycanon:26.10.2
 
 # 2. Run migrations against the live database
 docker run --rm \
   --env-file .env \
-  ghcr.io/fireflyframework/flycanon:26.10.1 migrate
+  ghcr.io/fireflyframework/flycanon:26.10.2 migrate
 
 # 3. Roll the API + worker deployments
 docker compose --env-file .env up -d
