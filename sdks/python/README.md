@@ -33,7 +33,7 @@ Compatible with **flycanon service version `26.10.x`**.
 
 | SDK | Service |
 |-----|---------|
-| `26.10.0` | `26.10.x` (unchanged HTTP contract; identifier-aware PII matching) |
+| `26.10.1` | `26.10.x` (unchanged HTTP contract; identifier-aware PII matching) |
 | `26.8.0` | `26.8.x` (embedding sets, `flycanon reindex`, `ChunkStats.by_embedding_model`) |
 | `26.7.1` | `26.7.x` (routes realigned: `?mode=async`, `/query/stream`, `/conversations/{id}/turn`, `/query/suggest`, `?after_id=`; `X-API-Key`; `delete_source`, `purge_workspace`) |
 | `26.5.7` | `26.5.x` |
@@ -41,9 +41,9 @@ Compatible with **flycanon service version `26.10.x`**.
 ## Install
 
 ```bash
-uv add https://github.com/fireflyframework/flycanon/releases/download/v26.10.0/flycanon_sdk-26.10.0-py3-none-any.whl
+uv add https://github.com/fireflyframework/flycanon/releases/download/v26.10.1/flycanon_sdk-26.10.1-py3-none-any.whl
 # or
-pip install https://github.com/fireflyframework/flycanon/releases/download/v26.10.0/flycanon_sdk-26.10.0-py3-none-any.whl
+pip install https://github.com/fireflyframework/flycanon/releases/download/v26.10.1/flycanon_sdk-26.10.1-py3-none-any.whl
 ```
 
 ## Quick start

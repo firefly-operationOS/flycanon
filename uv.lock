@@ -1408,7 +1408,7 @@ wheels = [
 
 [[package]]
 name = "flycanon"
-version = "26.10.0"
+version = "26.10.1"
 source = { editable = "." }
 dependencies = [
     { name = "aiosqlite" },

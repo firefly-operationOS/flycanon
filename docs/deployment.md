@@ -15,7 +15,7 @@
 
 flycanon ships as a **single Python service** plus its operational
 dependencies. The reference deployment is one Docker image
-(`ghcr.io/firefly-operationos/flycanon`) backed by a Postgres
+(`ghcr.io/fireflyframework/flycanon`) backed by a Postgres
 instance with the `vector` extension and an embedding-provider key
 of your choice. Everything else (Redis, Gotenberg, Docling OCR
 sidecar, ...) is optional.
@@ -42,9 +42,9 @@ For a host installation using the released wheel, follow [Install the released s
 ## Pull the image
 
 ```bash
-docker pull ghcr.io/firefly-operationos/flycanon:latest          # latest main
-docker pull ghcr.io/firefly-operationos/flycanon:26.10.0          # specific release
-docker pull ghcr.io/firefly-operationos/flycanon:26.10            # latest 26.10.x
+docker pull ghcr.io/fireflyframework/flycanon:latest          # latest main
+docker pull ghcr.io/fireflyframework/flycanon:26.10.1          # specific release
+docker pull ghcr.io/fireflyframework/flycanon:26.10            # latest 26.10.x
 ```
 
 Multi-arch manifest: pulling `:latest` on Apple Silicon /
@@ -127,7 +127,7 @@ required for production:
 For a complete list with defaults and inline docs, run:
 
 ```bash
-docker run --rm ghcr.io/firefly-operationos/flycanon:latest cat /app/env_template
+docker run --rm ghcr.io/fireflyframework/flycanon:latest cat /app/env_template
 ```
 
 ---
@@ -309,7 +309,7 @@ once per deploy:
 ```bash
 docker run --rm \
   --env FLYCANON_DATABASE_URL=postgresql+asyncpg://canon:canon@db.internal:5432/flycanon \
-  ghcr.io/firefly-operationos/flycanon:latest migrate
+  ghcr.io/fireflyframework/flycanon:latest migrate
 ```
 
 `alembic upgrade head` is **also** run on container startup when
@@ -681,12 +681,12 @@ The recommended upgrade dance:
 
 ```bash
 # 1. Pull the new image
-docker pull ghcr.io/firefly-operationos/flycanon:26.6.0
+docker pull ghcr.io/fireflyframework/flycanon:26.10.1
 
 # 2. Run migrations against the live database
 docker run --rm \
   --env-file .env \
-  ghcr.io/firefly-operationos/flycanon:26.6.0 migrate
+  ghcr.io/fireflyframework/flycanon:26.10.1 migrate
 
 # 3. Roll the API + worker deployments
 docker compose --env-file .env up -d
