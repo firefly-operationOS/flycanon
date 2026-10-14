@@ -592,7 +592,7 @@ async def test_answer_returns_typed_response() -> None:
 
 
 def test_sdk_version_declares_current_release() -> None:
-    assert __version__ == "26.10.2"
+    assert __version__ == "26.10.3"
 
 
 def test_canon_workspaces_topic_constant() -> None:
@@ -674,7 +674,7 @@ async def test_user_agent_advertises_sdk_version() -> None:
             }
         )
         await client.version()
-        assert "flycanon-sdk-python/26.10.2" in route.calls.last.request.headers["User-Agent"]
+        assert "flycanon-sdk-python/26.10.3" in route.calls.last.request.headers["User-Agent"]
 
 
 # ----------------------------------------------------------------------

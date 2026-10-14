@@ -2,6 +2,12 @@
 
 All notable changes to **flycanon** are documented here.
 
+## [26.10.3] - 2026-10-14
+
+### Fixed
+
+- Serialize Python SDK token expiry in JSON mode before HTTP dispatch. Timezone-aware datetime values now reach the mint endpoint, while omitted fields retain their existing behavior. UTC and offset cases cover request and response values; native local mint, list and revoke verify the bounded token lifecycle.
+
 ## [26.10.2] - 2026-10-14
 
 ### Dependencies

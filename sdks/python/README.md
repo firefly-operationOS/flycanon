@@ -33,7 +33,7 @@ Compatible with **flycanon service version `26.10.x`**.
 
 | SDK | Service |
 |-----|---------|
-| `26.10.2` | `26.10.x` (unchanged HTTP contract; Agentic dependency adoption) |
+| `26.10.3` | `26.10.x` (unchanged HTTP contract; Agentic dependency adoption) |
 | `26.8.0` | `26.8.x` (embedding sets, `flycanon reindex`, `ChunkStats.by_embedding_model`) |
 | `26.7.1` | `26.7.x` (routes realigned: `?mode=async`, `/query/stream`, `/conversations/{id}/turn`, `/query/suggest`, `?after_id=`; `X-API-Key`; `delete_source`, `purge_workspace`) |
 | `26.5.7` | `26.5.x` |
@@ -41,9 +41,9 @@ Compatible with **flycanon service version `26.10.x`**.
 ## Install
 
 ```bash
-uv add https://github.com/fireflyframework/flycanon/releases/download/v26.10.2/flycanon_sdk-26.10.2-py3-none-any.whl
+uv add https://github.com/fireflyframework/flycanon/releases/download/v26.10.3/flycanon_sdk-26.10.3-py3-none-any.whl
 # or
-pip install https://github.com/fireflyframework/flycanon/releases/download/v26.10.2/flycanon_sdk-26.10.2-py3-none-any.whl
+pip install https://github.com/fireflyframework/flycanon/releases/download/v26.10.3/flycanon_sdk-26.10.3-py3-none-any.whl
 ```
 
 ## Quick start
@@ -126,6 +126,24 @@ boundary.
 
 Agent-tier callers (authenticated with `X-Agent-Token`) are refused
 on the mint path with `403 agent_cannot_mint`.
+
+Set `expires_at` to a timezone-aware datetime when a token needs a bounded lifetime. The SDK sends the expiry as an ISO 8601 JSON string and retains its timezone. For example, an authenticated platform client can mint a one-hour reader:
+
+```python
+from datetime import UTC, datetime, timedelta
+from flycanon_sdk import AgentTokenMintRequest
+
+created = await client.mint_agent_token(
+    AgentTokenMintRequest(
+        name="inventory-reader",
+        workspace_allowlist=["inventory"],
+        scopes=["agent.sources:read"],
+        expires_at=datetime.now(UTC) + timedelta(hours=1),
+    )
+)
+```
+
+Store the returned token in the caller's secret store. Later token listings retain the expiry and public prefix, and omit the secret.
 
 ### Agent surface (`/api/v1/agent/*`, agent-tier, exposed via `client.agent`)
 
