@@ -159,9 +159,14 @@ mutation emits an event on `canon.workspaces.v1` so consumers
 
 ### Create a workspace
 
+Set `X-Workspace-Id` to the same value as the body `id`. A mismatch
+returns `400 workspace_scope_mismatch` before any row or event is
+written. This check preserves the production RLS scope; it does not
+grant access to a tenant or workspace.
+
 ```bash
 curl -X POST https://canon.example.com/api/v1/workspaces \
-  -H "Authorization: Bearer $OPERATOR_JWT" \
+  -H "X-API-Key: $FLYCANON_API_KEY" \
   -H "X-Tenant-Id: acme" \
   -H "X-Workspace-Id: ws-prod" \
   -H "Content-Type: application/json" \

@@ -181,7 +181,7 @@ at the boundary as a typed exception.
 
 | Method | Description |
 |--------|-------------|
-| `createWorkspace(WorkspaceCreate spec) -> WorkspaceSpec` | Create a workspace under the caller's tenant. |
+| `createWorkspace(WorkspaceCreate spec) -> WorkspaceSpec` | Create a workspace under the caller's tenant. Configure the client's workspace header to equal `spec.id()`; a mismatch returns `400 workspace_scope_mismatch` before any write. |
 | `listWorkspaces() -> List<WorkspaceSummary>` | List every workspace owned by the caller's tenant (`created_at DESC`). |
 | `getWorkspace(String workspaceId) -> WorkspaceSpec` | Fetch a single workspace by id. |
 | `updateWorkspace(String workspaceId, WorkspaceUpdate patch) -> WorkspaceSpec` | Sparse PATCH; only present fields are applied. |

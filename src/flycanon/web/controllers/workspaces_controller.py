@@ -1,4 +1,5 @@
 # Copyright 2024-2026 Firefly Software Foundation
+# SPDX-License-Identifier: Apache-2.0
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -21,11 +22,10 @@ workspace-creation rights.
 Headers:
 
 * ``X-Tenant-Id`` is the tenant scope.
-* ``X-Workspace-Id`` is the caller's "current" workspace -- still
-  required by :func:`tenant_context_from_request` for header
-  uniformity, but the path ``{workspace_id}`` is the authoritative
-  identifier for GET / PATCH / close. ``POST`` creates a row whose
-  id is taken from the body.
+* ``X-Workspace-Id`` is the request's workspace scope. Creation
+  requires the body ``id`` to match this header before storage or
+  event publication. Production RLS also restricts row visibility
+  to this scope; the path identifies the target for GET / PATCH / close.
 
 Path conventions:
 
@@ -101,12 +101,16 @@ class WorkspacesController:
 
         The body carries the caller-chosen workspace id (slug,
         ``<= 64`` chars). Tenant id comes from the ``X-Tenant-Id``
-        header -- the body intentionally does not accept it so a
-        caller cannot create workspaces under another tenant.
+        header. The body id must equal ``X-Workspace-Id``; a mismatch
+        returns ``400 workspace_scope_mismatch`` before any write.
 
         Returns ``201 Created`` with the persisted :class:`WorkspaceSpec`.
         """
         ctx: TenantContext = tenant_context_from_request(http_request)
+        if body.id != ctx.workspace_id:
+            raise WorkspaceScopeMismatch(
+                f"X-Workspace-Id {ctx.workspace_id!r} must equal the body workspace {body.id!r}."
+            )
         row: dict[str, Any] = {
             "id": body.id,
             "tenant_id": ctx.tenant_id,

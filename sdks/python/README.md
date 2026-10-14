@@ -110,7 +110,7 @@ boundary.
 
 | Method | Description |
 |--------|-------------|
-| `create_workspace(spec: WorkspaceCreate) -> WorkspaceSpec` | Create a workspace under the caller's tenant. |
+| `create_workspace(spec: WorkspaceCreate) -> WorkspaceSpec` | Create a workspace under the caller's tenant. The client's `workspace_id` must equal `spec.id`; a mismatch returns `400 workspace_scope_mismatch` before any write. |
 | `list_workspaces() -> list[WorkspaceSummary]` | List every workspace owned by the caller's tenant (`created_at DESC`). |
 | `get_workspace(workspace_id) -> WorkspaceSpec` | Fetch a single workspace by id. |
 | `update_workspace(workspace_id, patch: WorkspaceUpdate) -> WorkspaceSpec` | Sparse PATCH; only present fields are applied. |

@@ -1,4 +1,5 @@
 # Copyright 2024-2026 Firefly Software Foundation
+# SPDX-License-Identifier: Apache-2.0
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -12,7 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""End-to-end coverage for the ``/api/v1/workspaces`` controller.
+"""Controller coverage for the ``/api/v1/workspaces`` surface.
 
 Exercises the controller methods directly with a stubbed Starlette
 :class:`Request` so the full handler chain (TenantContext extraction
@@ -189,13 +190,38 @@ def _request(tenant_id: str = "acme", workspace_id: str = "default") -> object:
 
 class TestCreate:
     @pytest.mark.asyncio
+    async def test_create_rejects_header_body_scope_before_storage_or_events(
+        self, controller: WorkspacesController, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from unittest.mock import AsyncMock
+
+        from flycanon.web.conventions import WorkspaceScopeMismatch
+
+        insert = AsyncMock(wraps=controller._repository.insert)
+        get = AsyncMock(wraps=controller._repository.get)
+        publish = AsyncMock(wraps=controller._event_publisher.publish_created)
+        monkeypatch.setattr(controller._repository, "insert", insert)
+        monkeypatch.setattr(controller._repository, "get", get)
+        monkeypatch.setattr(controller._event_publisher, "publish_created", publish)
+        with pytest.raises(WorkspaceScopeMismatch) as exc_info:
+            await controller.create(
+                _request(tenant_id="acme", workspace_id="authorized-workspace"),
+                WorkspaceCreate(id="different-workspace", name="Fictional scope fixture"),
+            )
+        assert exc_info.value.status == 400
+        assert exc_info.value.code == "workspace_scope_mismatch"
+        insert.assert_not_awaited()
+        get.assert_not_awaited()
+        publish.assert_not_awaited()
+
+    @pytest.mark.asyncio
     async def test_post_creates_and_returns_spec(self, controller: WorkspacesController) -> None:
         body = WorkspaceCreate(
             id="ws-1",
             name="Q3 audit",
             status=WorkspaceStatus.active,
         )
-        spec = await controller.create(_request(tenant_id="acme"), body)
+        spec = await controller.create(_request(tenant_id="acme", workspace_id="ws-1"), body)
         assert isinstance(spec, WorkspaceSpec)
         assert spec.id == "ws-1"
         assert spec.tenant_id == "acme"
@@ -208,20 +234,20 @@ class TestCreate:
     @pytest.mark.asyncio
     async def test_duplicate_id_raises_integrity_error(self, controller: WorkspacesController) -> None:
         body = WorkspaceCreate(id="ws-dup", name="A", status=WorkspaceStatus.active)
-        await controller.create(_request(tenant_id="acme"), body)
+        await controller.create(_request(tenant_id="acme", workspace_id="ws-dup"), body)
         with pytest.raises(IntegrityError):
-            await controller.create(_request(tenant_id="acme"), body)
+            await controller.create(_request(tenant_id="acme", workspace_id="ws-dup"), body)
 
 
 class TestList:
     @pytest.mark.asyncio
     async def test_list_returns_tenant_workspaces(self, controller: WorkspacesController) -> None:
         await controller.create(
-            _request(tenant_id="acme"),
+            _request(tenant_id="acme", workspace_id="ws-acme-1"),
             WorkspaceCreate(id="ws-acme-1", name="A", status=WorkspaceStatus.active),
         )
         await controller.create(
-            _request(tenant_id="acme"),
+            _request(tenant_id="acme", workspace_id="ws-acme-2"),
             WorkspaceCreate(id="ws-acme-2", name="B", status=WorkspaceStatus.active),
         )
         # Different tenant row -- must NOT surface in acme's list. The
@@ -229,7 +255,7 @@ class TestList:
         # distinct id; the partitioning happens at the tenant_id WHERE
         # clause in :meth:`list_for_tenant`, not at id collision.
         await controller.create(
-            _request(tenant_id="bcorp"),
+            _request(tenant_id="bcorp", workspace_id="ws-bcorp-1"),
             WorkspaceCreate(id="ws-bcorp-1", name="cross-tenant", status=WorkspaceStatus.active),
         )
         rows = await controller.list_workspaces(_request(tenant_id="acme"))
@@ -244,7 +270,7 @@ class TestGet:
     @pytest.mark.asyncio
     async def test_get_returns_spec(self, controller: WorkspacesController) -> None:
         await controller.create(
-            _request(tenant_id="acme"),
+            _request(tenant_id="acme", workspace_id="ws-1"),
             WorkspaceCreate(id="ws-1", name="A", status=WorkspaceStatus.active),
         )
         spec = await controller.get(_request(tenant_id="acme"), "ws-1")
@@ -261,7 +287,7 @@ class TestGet:
     async def test_get_cross_tenant_raises_404(self, controller: WorkspacesController) -> None:
         # Workspace lives under tenant=acme; bcorp must not see it.
         await controller.create(
-            _request(tenant_id="acme"),
+            _request(tenant_id="acme", workspace_id="ws-1"),
             WorkspaceCreate(id="ws-1", name="A", status=WorkspaceStatus.active),
         )
         with pytest.raises(WorkspaceNotFound):
@@ -272,7 +298,7 @@ class TestUpdate:
     @pytest.mark.asyncio
     async def test_patch_applies_sparse_update(self, controller: WorkspacesController) -> None:
         await controller.create(
-            _request(tenant_id="acme"),
+            _request(tenant_id="acme", workspace_id="ws-1"),
             WorkspaceCreate(id="ws-1", name="Original", status=WorkspaceStatus.active),
         )
         updated = await controller.update(
@@ -300,7 +326,7 @@ class TestClose:
         self, controller: WorkspacesController
     ) -> None:
         await controller.create(
-            _request(tenant_id="acme"),
+            _request(tenant_id="acme", workspace_id="ws-1"),
             WorkspaceCreate(id="ws-1", name="A", status=WorkspaceStatus.active),
         )
         closed = await controller.close(_request(tenant_id="acme"), "ws-1")
@@ -330,7 +356,7 @@ class TestLifecycleEvents:
         captured_events: list[WorkspaceEventBase],
     ) -> None:
         await controller.create(
-            _request(tenant_id="acme"),
+            _request(tenant_id="acme", workspace_id="ws-1"),
             WorkspaceCreate(id="ws-1", name="Q3 audit", status=WorkspaceStatus.active),
         )
         assert len(captured_events) == 1
@@ -349,7 +375,7 @@ class TestLifecycleEvents:
         captured_events: list[WorkspaceEventBase],
     ) -> None:
         await controller.create(
-            _request(tenant_id="acme"),
+            _request(tenant_id="acme", workspace_id="ws-1"),
             WorkspaceCreate(id="ws-1", name="Original", status=WorkspaceStatus.active),
         )
         captured_events.clear()  # drop the WorkspaceCreated from create()
@@ -373,7 +399,7 @@ class TestLifecycleEvents:
         captured_events: list[WorkspaceEventBase],
     ) -> None:
         await controller.create(
-            _request(tenant_id="acme"),
+            _request(tenant_id="acme", workspace_id="ws-1"),
             WorkspaceCreate(id="ws-1", name="A", status=WorkspaceStatus.active),
         )
         captured_events.clear()
@@ -398,10 +424,10 @@ class TestLifecycleEvents:
         not see a phantom WorkspaceCreated.
         """
         body = WorkspaceCreate(id="ws-1", name="A", status=WorkspaceStatus.active)
-        await controller.create(_request(tenant_id="acme"), body)
+        await controller.create(_request(tenant_id="acme", workspace_id="ws-1"), body)
         captured_events.clear()
         with pytest.raises(IntegrityError):
-            await controller.create(_request(tenant_id="acme"), body)
+            await controller.create(_request(tenant_id="acme", workspace_id="ws-1"), body)
         assert captured_events == []
 
     @pytest.mark.asyncio

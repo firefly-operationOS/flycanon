@@ -877,8 +877,10 @@ class CanonClient:
         """Create a workspace under the caller's tenant.
 
         The id comes from ``spec.id`` (caller-chosen slug); the tenant
-        comes from the ``X-Tenant-Id`` header. Returns ``201 Created``
-        with the persisted :class:`WorkspaceSpec`.
+        comes from the ``X-Tenant-Id`` header. Configure the client's
+        ``workspace_id`` to equal ``spec.id``. A mismatch raises an
+        SDK error with ``400 workspace_scope_mismatch`` before any write.
+        Returns ``201 Created`` with the persisted :class:`WorkspaceSpec`.
         """
         body = await self._request(
             "POST",

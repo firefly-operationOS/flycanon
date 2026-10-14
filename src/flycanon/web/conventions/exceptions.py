@@ -1,4 +1,5 @@
 # Copyright 2024-2026 Firefly Software Foundation
+# SPDX-License-Identifier: Apache-2.0
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -123,9 +124,10 @@ class CallbackUrlNotAllowed(FireflyHTTPException):
 
 
 class WorkspaceScopeMismatch(FireflyHTTPException):
-    """The path ``{workspace_id}`` and ``X-Workspace-Id`` disagree.
+    """The target workspace and ``X-Workspace-Id`` disagree.
 
-    Raised by the destructive workspace verbs (``:purge``). Under the
+    Creation checks the body ``id`` before any storage or event write.
+    Purge checks the path ``{workspace_id}``. Under the
     production RLS role every row visible to the request is already
     filtered by the header workspace, so a purge addressed to a
     different path id would silently touch nothing -- or, under a

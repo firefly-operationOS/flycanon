@@ -164,13 +164,16 @@ The `/api/v1/ingest-jobs/*` surface parallels flyradar's
 
 ## Workspaces
 
-CRUD over the `canon_workspaces` table. All six endpoints
-require the standard tenant headers; list / get / update / close /
-purge scope by `X-Tenant-Id`.
+CRUD over the `canon_workspaces` table. All six endpoints require
+the standard tenant and workspace headers. For creation, the body
+`id` must equal `X-Workspace-Id`. A mismatch returns
+`400 workspace_scope_mismatch` before any row or event is written.
+Production RLS restricts row visibility to the tenant and workspace
+in those headers; the tenant-wide list exception is described below.
 
 | Method | Path | Description |
 |--------|------|-------------|
-| `POST` | `/api/v1/workspaces` | Create. Body: `WorkspaceCreate`. Returns `WorkspaceSummary`. |
+| `POST` | `/api/v1/workspaces` | Create. Body: `WorkspaceCreate`; `id` must match `X-Workspace-Id`. Returns `201` with `WorkspaceSpec`. |
 | `GET`  | `/api/v1/workspaces` | List within tenant. Query: `status`, `limit`, `offset`. |
 | `GET`  | `/api/v1/workspaces/{id}` | Fetch one. 404 → `resource_not_found`. |
 | `PATCH` | `/api/v1/workspaces/{id}` | Sparse update. Body: `WorkspaceUpdate`. |
@@ -351,7 +354,7 @@ Field-level validation details land under `errors[]`.
 | 400 | `url_fetch_forbidden_host` / `url_fetch_unsupported_scheme` | `uri` targets a refused host / a non-http scheme. |
 | 413 | `url_fetch_too_large` | The origin's document exceeds `FLYCANON_MAX_BYTES`. |
 | 502 | `url_fetch_http_error` / `url_fetch_failed` / `url_fetch_too_many_redirects` | The origin answered 4xx/5xx, could not be reached, or redirected more than five times. |
-| 400 | `workspace_scope_mismatch` | `POST /workspaces/{id}:purge` with an `X-Workspace-Id` that differs from the path id. |
+| 400 | `workspace_scope_mismatch` | Workspace creation with a body `id` different from `X-Workspace-Id`, or `POST /workspaces/{id}:purge` with a different path id. |
 | 404 | `source_not_found` | `DELETE`/`PUT` on an unknown source id (either tier). |
 | 400 | `invalid_request` | Pydantic validation, missing-field `ValueError` raised inside a controller helper. |
 | 404 | `resource_not_found` | Generic missing resource (knowledge item, source, conversation, candidate, job, workspace). |
