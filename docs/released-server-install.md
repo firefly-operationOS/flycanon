@@ -6,13 +6,13 @@ Use the released source archive for the operator configuration and migration fil
 
 ## Download and verify
 
-Download `flycanon-26.10.2-py3-none-any.whl`, `flycanon-26.10.2.tar.gz`, `runtime-requirements-26.10.2.txt`, and `SHA256SUMS` from the [26.10.2 release](https://github.com/fireflyframework/flycanon/releases/tag/v26.10.2). Verify the downloaded files against their matching checksum entries before extracting or installing them.
+Download `flycanon-26.10.3-py3-none-any.whl`, `flycanon-26.10.3.tar.gz`, `runtime-requirements-26.10.3.txt`, and `SHA256SUMS` from the [26.10.3 release](https://github.com/fireflyframework/flycanon/releases/tag/v26.10.3). Verify the downloaded files against their matching checksum entries before extracting or installing them.
 
 ```bash
-tar -xzf flycanon-26.10.2.tar.gz
-cd flycanon-26.10.2
+tar -xzf flycanon-26.10.3.tar.gz
+cd flycanon-26.10.3
 uv venv --python 3.13 .venv
-uv pip install --python .venv/bin/python -r ../runtime-requirements-26.10.2.txt
+uv pip install --python .venv/bin/python -r ../runtime-requirements-26.10.3.txt
 ```
 
 The requirements file selects the released server wheel and these canonical framework references:
@@ -26,7 +26,7 @@ The equivalent installation without a requirements file is:
 
 ```bash
 uv pip install --python .venv/bin/python \
-  'flycanon @ https://github.com/fireflyframework/flycanon/releases/download/v26.10.2/flycanon-26.10.2-py3-none-any.whl' \
+  'flycanon @ https://github.com/fireflyframework/flycanon/releases/download/v26.10.3/flycanon-26.10.3-py3-none-any.whl' \
   'pyfly @ git+https://github.com/fireflyframework/fireflyframework-pyfly.git@v26.09.04' \
   'fireflyframework-agentic @ https://github.com/fireflyframework/fireflyframework-agentic/releases/download/v26.10.1/fireflyframework_agentic-26.10.1-py3-none-any.whl'
 ```
@@ -39,11 +39,11 @@ This release retains pyfly `v26.09.04` and the existing PostgreSQL EDA outbox. A
 
 ## Configure the runtime
 
-Keep `pyfly.yaml`, `alembic.ini`, `migrations/`, and `env_template` from the source archive in the working directory. The wheel does not supply the root-level `pyfly.yaml`. The release also provides a byte-identical `pyfly-26.10.2.yaml` copy for operators who already have a migration scaffold; install it as `pyfly.yaml` in the runtime working directory.
+Keep `pyfly.yaml`, `alembic.ini`, `migrations/`, and `env_template` from the source archive in the working directory. The wheel does not supply the root-level `pyfly.yaml`. The release also provides a byte-identical `pyfly-26.10.3.yaml` copy for operators who already have a migration scaffold; install it as `pyfly.yaml` in the runtime working directory.
 
 The configuration selects the PostgreSQL event adapter and separate API/worker consumer groups. Starting without it can activate framework defaults, including an attempted Kafka connection to `localhost:9092` and a separate management listener. Do not rely on those defaults for the released service.
 
-Set the database URL, embedding model and dimensions, provider credentials, platform API keys, object-storage location, and optional Redis settings for your environment. Use [`env_template`](https://github.com/fireflyframework/flycanon/blob/v26.10.2/env_template) and the [deployment guide](https://github.com/fireflyframework/flycanon/blob/v26.10.2/docs/deployment.md) for the exact settings. Store real secrets outside published configuration and supply them through your operator's environment or secret manager.
+Set the database URL, embedding model and dimensions, provider credentials, platform API keys, object-storage location, and optional Redis settings for your environment. Use [`env_template`](https://github.com/fireflyframework/flycanon/blob/v26.10.3/env_template) and the [deployment guide](https://github.com/fireflyframework/flycanon/blob/v26.10.3/docs/deployment.md) for the exact settings. Store real secrets outside published configuration and supply them through your operator's environment or secret manager.
 
 Provision the PostgreSQL database, required extensions and roles using the deployment guide. Apply migrations as a separate operator step before serving a new database:
 
