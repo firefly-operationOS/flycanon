@@ -371,7 +371,7 @@ makes the image build deterministic between local dev and CI.
    ```bash
    cd /Users/ancongui/Development/fireflyframework/fireflyframework-pyfly
    git fetch --tags && git checkout v26.05.06
-   cd /Users/ancongui/Development/firefly-operationOS/flycanon
+   cd flycanon
    rm -rf vendor && mkdir vendor
    cp -r ../../fireflyframework/fireflyframework-pyfly vendor/pyfly
    cp -r ../../fireflyframework/fireflyframework-agentic vendor/fireflyframework-agentic
