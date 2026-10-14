@@ -133,12 +133,14 @@ Set `expires_at` to a timezone-aware datetime when a token needs a bounded lifet
 from datetime import UTC, datetime, timedelta
 from flycanon_sdk import AgentTokenMintRequest
 
-created = await client.mint_agent_token(AgentTokenMintRequest(
-    name="inventory-reader",
-    workspace_allowlist=["inventory"],
-    scopes=["agent.sources:read"],
-    expires_at=datetime.now(UTC) + timedelta(hours=1),
-))
+created = await client.mint_agent_token(
+    AgentTokenMintRequest(
+        name="inventory-reader",
+        workspace_allowlist=["inventory"],
+        scopes=["agent.sources:read"],
+        expires_at=datetime.now(UTC) + timedelta(hours=1),
+    )
+)
 ```
 
 Store the returned token in the caller's secret store. Later token listings retain the expiry and public prefix, and omit the secret.
