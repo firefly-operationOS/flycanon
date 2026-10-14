@@ -681,12 +681,12 @@ The recommended upgrade dance:
 
 ```bash
 # 1. Pull the new image
-docker pull ghcr.io/fireflyframework/flycanon:26.6.0
+docker pull ghcr.io/fireflyframework/flycanon:26.10.1
 
 # 2. Run migrations against the live database
 docker run --rm \
   --env-file .env \
-  ghcr.io/fireflyframework/flycanon:26.6.0 migrate
+  ghcr.io/fireflyframework/flycanon:26.10.1 migrate
 
 # 3. Roll the API + worker deployments
 docker compose --env-file .env up -d
