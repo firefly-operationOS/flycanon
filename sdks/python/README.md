@@ -127,6 +127,22 @@ boundary.
 Agent-tier callers (authenticated with `X-Agent-Token`) are refused
 on the mint path with `403 agent_cannot_mint`.
 
+Set `expires_at` to a timezone-aware datetime when a token needs a bounded lifetime. The SDK sends the expiry as an ISO 8601 JSON string and retains its timezone. For example, an authenticated platform client can mint a one-hour reader:
+
+```python
+from datetime import UTC, datetime, timedelta
+from flycanon_sdk import AgentTokenMintRequest
+
+created = await client.mint_agent_token(AgentTokenMintRequest(
+    name="inventory-reader",
+    workspace_allowlist=["inventory"],
+    scopes=["agent.sources:read"],
+    expires_at=datetime.now(UTC) + timedelta(hours=1),
+))
+```
+
+Store the returned token in the caller's secret store. Later token listings retain the expiry and public prefix, and omit the secret.
+
 ### Agent surface (`/api/v1/agent/*`, agent-tier, exposed via `client.agent`)
 
 Every POST on this surface mandates a non-empty `idempotency_key`

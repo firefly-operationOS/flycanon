@@ -964,7 +964,7 @@ class CanonClient:
         body = await self._request(
             "POST",
             "/api/v1/agent-tokens",
-            json=request.model_dump(exclude_none=True),
+            json=request.model_dump(mode="json", exclude_none=True),
         )
         return AgentTokenCreated.model_validate(body)
 
