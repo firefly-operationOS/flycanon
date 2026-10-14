@@ -94,7 +94,7 @@ public final class CanonClient {
     static final String HEADER_IDEMPOTENCY_KEY = "Idempotency-Key";
 
     /** SDK version. Mirrors {@code pom.xml}. */
-    public static final String SDK_VERSION = "26.10.3";
+    public static final String SDK_VERSION = "26.10.4";
 
     private final RestClient restClient;
     private final ObjectMapper mapper;

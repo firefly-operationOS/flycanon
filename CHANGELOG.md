@@ -2,6 +2,18 @@
 
 All notable changes to **flycanon** are documented here.
 
+## [26.10.4] - 2026-10-14
+
+### Fixed
+
+- Reject workspace creation when the body `id` differs from `X-Workspace-Id`. The service returns `400 workspace_scope_mismatch` before any storage or lifecycle event write, rather than exposing a PostgreSQL RLS failure as HTTP 500. Matching requests retain their existing `201` response.
+- Correct the workspace reference: lookup returns `workspace_not_found`, and the list endpoint accepts no filter or pagination arguments. A separate configured admin connection permits tenant-wide listing; otherwise the request connection's RLS scope controls visibility.
+
+### Distribution
+
+- Align the server and Python/Java SDK versions at `26.10.4`. SDK methods, wire schemas, dependency pins and RLS policies are unchanged. Configure the SDK's workspace header to match the workspace being created; the published Python SDK `26.10.3` remains compatible with the corrected server.
+- Native local checks cover creation, RFC 7807 errors, SDK propagation, foreign-scope visibility and credential denial. Lifecycle event delivery remains best-effort after a successful workspace write; this patch adds no delivery guarantee or tenant-bound platform-key grant.
+
 ## [26.10.3] - 2026-10-14
 
 ### Fixed

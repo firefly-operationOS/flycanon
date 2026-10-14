@@ -5103,7 +5103,7 @@
       "url": "https://github.com/fireflyframework/flycanon/blob/main/LICENSE"
     },
     "title": "flycanon",
-    "version": "26.10.3"
+    "version": "26.10.4"
   },
   "openapi": "3.1.0",
   "paths": {
@@ -8719,7 +8719,7 @@
         ]
       },
       "post": {
-        "description": "The body carries the caller-chosen workspace id (slug,\n``<= 64`` chars). Tenant id comes from the ``X-Tenant-Id``\nheader -- the body intentionally does not accept it so a\ncaller cannot create workspaces under another tenant.\n\nReturns ``201 Created`` with the persisted :class:`WorkspaceSpec`.",
+        "description": "The body carries the caller-chosen workspace id (slug,\n``<= 64`` chars). Tenant id comes from the ``X-Tenant-Id``\nheader. The body id must equal ``X-Workspace-Id``; a mismatch\nreturns ``400 workspace_scope_mismatch`` before any write.\n\nReturns ``201 Created`` with the persisted :class:`WorkspaceSpec`.",
         "operationId": "create",
         "parameters": [
           {

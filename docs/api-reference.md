@@ -164,23 +164,28 @@ The `/api/v1/ingest-jobs/*` surface parallels flyradar's
 
 ## Workspaces
 
-CRUD over the `canon_workspaces` table. All six endpoints
-require the standard tenant headers; list / get / update / close /
-purge scope by `X-Tenant-Id`.
+CRUD over the `canon_workspaces` table. All six endpoints require
+the standard tenant and workspace headers. For creation, the body
+`id` must equal `X-Workspace-Id`. A mismatch returns
+`400 workspace_scope_mismatch` before any row or event is written.
+Production RLS restricts row visibility to the tenant and workspace
+in those headers; the tenant-wide list exception is described below.
 
 | Method | Path | Description |
 |--------|------|-------------|
-| `POST` | `/api/v1/workspaces` | Create. Body: `WorkspaceCreate`. Returns `WorkspaceSummary`. |
-| `GET`  | `/api/v1/workspaces` | List within tenant. Query: `status`, `limit`, `offset`. |
-| `GET`  | `/api/v1/workspaces/{id}` | Fetch one. 404 → `resource_not_found`. |
+| `POST` | `/api/v1/workspaces` | Create. Body: `WorkspaceCreate`; `id` must match `X-Workspace-Id`. Returns `201` with `WorkspaceSpec`. |
+| `GET`  | `/api/v1/workspaces` | List visible workspaces within the tenant, newest first. No filter or pagination arguments. |
+| `GET`  | `/api/v1/workspaces/{id}` | Fetch one. 404 → `workspace_not_found`. |
 | `PATCH` | `/api/v1/workspaces/{id}` | Sparse update. Body: `WorkspaceUpdate`. |
 | `POST` | `/api/v1/workspaces/{id}:close` | Close (idempotent; sets `status=closed` + `closed_at`). Data stays. |
 | `POST` | `/api/v1/workspaces/{id}:purge` | Erase everything the workspace holds, then close it: every source through the full removal pipeline (vectors, chunks, stored originals, audit + event each), then knowledge items / versions / citations / relations, candidates, conversations / turns, ingest jobs / events and cost events in one transaction; emits `WorkspaceDeleted`; audit rows are kept and a `workspace.purged` row records the counts. `X-Workspace-Id` must equal the path id (`400 workspace_scope_mismatch`). Returns `WorkspacePurgeResult` -- every counter is what this call erased, `originals_deleted` only objects actually found in the store, `closed` only when this call closed the row; a repeat is all zeros, `closed: false`, no event, no audit row. (26.7.1) |
 
-`GET /api/v1/workspaces` is a tenant-wide read and runs on the
-BYPASSRLS engine named by `FLYCANON_ADMIN_DATABASE_URL`; under the
-production `flycanon_app` role without that setting it can only return
-the workspace named in the caller's own `X-Workspace-Id` header.
+With a separate BYPASSRLS connection configured through
+`FLYCANON_ADMIN_DATABASE_URL`, `GET /api/v1/workspaces` lists the
+tenant's workspaces on that connection. Otherwise it uses the request
+connection; under the production non-bypass role, RLS limits the
+result to the workspace named in `X-Workspace-Id`. Both tenant and
+workspace headers remain required in either configuration.
 
 ## Billing
 
@@ -351,7 +356,7 @@ Field-level validation details land under `errors[]`.
 | 400 | `url_fetch_forbidden_host` / `url_fetch_unsupported_scheme` | `uri` targets a refused host / a non-http scheme. |
 | 413 | `url_fetch_too_large` | The origin's document exceeds `FLYCANON_MAX_BYTES`. |
 | 502 | `url_fetch_http_error` / `url_fetch_failed` / `url_fetch_too_many_redirects` | The origin answered 4xx/5xx, could not be reached, or redirected more than five times. |
-| 400 | `workspace_scope_mismatch` | `POST /workspaces/{id}:purge` with an `X-Workspace-Id` that differs from the path id. |
+| 400 | `workspace_scope_mismatch` | Workspace creation with a body `id` different from `X-Workspace-Id`, or `POST /workspaces/{id}:purge` with a different path id. |
 | 404 | `source_not_found` | `DELETE`/`PUT` on an unknown source id (either tier). |
 | 400 | `invalid_request` | Pydantic validation, missing-field `ValueError` raised inside a controller helper. |
 | 404 | `resource_not_found` | Generic missing resource (knowledge item, source, conversation, candidate, job, workspace). |
