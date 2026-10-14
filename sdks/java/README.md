@@ -1,6 +1,11 @@
 <div align="center">
 
-<img src="../../docs/assets/logo.png" alt="flycanon" width="100%" />
+<picture>
+  <source media="(prefers-color-scheme: dark) and (max-width: 600px)" srcset="../../docs/assets/brand/banner-dark-mobile.svg">
+  <source media="(max-width: 600px)" srcset="../../docs/assets/brand/banner-light-mobile.svg">
+  <source media="(prefers-color-scheme: dark)" srcset="../../docs/assets/brand/banner-dark.svg">
+  <img src="../../docs/assets/brand/banner-light.svg" alt="flycanon by Firefly" width="100%">
+</picture>
 
 ### **Java SDK** &nbsp;&middot;&nbsp; Spring Boot 3.5.9 &nbsp;&middot;&nbsp; Java 25
 
