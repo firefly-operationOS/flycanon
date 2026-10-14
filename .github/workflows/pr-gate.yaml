@@ -1,4 +1,5 @@
 # Copyright 2026 Firefly Software Foundation
+# SPDX-License-Identifier: Apache-2.0
 #
 # PR gate -- runs on every pull request and on workflow_dispatch.
 # Checks:
@@ -35,10 +36,10 @@ concurrency:
 env:
   PYTHON_VERSION: "3.13"
   # Sibling checkouts staged as BuildKit / path contexts. The Python
-  # dependency itself resolves from the git tags in pyproject.toml
-  # (locked in uv.lock), so keep these equal to those tags.
+  # dependencies resolve from the PyFly tag and published Agentic wheel
+  # in pyproject.toml (locked in uv.lock). Keep these source tags aligned.
   PYFLY_REF: v26.09.04
-  AGENTIC_REF: v26.06.16
+  AGENTIC_REF: v26.10.1
 
 jobs:
   lint:

@@ -37,13 +37,13 @@ all three. The differences are how you wire the dependencies.
 
 ## Install from release packages
 
-For a host installation using the released wheel, follow [Install the released server](released-server-install.md). A wheel install needs explicit framework Git references and the matching source archive for `pyfly.yaml` and migrations.
+For a host installation using the released wheel, follow [Install the released server](released-server-install.md). A wheel install needs explicit framework references and the matching source archive for `pyfly.yaml` and migrations.
 
 ## Pull the image
 
 ```bash
 docker pull ghcr.io/fireflyframework/flycanon:latest          # latest main
-docker pull ghcr.io/fireflyframework/flycanon:26.10.1          # specific release
+docker pull ghcr.io/fireflyframework/flycanon:26.10.2          # specific release
 docker pull ghcr.io/fireflyframework/flycanon:26.10            # latest 26.10.x
 ```
 
@@ -380,15 +380,15 @@ finds its table and only verifies it. Before 26.7.1 every process created
 those lazily, and PostgreSQL refuses that for `flycanon_app`: it checks
 `CREATE` on the schema before it honours `CREATE TABLE IF NOT EXISTS`, and
 demands ownership before `CREATE INDEX IF NOT EXISTS`. One piece of that
-lazy DDL remains, in PyFly rather than flycanon: `PostgresEventBus.start()`
+lazy DDL remains, in pyfly rather than flycanon: `PostgresEventBus.start()`
 still runs the outbox `CREATE TABLE / INDEX IF NOT EXISTS` in every
-process. Until PyFly skips it on existing tables, a `serve` process that
+process. Until pyfly skips it on existing tables, a `serve` process that
 runs as `flycanon_app` needs the two statements below on top of the
 grants above; they widen nothing else (the role stays NOBYPASSRLS, and
 the two outbox tables hold no tenant rows):
 
 ```sql
--- Temporary, for PyFly's outbox DDL at boot (see the note above).
+-- Temporary, for pyfly's outbox DDL at boot (see the note above).
 GRANT CREATE ON SCHEMA public TO flycanon_app;
 ALTER TABLE pyfly_eda_outbox  OWNER TO flycanon_app;   -- or a NOLOGIN role
 ALTER TABLE pyfly_eda_offsets OWNER TO flycanon_app;   -- both roles belong to
@@ -681,12 +681,12 @@ The recommended upgrade dance:
 
 ```bash
 # 1. Pull the new image
-docker pull ghcr.io/fireflyframework/flycanon:26.10.1
+docker pull ghcr.io/fireflyframework/flycanon:26.10.2
 
 # 2. Run migrations against the live database
 docker run --rm \
   --env-file .env \
-  ghcr.io/fireflyframework/flycanon:26.10.1 migrate
+  ghcr.io/fireflyframework/flycanon:26.10.2 migrate
 
 # 3. Roll the API + worker deployments
 docker compose --env-file .env up -d

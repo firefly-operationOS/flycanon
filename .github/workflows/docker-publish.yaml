@@ -1,4 +1,5 @@
 # Copyright 2026 Firefly Software Foundation
+# SPDX-License-Identifier: Apache-2.0
 #
 # Multi-arch image build + GHCR push.
 #
@@ -57,7 +58,7 @@ concurrency:
 env:
   REGISTRY: ghcr.io
   PYFLY_REF: v26.09.04
-  AGENTIC_REF: v26.06.16
+  AGENTIC_REF: v26.10.1
 
 jobs:
   publish:

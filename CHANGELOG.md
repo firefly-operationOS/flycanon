@@ -2,6 +2,17 @@
 
 All notable changes to **flycanon** are documented here.
 
+## [26.10.2] - 2026-10-14
+
+### Dependencies
+
+- Adopt the published Agentic `26.10.1` wheel, with its exact digest recorded in the lock. Remove the obsolete Mistral 1.x resolver override and undeclared Agentic `rest`/`redis` extras; Canon continues to supply web and Redis support through its existing dependencies.
+- Retain the qualified pyfly `v26.09.04` pin and existing EDA migration history. A later pyfly upgrade requires a separately qualified drain or replay of queued legacy outbox events.
+
+### Distribution
+
+- Synchronize server and SDK versions, workflow references, and released-server installation examples for `26.10.2`. HTTP schemas and Canon's Azure builder and independent RLM cache behavior retain their existing contracts.
+
 ## [26.10.0] - 2026-10-12
 
 ### Fixed
