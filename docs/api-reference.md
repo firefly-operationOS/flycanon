@@ -174,16 +174,18 @@ in those headers; the tenant-wide list exception is described below.
 | Method | Path | Description |
 |--------|------|-------------|
 | `POST` | `/api/v1/workspaces` | Create. Body: `WorkspaceCreate`; `id` must match `X-Workspace-Id`. Returns `201` with `WorkspaceSpec`. |
-| `GET`  | `/api/v1/workspaces` | List within tenant. Query: `status`, `limit`, `offset`. |
-| `GET`  | `/api/v1/workspaces/{id}` | Fetch one. 404 → `resource_not_found`. |
+| `GET`  | `/api/v1/workspaces` | List visible workspaces within the tenant, newest first. No filter or pagination arguments. |
+| `GET`  | `/api/v1/workspaces/{id}` | Fetch one. 404 → `workspace_not_found`. |
 | `PATCH` | `/api/v1/workspaces/{id}` | Sparse update. Body: `WorkspaceUpdate`. |
 | `POST` | `/api/v1/workspaces/{id}:close` | Close (idempotent; sets `status=closed` + `closed_at`). Data stays. |
 | `POST` | `/api/v1/workspaces/{id}:purge` | Erase everything the workspace holds, then close it: every source through the full removal pipeline (vectors, chunks, stored originals, audit + event each), then knowledge items / versions / citations / relations, candidates, conversations / turns, ingest jobs / events and cost events in one transaction; emits `WorkspaceDeleted`; audit rows are kept and a `workspace.purged` row records the counts. `X-Workspace-Id` must equal the path id (`400 workspace_scope_mismatch`). Returns `WorkspacePurgeResult` -- every counter is what this call erased, `originals_deleted` only objects actually found in the store, `closed` only when this call closed the row; a repeat is all zeros, `closed: false`, no event, no audit row. (26.7.1) |
 
-`GET /api/v1/workspaces` is a tenant-wide read and runs on the
-BYPASSRLS engine named by `FLYCANON_ADMIN_DATABASE_URL`; under the
-production `flycanon_app` role without that setting it can only return
-the workspace named in the caller's own `X-Workspace-Id` header.
+With a separate BYPASSRLS connection configured through
+`FLYCANON_ADMIN_DATABASE_URL`, `GET /api/v1/workspaces` lists the
+tenant's workspaces on that connection. Otherwise it uses the request
+connection; under the production non-bypass role, RLS limits the
+result to the workspace named in `X-Workspace-Id`. Both tenant and
+workspace headers remain required in either configuration.
 
 ## Billing
 
