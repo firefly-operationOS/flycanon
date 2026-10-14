@@ -591,7 +591,7 @@ async def test_answer_returns_typed_response() -> None:
 # ----------------------------------------------------------------------
 
 
-def test_sdk_version_string_is_26_10_0() -> None:
+def test_sdk_version_declares_current_release() -> None:
     assert __version__ == "26.10.1"
 
 
