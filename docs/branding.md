@@ -17,7 +17,9 @@ framework-family wordmarks. The Manrope glyph and its spacing remain intact.
 Reusable light and dark logos accompany the banners. Each banner contains its
 own title and description and loads no fonts, JavaScript or external resources.
 
-The illustration describes document provenance and version decisions.
+The illustration follows a source document through retrieval to an answer
+that retains a citation. The document stack, magnifier and numbered reference
+make each step visible.
 It represents the service's purpose; it is not a live status display.
 
 Artwork was produced from the [Framework brandkit](https://github.com/fireflyframework/brand-kit)
