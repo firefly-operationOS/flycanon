@@ -4,9 +4,10 @@ Thanks for working on flycanon. This document captures the
 non-obvious workflow rules that the PR gate enforces, so the first
 push doesn't bounce on something easy to fix.
 
-For the broader contribution model (commit conventions, branch
-naming, release process) see the top-level Firefly OperationOS
-contributor guide.
+Use a focused branch and pull request against this repository. Include the
+checks relevant to your change and describe any prerequisites that prevented
+a test from running. The release workflows are documented in
+[CI/CD](docs/cicd.md).
 
 ## OpenAPI snapshot gate
 

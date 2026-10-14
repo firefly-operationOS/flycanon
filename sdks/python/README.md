@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="../../docs/assets/logo.png" alt="flycanon" width="380" />
+<img src="../../docs/assets/logo.png" alt="flycanon" width="100%" />
 
 ### **Python SDK**
 
@@ -9,7 +9,7 @@
 ---
 
 Async-first Python client for the
-[flycanon](https://github.com/firefly-operationOS/flycanon) Operational
+[flycanon](https://github.com/fireflyframework/flycanon) Operational
 Knowledge Repository service.
 
 - Pydantic-typed request + response models.
@@ -36,9 +36,9 @@ Compatible with **flycanon service version `26.10.x`**.
 ## Install
 
 ```bash
-uv add https://github.com/firefly-operationOS/flycanon/releases/download/v26.10.0/flycanon_sdk-26.10.0-py3-none-any.whl
+uv add https://github.com/fireflyframework/flycanon/releases/download/v26.10.0/flycanon_sdk-26.10.0-py3-none-any.whl
 # or
-pip install https://github.com/firefly-operationOS/flycanon/releases/download/v26.10.0/flycanon_sdk-26.10.0-py3-none-any.whl
+pip install https://github.com/fireflyframework/flycanon/releases/download/v26.10.0/flycanon_sdk-26.10.0-py3-none-any.whl
 ```
 
 ## Quick start

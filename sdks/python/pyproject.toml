@@ -35,9 +35,9 @@ dev = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/firefly-operationOS/flycanon"
-Documentation = "https://github.com/firefly-operationOS/flycanon/tree/main/sdks/python"
-Source = "https://github.com/firefly-operationOS/flycanon"
+Homepage = "https://github.com/fireflyframework/flycanon"
+Documentation = "https://github.com/fireflyframework/flycanon/tree/main/sdks/python"
+Source = "https://github.com/fireflyframework/flycanon"
 
 [build-system]
 requires = ["hatchling>=1.18"]

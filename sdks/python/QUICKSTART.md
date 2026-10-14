@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="../../docs/assets/logo.png" alt="flycanon" width="380" />
+<img src="../../docs/assets/logo.png" alt="flycanon" width="100%" />
 
 ### **Python SDK quickstart**
 
@@ -10,7 +10,7 @@
 
 Five-minute tour of the async Python client. Assumes the flycanon
 service is running on `http://localhost:8500` (see the service-level
-[QUICKSTART](https://github.com/firefly-operationOS/flycanon/blob/main/QUICKSTART.md)).
+[QUICKSTART](https://github.com/fireflyframework/flycanon/blob/main/QUICKSTART.md)).
 
 ## 1. Install
 
