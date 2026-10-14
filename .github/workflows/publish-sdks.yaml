@@ -1,4 +1,5 @@
 # Copyright 2026 Firefly Software Foundation
+# SPDX-License-Identifier: Apache-2.0
 #
 # Publish the Java + Python SDKs.
 #
@@ -272,7 +273,11 @@ jobs:
           requirements = [f"flycanon @ https://github.com/fireflyframework/flycanon/releases/download/v{version}/flycanon-{wheel_version}-py3-none-any.whl"]
           for name in ("pyfly", "fireflyframework-agentic"):
               source = project["tool"]["uv"]["sources"][name]
-              requirements.append(f"{name} @ git+{source['git']}@{source['tag']}")
+              if "url" in source:
+                  reference = source["url"]
+              else:
+                  reference = f"git+{source['git']}@{source['tag']}"
+              requirements.append(f"{name} @ {reference}")
           pathlib.Path(f"dist/runtime-requirements-{version}.txt").write_text("\n".join(requirements) + "\n")
           pathlib.Path(f"dist/pyfly-{version}.yaml").write_bytes(pathlib.Path("pyfly.yaml").read_bytes())
           pathlib.Path(f"dist/INSTALL-SERVER-{version}.md").write_bytes(pathlib.Path("docs/released-server-install.md").read_bytes())
