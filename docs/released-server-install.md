@@ -35,7 +35,7 @@ A fresh installation with these references resolved all runtime dependencies wit
 
 ## Framework migration compatibility
 
-This release retains PyFly `v26.09.04` and the existing PostgreSQL EDA outbox. A later PyFly upgrade uses different outbox tables and requires a separate drain or replay of queued legacy events. Qualify that cutover before changing the PyFly pin; the current migration history and Azure/RLM behavior remain the existing ones.
+This release retains pyfly `v26.09.04` and the existing PostgreSQL EDA outbox. A later pyfly upgrade uses different outbox tables and requires a separate drain or replay of queued legacy events. Qualify that cutover before changing the pyfly pin; the current migration history and Azure/RLM behavior remain the existing ones.
 
 ## Configure the runtime
 
