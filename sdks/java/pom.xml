@@ -29,7 +29,7 @@
     an @AutoConfiguration so a CanonClient bean is wired straight
     from flycanon.* properties.
   </description>
-  <url>https://github.com/firefly-operationOS/flycanon</url>
+  <url>https://github.com/fireflyframework/flycanon</url>
 
   <licenses>
     <license>
@@ -40,7 +40,7 @@
 
   <organization>
     <name>Firefly Software Foundation</name>
-    <url>https://github.com/firefly-operationOS</url>
+    <url>https://github.com/fireflyframework</url>
   </organization>
 
   <properties>
@@ -162,8 +162,8 @@
   <distributionManagement>
     <repository>
       <id>github</id>
-      <name>GitHub Packages -- firefly-operationOS/flycanon</name>
-      <url>https://maven.pkg.github.com/firefly-operationOS/flycanon</url>
+      <name>GitHub Packages -- fireflyframework/flycanon</name>
+      <url>https://maven.pkg.github.com/fireflyframework/flycanon</url>
     </repository>
   </distributionManagement>
 </project>

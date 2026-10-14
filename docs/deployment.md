@@ -1,6 +1,11 @@
 <div align="center">
 
-<img src="assets/logo.png" alt="flycanon" width="380" />
+<picture>
+  <source media="(prefers-color-scheme: dark) and (max-width: 600px)" srcset="assets/brand/banner-dark-mobile.svg">
+  <source media="(max-width: 600px)" srcset="assets/brand/banner-light-mobile.svg">
+  <source media="(prefers-color-scheme: dark)" srcset="assets/brand/banner-dark.svg">
+  <img src="assets/brand/banner-light.svg" alt="flycanon by Firefly" width="100%">
+</picture>
 
 ### **Deployment**
 
@@ -697,3 +702,8 @@ SDK versions keep working against a newer service.
 See [troubleshooting.md](troubleshooting.md) for a problem -> root
 cause -> fix table covering the common production failure modes
 (embeddings unavailable, pgvector dim mismatch, OCR missing, ...).
+
+## Repository and package namespaces
+
+See [branding.md](branding.md#package-registries) for the canonical source
+URLs and the publication checks required before using the new package namespace.

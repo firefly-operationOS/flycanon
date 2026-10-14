@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="docs/assets/logo.png" alt="flycanon" width="380" />
+<img src="docs/assets/logo.png" alt="flycanon" width="100%" />
 
 ### **Quickstart**
 

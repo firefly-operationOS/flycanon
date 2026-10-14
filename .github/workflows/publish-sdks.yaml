@@ -12,14 +12,14 @@
 #       - workflow_dispatch                  -> manual re-publish
 #
 #   * Java SDK -> ``mvn deploy`` to GitHub Packages
-#       (https://maven.pkg.github.com/firefly-operationOS/flycanon)
+#       (https://maven.pkg.github.com/fireflyframework/flycanon)
 #
 #   * Python SDK -> build sdist + wheel with ``uv build`` and attach
 #                  both to the GitHub Release. We do NOT publish to
 #                  PyPI -- users install directly from the release URL
 #                  with uv:
 #
-#                      uv add https://github.com/firefly-operationOS/flycanon/releases/download/v26.05.01/flycanon_sdk-26.5.1-py3-none-any.whl
+#                      uv add https://github.com/fireflyframework/flycanon/releases/download/v26.05.01/flycanon_sdk-26.5.1-py3-none-any.whl
 #
 #                  (or pin in pyproject.toml under [tool.uv.sources]).
 #
@@ -103,7 +103,7 @@ jobs:
             echo "### Published Java SDK"
             echo
             echo "**Coordinates**: \`com.firefly:flycanon-sdk:$(mvn -B -q -DforceStdout help:evaluate -Dexpression=project.version)\`"
-            echo "**Repository**: https://maven.pkg.github.com/firefly-operationOS/flycanon"
+            echo "**Repository**: https://maven.pkg.github.com/fireflyframework/flycanon"
             echo
             echo "Add to your \`pom.xml\`:"
             echo '```xml'
@@ -236,8 +236,8 @@ jobs:
             ```xml
             <repositories>
               <repository>
-                <id>github-firefly-operationOS</id>
-                <url>https://maven.pkg.github.com/firefly-operationOS/flycanon</url>
+                <id>github-fireflyframework</id>
+                <url>https://maven.pkg.github.com/fireflyframework/flycanon</url>
               </repository>
             </repositories>
             ```
@@ -269,7 +269,7 @@ jobs:
           project = tomllib.loads(pathlib.Path("pyproject.toml").read_text())
           version = project["project"]["version"]
           wheel_version = ".".join(str(int(part)) for part in version.split("."))
-          requirements = [f"flycanon @ https://github.com/firefly-operationOS/flycanon/releases/download/v{version}/flycanon-{wheel_version}-py3-none-any.whl"]
+          requirements = [f"flycanon @ https://github.com/fireflyframework/flycanon/releases/download/v{version}/flycanon-{wheel_version}-py3-none-any.whl"]
           for name in ("pyfly", "fireflyframework-agentic"):
               source = project["tool"]["uv"]["sources"][name]
               requirements.append(f"{name} @ git+{source['git']}@{source['tag']}")

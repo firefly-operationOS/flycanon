@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="../../docs/assets/logo.png" alt="flycanon" width="380" />
+<img src="../../docs/assets/logo.png" alt="flycanon" width="100%" />
 
 ### **Java SDK quickstart** &nbsp;·&nbsp; Spring Boot 3.5.9 &nbsp;·&nbsp; Java 25
 

@@ -1,6 +1,11 @@
 <div align="center">
 
-<img src="assets/logo.png" alt="flycanon" width="380" />
+<picture>
+  <source media="(prefers-color-scheme: dark) and (max-width: 600px)" srcset="assets/brand/banner-dark-mobile.svg">
+  <source media="(max-width: 600px)" srcset="assets/brand/banner-light-mobile.svg">
+  <source media="(prefers-color-scheme: dark)" srcset="assets/brand/banner-dark.svg">
+  <img src="assets/brand/banner-light.svg" alt="flycanon by Firefly" width="100%">
+</picture>
 
 ### **Troubleshooting**
 
@@ -328,7 +333,7 @@ server entry:
 ```xml
 <servers>
   <server>
-    <id>github-firefly-operationOS</id>
+    <id>github-fireflyframework</id>
     <username>your-github-username</username>
     <password>ghp_xxx_personal_access_token_with_read_packages</password>
   </server>

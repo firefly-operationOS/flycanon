@@ -1,6 +1,11 @@
 <div align="center">
 
-<img src="assets/logo.png" alt="flycanon" width="380" />
+<picture>
+  <source media="(prefers-color-scheme: dark) and (max-width: 600px)" srcset="assets/brand/banner-dark-mobile.svg">
+  <source media="(max-width: 600px)" srcset="assets/brand/banner-light-mobile.svg">
+  <source media="(prefers-color-scheme: dark)" srcset="assets/brand/banner-dark.svg">
+  <img src="assets/brand/banner-light.svg" alt="flycanon by Firefly" width="100%">
+</picture>
 
 ### **CI / CD**
 
@@ -15,10 +20,10 @@ publish triggers another, and a manual escape hatch covers the rest.
 | Workflow | File | Trigger | What it produces |
 |----------|------|---------|------------------|
 | **PR gate** | [`.github/workflows/pr-gate.yaml`](../.github/workflows/pr-gate.yaml) | `pull_request` against `main`/`develop`, `workflow_dispatch` | Status checks only -- nothing published. |
-| **Docker publish (multi-arch)** | [`.github/workflows/docker-publish.yaml`](../.github/workflows/docker-publish.yaml) | `push` to `main`, `push` of a `v*.*.*` tag, `workflow_dispatch` | `ghcr.io/firefly-operationos/flycanon` multi-arch image (`linux/amd64` + `linux/arm64`); provenance upload is advisory and SBOM publication is disabled. |
+| **Docker publish (multi-arch)** | [`.github/workflows/docker-publish.yaml`](../.github/workflows/docker-publish.yaml) | `push` to `main`, `push` of a `v*.*.*` tag, `workflow_dispatch` | `ghcr.io/fireflyframework/flycanon` multi-arch image (`linux/amd64` + `linux/arm64`); provenance upload is advisory and SBOM publication is disabled. |
 | **Publish SDKs** | [`.github/workflows/publish-sdks.yaml`](../.github/workflows/publish-sdks.yaml) | `push` of a `v*.*.*` tag, `workflow_dispatch` | Java SDK to GitHub Packages (`com.firefly:flycanon-sdk:<version>`); server and Python SDK wheels/source archives, Java JAR, and `SHA256SUMS` attached to the GitHub Release. |
 
-The same three workflows ship with every Firefly OperationOS service
+The same three workflows ship with every Firefly Framework service
 (flydocs, flycanon, ...) so the release loop is identical across the
 fleet. flycanon's deviations from the shared shape are called out
 inline below.
@@ -56,11 +61,10 @@ does not burn CI minutes.
 
 ## 2. Docker publish (multi-arch)
 
-`docker-publish.yaml` builds + pushes `ghcr.io/firefly-operationos/flycanon`
-for **`linux/amd64` + `linux/arm64`** via QEMU + BuildKit. The GHCR
-owner is normalised to lower-case at build time so the
-`firefly-operationOS` org name (mixed case in URLs but lower-case
-required by GHCR) doesn't bite.
+`docker-publish.yaml` derives `ghcr.io/fireflyframework/flycanon` from the
+current repository owner and builds for `linux/amd64` and `linux/arm64`.
+Historical pull examples below retain their original published namespace.
+Verify the image inventory before switching an existing installation.
 
 ### Triggers and tags
 
@@ -165,7 +169,7 @@ Consumer setup (in any project depending on flycanon-sdk):
 
 <repositories>
   <repository>
-    <id>github-firefly-operationOS</id>
+    <id>github-fireflyframework</id>
     <url>https://maven.pkg.github.com/firefly-operationOS/flycanon</url>
   </repository>
 </repositories>
@@ -196,7 +200,7 @@ The workflow:
 Consumer setup:
 
 ```bash
-uv add https://github.com/firefly-operationOS/flycanon/releases/download/v26.5.6/flycanon_sdk-26.5.6-py3-none-any.whl
+uv add https://github.com/fireflyframework/flycanon/releases/download/v26.5.6/flycanon_sdk-26.5.6-py3-none-any.whl
 ```
 
 Or pin in `pyproject.toml`:
@@ -206,7 +210,7 @@ Or pin in `pyproject.toml`:
 dependencies = ["flycanon-sdk"]
 
 [tool.uv.sources]
-flycanon-sdk = { url = "https://github.com/firefly-operationOS/flycanon/releases/download/v26.5.6/flycanon_sdk-26.5.6-py3-none-any.whl" }
+flycanon-sdk = { url = "https://github.com/fireflyframework/flycanon/releases/download/v26.5.6/flycanon_sdk-26.5.6-py3-none-any.whl" }
 ```
 
 **PEP 440 normalisation.** Tag `v26.05.04` produces the wheel name
@@ -274,3 +278,8 @@ keys, Anthropic API key, ...) is **not** baked into any CI workflow
 For runtime / deployment failures (image runs but service crashes,
 embeddings unavailable, ...), see
 [troubleshooting.md](troubleshooting.md).
+
+## Repository and package namespaces
+
+See [branding.md](branding.md#package-registries) for the canonical source
+URLs and the publication checks required before using the new package namespace.

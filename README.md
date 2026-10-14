@@ -1,6 +1,11 @@
 <div align="center">
 
-<img src="docs/assets/logo.png" alt="flycanon — operational knowledge repository" width="520" />
+<picture>
+  <source media="(prefers-color-scheme: dark) and (max-width: 600px)" srcset="docs/assets/brand/banner-dark-mobile.svg">
+  <source media="(max-width: 600px)" srcset="docs/assets/brand/banner-light-mobile.svg">
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/brand/banner-dark.svg">
+  <img src="docs/assets/brand/banner-light.svg" alt="flycanon by Firefly" width="100%">
+</picture>
 
 ### **Operational Knowledge Repository**
 
@@ -251,7 +256,7 @@ For a standalone release-wheel installation, follow [Install the released server
 > — `task docker:up:test` + one curl call against a mock LLM, no API keys.
 
 ```bash
-git clone https://github.com/firefly-operationOS/flycanon.git
+git clone https://github.com/fireflyframework/flycanon.git
 cd flycanon
 task deps:install          # uv sync --extra dev (pins .venv)
 task docker:up             # api + worker + postgres(pgvector) + redis
@@ -414,6 +419,13 @@ flycanon/
 
 ---
 
+## Repository and identity
+
+Source, issues and release downloads are hosted under the
+[fireflyframework organization](https://github.com/fireflyframework/flycanon).
+See [identity and package registries](docs/branding.md) for banner provenance
+and the distinction between source transfers and historical package namespaces.
+
 ## License
 
 flycanon is released under the [Apache License 2.0](LICENSE) —
@@ -426,6 +438,6 @@ The bundled SDKs under [`sdks/python`](sdks/python) and
 
 <div align="center">
 
-Part of **[Firefly OperationOS](https://github.com/firefly-operationOS)**. &nbsp;Platform-agnostic by design.
+Part of **[Firefly Framework](https://github.com/fireflyframework)**. &nbsp;Platform-agnostic by design.
 
 </div>

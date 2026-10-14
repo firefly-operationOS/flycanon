@@ -1,6 +1,11 @@
 <div align="center">
 
-<img src="assets/logo.png" alt="flycanon" width="380" />
+<picture>
+  <source media="(prefers-color-scheme: dark) and (max-width: 600px)" srcset="assets/brand/banner-dark-mobile.svg">
+  <source media="(max-width: 600px)" srcset="assets/brand/banner-light-mobile.svg">
+  <source media="(prefers-color-scheme: dark)" srcset="assets/brand/banner-dark.svg">
+  <img src="assets/brand/banner-light.svg" alt="flycanon by Firefly" width="100%">
+</picture>
 
 ### **Documentation**
 
@@ -134,3 +139,8 @@ task openapi
 
 The Swagger UI at `/docs` and Redoc at `/redoc` both browse the same
 spec.
+
+## Repository and identity
+
+See [branding.md](branding.md) for the canonical repository, light/dark and
+mobile banners, artwork provenance, and package-registry transition.

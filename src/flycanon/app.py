@@ -42,7 +42,7 @@ from flycanon import __version__
         "flycanon -- Operational Knowledge Repository. Versioned, "
         "provenance-tracked canonical knowledge with hybrid retrieval "
         "and RAG, exposed as a standalone HTTP microservice. Part of "
-        "Firefly OperationOS, platform-agnostic by design."
+        "Firefly Framework, platform-agnostic by design."
     ),
     scan_packages=[
         "flycanon.core",  # @configuration class

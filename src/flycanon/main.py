@@ -49,7 +49,7 @@ _DESCRIPTION = (
     "canonical knowledge with hybrid retrieval (BM25 + vector + RRF) "
     "and retrieval-augmented answering, exposed as a standalone HTTP "
     "microservice over fireflyframework-pyfly and -agentic. Part of "
-    "Firefly OperationOS, platform-agnostic by design."
+    "Firefly Framework, platform-agnostic by design."
 )
 
 # Build PyFlyApplication: loads pyfly.yaml, scans packages, prepares the

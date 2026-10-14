@@ -6,7 +6,7 @@ Use the released source archive for the operator configuration and migration fil
 
 ## Download and verify
 
-Download `flycanon-26.10.0-py3-none-any.whl`, `flycanon-26.10.0.tar.gz`, `runtime-requirements-26.10.0.txt`, and `SHA256SUMS` from the [26.10.0 release](https://github.com/firefly-operationOS/flycanon/releases/tag/v26.10.0). Verify the downloaded files against their matching checksum entries before extracting or installing them.
+Download `flycanon-26.10.0-py3-none-any.whl`, `flycanon-26.10.0.tar.gz`, `runtime-requirements-26.10.0.txt`, and `SHA256SUMS` from the [26.10.0 release](https://github.com/fireflyframework/flycanon/releases/tag/v26.10.0). Verify the downloaded files against their matching checksum entries before extracting or installing them.
 
 ```bash
 tar -xzf flycanon-26.10.0.tar.gz
@@ -26,7 +26,7 @@ The equivalent installation without a requirements file is:
 
 ```bash
 uv pip install --python .venv/bin/python \
-  'flycanon @ https://github.com/firefly-operationOS/flycanon/releases/download/v26.10.0/flycanon-26.10.0-py3-none-any.whl' \
+  'flycanon @ https://github.com/fireflyframework/flycanon/releases/download/v26.10.0/flycanon-26.10.0-py3-none-any.whl' \
   'pyfly @ git+https://github.com/fireflyframework/fireflyframework-pyfly.git@v26.09.04' \
   'fireflyframework-agentic @ git+https://github.com/fireflyframework/fireflyframework-agentic.git@v26.06.16'
 ```
@@ -39,7 +39,7 @@ Keep `pyfly.yaml`, `alembic.ini`, `migrations/`, and `env_template` from the sou
 
 The configuration selects the PostgreSQL event adapter and separate API/worker consumer groups. Starting without it can activate framework defaults, including an attempted Kafka connection to `localhost:9092` and a separate management listener. Do not rely on those defaults for the released service.
 
-Set the database URL, embedding model and dimensions, provider credentials, platform API keys, object-storage location, and optional Redis settings for your environment. Use [`env_template`](https://github.com/firefly-operationOS/flycanon/blob/v26.10.0/env_template) and the [deployment guide](https://github.com/firefly-operationOS/flycanon/blob/v26.10.0/docs/deployment.md) for the exact settings. Store real secrets outside published configuration and supply them through your operator's environment or secret manager.
+Set the database URL, embedding model and dimensions, provider credentials, platform API keys, object-storage location, and optional Redis settings for your environment. Use [`env_template`](https://github.com/fireflyframework/flycanon/blob/v26.10.0/env_template) and the [deployment guide](https://github.com/fireflyframework/flycanon/blob/v26.10.0/docs/deployment.md) for the exact settings. Store real secrets outside published configuration and supply them through your operator's environment or secret manager.
 
 Provision the PostgreSQL database, required extensions and roles using the deployment guide. Apply migrations as a separate operator step before serving a new database:
 

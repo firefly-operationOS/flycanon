@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="../../docs/assets/logo.png" alt="flycanon" width="380" />
+<img src="../../docs/assets/logo.png" alt="flycanon" width="100%" />
 
 ### **Java SDK** &nbsp;&middot;&nbsp; Spring Boot 3.5.9 &nbsp;&middot;&nbsp; Java 25
 
@@ -9,7 +9,7 @@
 ---
 
 Spring-Boot-native Java client for the
-[flycanon](https://github.com/firefly-operationOS/flycanon) Operational
+[flycanon](https://github.com/fireflyframework/flycanon) Operational
 Knowledge Repository service.
 
 - **Java 25** (LTS) / **Spring Boot 3.5.9** / **Spring Framework 6.2**.

@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="../docs/assets/logo.png" alt="flycanon" width="380" />
+<img src="../docs/assets/brand/banner-light.svg" alt="flycanon" width="100%" />
 
 ### **SDKs**
 
@@ -28,4 +28,4 @@ Quickstarts:
   a multi-tenant pattern and a custom `RestClient.Builder` hook.
 
 Need a TypeScript / Go / C# SDK? File an issue on the
-[flycanon repo](https://github.com/firefly-operationOS/flycanon/issues).
+[flycanon repo](https://github.com/fireflyframework/flycanon/issues).
