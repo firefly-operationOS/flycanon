@@ -369,9 +369,9 @@ makes the image build deterministic between local dev and CI.
 1. Test locally first. Pull the new framework tag, copy into
    `vendor/`, run the docker build:
    ```bash
-   cd /Users/ancongui/Development/fireflyframework/fireflyframework-pyfly
+   cd /path/to/fireflyframework/fireflyframework-pyfly
    git fetch --tags && git checkout v26.05.06
-   cd flycanon
+   cd /path/to/fireflyframework/flycanon
    rm -rf vendor && mkdir vendor
    cp -r ../../fireflyframework/fireflyframework-pyfly vendor/pyfly
    cp -r ../../fireflyframework/fireflyframework-agentic vendor/fireflyframework-agentic
