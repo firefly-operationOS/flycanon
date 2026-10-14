@@ -43,7 +43,7 @@ For a host installation using the released wheel, follow [Install the released s
 
 ```bash
 docker pull ghcr.io/firefly-operationos/flycanon:latest          # latest main
-docker pull ghcr.io/firefly-operationos/flycanon:26.10.0          # specific release
+docker pull ghcr.io/fireflyframework/flycanon:26.10.1          # specific release
 docker pull ghcr.io/firefly-operationos/flycanon:26.10            # latest 26.10.x
 ```
 

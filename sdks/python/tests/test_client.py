@@ -1,4 +1,5 @@
 # Copyright 2024-2026 Firefly Software Foundation
+# SPDX-License-Identifier: Apache-2.0
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -591,7 +592,7 @@ async def test_answer_returns_typed_response() -> None:
 
 
 def test_sdk_version_string_is_26_10_0() -> None:
-    assert __version__ == "26.10.0"
+    assert __version__ == "26.10.1"
 
 
 def test_canon_workspaces_topic_constant() -> None:
@@ -673,7 +674,7 @@ async def test_user_agent_advertises_sdk_version() -> None:
             }
         )
         await client.version()
-        assert "flycanon-sdk-python/26.10.0" in route.calls.last.request.headers["User-Agent"]
+        assert "flycanon-sdk-python/26.10.1" in route.calls.last.request.headers["User-Agent"]
 
 
 # ----------------------------------------------------------------------

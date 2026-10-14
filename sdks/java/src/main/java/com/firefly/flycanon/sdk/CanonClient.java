@@ -1,4 +1,5 @@
 // Copyright 2024-2026 Firefly Software Foundation
+// SPDX-License-Identifier: Apache-2.0
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -93,7 +94,7 @@ public final class CanonClient {
     static final String HEADER_IDEMPOTENCY_KEY = "Idempotency-Key";
 
     /** SDK version. Mirrors {@code pom.xml}. */
-    public static final String SDK_VERSION = "26.10.0";
+    public static final String SDK_VERSION = "26.10.1";
 
     private final RestClient restClient;
     private final ObjectMapper mapper;

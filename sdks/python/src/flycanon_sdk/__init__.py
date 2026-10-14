@@ -1,4 +1,5 @@
 # Copyright 2024-2026 Firefly Software Foundation
+# SPDX-License-Identifier: Apache-2.0
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -119,7 +120,7 @@ from flycanon_sdk._models import (
     WorkspaceUpdated,
 )
 
-__version__ = "26.10.0"
+__version__ = "26.10.1"
 
 __all__ = [
     "CANON_WORKSPACES_TOPIC",
