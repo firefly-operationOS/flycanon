@@ -120,7 +120,7 @@ from flycanon_sdk._models import (
     WorkspaceUpdated,
 )
 
-__version__ = "26.10.3"
+__version__ = "26.10.4"
 
 __all__ = [
     "CANON_WORKSPACES_TOPIC",
